@@ -11,7 +11,7 @@ import "core:strconv"
 import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
-import network_client "../client"
+import network_client "../surf"
 import "core:encoding/json"
 
 // Registration, pairing and session establishment.

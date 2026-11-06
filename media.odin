@@ -2,7 +2,7 @@ package whatsapp
 
 import ascii "../ascii"
 import http "../http"
-import network_client "../client"
+import network_client "../surf"
 import "core:bytes"
 import "core:crypto"
 import "core:crypto/aes"

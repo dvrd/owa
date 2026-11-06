@@ -1,6 +1,6 @@
 package whatsapp
 
-import network_client "../client"
+import network_client "../surf"
 import "core:crypto"
 import "core:crypto/x25519"
 import "core:mem"
