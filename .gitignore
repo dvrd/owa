@@ -1,0 +1,25 @@
+# Generated build output
+*.o
+*.obj
+*.exe
+*.bin
+*.a
+*.dylib
+*.so
+*.so.*
+*.dSYM/
+.DS_Store
+__pycache__/
+*.py[cod]
+node_modules/
+
+# Local credentials and runtime state
+.env
+.env.*
+!.env.example
+!.env.sample
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.db
+*.db-*
