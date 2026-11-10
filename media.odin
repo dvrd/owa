@@ -3249,9 +3249,13 @@ socket_media_download_recover :: proc(
 		}
 	}
 
-	media.url = ""; media.direct_path = notification.direct_path
+	// Retry routing borrows the authenticated scratch buffer only for this call.
+	// Keep the caller's metadata independent of that buffer's zeroing/lifetime.
+	retry_media := media^
+	retry_media.url = ""
+	retry_media.direct_path = notification.direct_path
 	final_n, final_err, final_pump_error :=
-		socket_media_download_http(socket, dst, media^, config)
+		socket_media_download_http(socket, dst, retry_media, config)
 	if final_pump_error.kind != .None {
 		return 0, final_pump_error
 	}
