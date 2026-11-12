@@ -43,7 +43,8 @@ def request(query, variables):
             data = response.read(watch.MAX_REPORT+1)
         if len(data) > watch.MAX_REPORT: raise ValueError()
         value = json.loads(data)
-        if value.get('errors') or not isinstance(value.get('data'), dict): raise ValueError()
+        if value.get('errors'): raise ReviewError('LINEAR_API_REJECTED')
+        if not isinstance(value.get('data'), dict): raise ValueError()
         return value['data']
     except (OSError, ValueError, TypeError):
         # Never return response bodies, headers, credentials or raw API errors.
@@ -95,7 +96,10 @@ def snapshot(report):
 def ticket(report, run_url):
     if not RUN.fullmatch(run_url): raise ReviewError('RUN_URL_INVALID')
     fingerprint, changed = snapshot(report)
-    issue_id = str(uuid.uuid5(uuid.UUID(PROJECT), 'owa-protocol-review/v1/'+fingerprint))
+    # Linear rejects UUIDv5 IDs. Retain deterministic idempotency with the UUIDv4
+    # version/variant shape required by its issue-create validator.
+    seed = hashlib.sha256((PROJECT+'/owa-protocol-review/v1/'+fingerprint).encode()).digest()[:16]
+    issue_id = str(uuid.UUID(bytes=seed, version=4))
     marker = 'owa-protocol-drift:v1:'+fingerprint
     lines = [
         'Review public upstream protocol changes detected by OWA. No automated agent or fix was run.',
@@ -149,11 +153,12 @@ def track(report, run_url, api=request):
     try:
         if api(CREATE, {'input': payload})['issueCreate']['success'] is not True:
             raise ReviewError('LINEAR_CREATE_UNCONFIRMED')
-    except ReviewError:
+    except ReviewError as error:
         # A lost response may hide a successful mutation. Query only; never replay
         # the create in this invocation. Future runs use the exact same UUID.
         found = lookup(api, issue_id, marker)
         if found: return {'status': 'EXISTING', **found, 'compatibility_approved': False}
+        if str(error) == 'LINEAR_API_REJECTED': raise
         raise ReviewError('LINEAR_CREATE_OUTCOME_UNKNOWN') from None
     found = lookup(api, issue_id, marker)
     if not found: raise ReviewError('LINEAR_CREATE_NOT_VERIFIED')

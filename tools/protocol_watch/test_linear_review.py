@@ -3,6 +3,7 @@ import importlib.util
 import json
 from pathlib import Path
 import unittest
+import uuid
 from unittest import mock
 
 SPEC = importlib.util.spec_from_file_location('linear_review', Path(__file__).with_name('linear_review.py'))
@@ -60,6 +61,21 @@ class Tests(unittest.TestCase):
         first = report(); second = copy.deepcopy(first)
         second['observation']['sources'][0]['files'][0]['current']['sha256'] = 'c'*64
         self.assertNotEqual(L.ticket(first, RUN)[0], L.ticket(second, RUN)[0])
+
+    def test_deterministic_id_has_linears_required_uuid4_shape(self):
+        first = L.ticket(report(), RUN)[0]
+        self.assertEqual(uuid.UUID(first).version, 4)
+        self.assertEqual(first, L.ticket(report(), RUN)[0])
+
+    def test_known_api_rejection_is_reported_without_repeating_create(self):
+        api = API(); creates = []
+        def reject(query, variables):
+            if query == L.CREATE:
+                creates.append(1); raise L.ReviewError('LINEAR_API_REJECTED')
+            return api(query, variables)
+        with self.assertRaisesRegex(L.ReviewError, '^LINEAR_API_REJECTED$'):
+            L.track(report(), RUN, reject)
+        self.assertEqual(len(creates), 1)
 
     def test_closed_archived_issue_is_reused_without_reopening(self):
         api = API(); L.track(report(), RUN, api)
@@ -123,7 +139,7 @@ class Tests(unittest.TestCase):
         opener = mock.Mock(); opener.open.return_value = response
         with mock.patch.dict(L.os.environ, {'LINEAR_API': 'private-test-key'}):
             with mock.patch.object(L.urllib.request, 'build_opener', return_value=opener):
-                with self.assertRaisesRegex(L.ReviewError, '^LINEAR_REQUEST_FAILED$'):
+                with self.assertRaisesRegex(L.ReviewError, '^LINEAR_API_REJECTED$'):
                     L.request(L.LOOKUP, {'ids': []})
         req = opener.open.call_args.args[0]
         self.assertEqual(req.full_url, 'https://api.linear.app/graphql')
