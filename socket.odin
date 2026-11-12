@@ -65,7 +65,8 @@ Socket_Config :: struct {
 	port:                               int,
 	tls:                                tls.Config,
 	http_execute:                       Media_HTTP_Execute,
-	// Nil retains the existing issuer-serial-only policy; verified TLS is still required.
+	// Nil verifies the signed Noise chain, static-key binding and validity times.
+	// An explicit callback replaces that policy. Verified TLS is still required.
 	// Applications may reject the Noise certificate before ClientFinish is sent.
 	verify_certificate:                 Certificate_Verifier,
 	payload:                            Payload_Config,

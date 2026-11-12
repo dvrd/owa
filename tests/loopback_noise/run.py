@@ -99,6 +99,7 @@ def main():
                 if p.is_file() and '.git' not in p.parts and '__pycache__' not in p.parts}
     before = snapshot()
     report = dict(passed=False,source_before=before,modes=[],commands=[],
+                  certificate_policy="explicit Baileys issuer-only compatibility; not strict qualification",
                   compiler_sha256=hashlib.sha256(args.odin.read_bytes()).hexdigest(),
                   compiler_version=subprocess.check_output([str(args.odin),'version'],text=True).strip(),
                   compiler_root=subprocess.check_output([str(args.odin),'root'],text=True).strip())

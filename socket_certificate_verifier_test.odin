@@ -8,7 +8,8 @@ import "core:encoding/hex"
 import "core:testing"
 
 // Independent pinned Baileys/Node handshake vectors also used by Mesa's consumer
-// suite. The second authenticates correctly but carries issuer serial one.
+// suite. These issuer-only synthetic chains do not qualify strict verification.
+// The second authenticates Noise correctly but carries issuer serial one.
 SOCKET_CERT_VALID_HELLO :: "1a6c0a20883186b800b41d5cf0429695da9b3cc4f328ebcd184a6e482" +
 	"fa578c103f06c7712305c99cd811daad2ae49577362c2af503eb36b54716c7e191e196f5da974163" +
 	"e0d243675d84f8e03ca39d132d2469772261a16f2adf7b37369f19e094e3d124227e1f7b467fe4812a0"
@@ -92,7 +93,8 @@ socket_cert_test_frames :: proc(output: []u8) -> int {
 	panic("unexpected handshake frame count")
 }
 
-socket_cert_test_case :: proc(t: ^testing.T, alternate, custom, reject: bool) {
+socket_cert_test_case :: proc(t: ^testing.T, alternate, custom, reject: bool,
+	strict_default := false) {
 	encoded := alternate ? SOCKET_CERT_OTHER_HELLO : SOCKET_CERT_VALID_HELLO
 	hello, decode_error := hex.decode(transmute([]u8)encoded); assert(decode_error)
 	defer delete(hello)
@@ -109,16 +111,24 @@ socket_cert_test_case :: proc(t: ^testing.T, alternate, custom, reject: bool) {
 	socket: Socket
 	auth: Auth_State
 	verify: Certificate_Verifier
-	if custom {verify = socket_cert_test_verify}
+	if custom {
+		verify = socket_cert_test_verify
+	} else if !strict_default {
+		verify = baileys_certificate_policy
+	}
 	socket_cert_test_init(&socket, &auth, &state, verify)
 	defer {client_close(&socket.client); auth_state_clear(&auth)}
 	result := client_handshake(&socket.client, nil)
-	failed := custom ? reject : alternate
+	failed := custom ? reject : (strict_default || alternate)
 	testing.expect_value(t, state.calls, custom ? 1 : 0)
 	if failed {
 		testing.expect_value(t, result.kind, .Certificate_Rejected)
-		testing.expect_value(t, result.certificate,
-			custom ? .Rejected : .Unexpected_Issuer_Serial)
+		if strict_default {
+			testing.expect(t, result.certificate != .None)
+		} else {
+			testing.expect_value(t, result.certificate,
+				custom ? .Rejected : .Unexpected_Issuer_Serial)
+		}
 		testing.expect_value(t, socket.client.phase, .Failed)
 		testing.expect_value(t, state.closed, 1)
 		testing.expect_value(t, socket_cert_test_frames(output[:state.written]), 1)
@@ -135,9 +145,16 @@ socket_cert_test_case :: proc(t: ^testing.T, alternate, custom, reject: bool) {
 }
 
 @(test)
-socket_certificate_verifier_reaches_handshake_and_preserves_default :: proc(t: ^testing.T) {
+socket_certificate_verifier_reaches_handshake_with_explicit_legacy_policy :: proc(t: ^testing.T) {
 	socket_cert_test_case(t, false, false, false)
 	socket_cert_test_case(t, true, false, false)
 	socket_cert_test_case(t, false, true, true)
 	socket_cert_test_case(t, true, true, false)
+}
+
+// A nil hook must continue to exercise production's strict default. The same
+// issuer-only vector accepted by explicit compatibility must not reach Finish.
+@(test)
+socket_certificate_nil_default_rejects_synthetic_issuer_only_chain :: proc(t: ^testing.T) {
+	socket_cert_test_case(t, false, false, false, true)
 }

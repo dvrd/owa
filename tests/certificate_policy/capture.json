@@ -1,0 +1,1 @@
+{"host":"web.whatsapp.com","transport":"native TLS/WebSocket/Noise","expected_result":"Certificate_Rejected/Rejected","captured_at_unix_ms":1794504045498,"certificate_bytes":241,"callback_calls":1,"system_tls_verified":true,"only_client_hello_sent":true,"account_state_used":false}

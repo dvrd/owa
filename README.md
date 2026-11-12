@@ -39,10 +39,23 @@ passes the decrypted Noise certificate payload and server static key to the
 existing `Certificate_Verifier` callback. A rejection terminates the handshake
 before ClientFinish. Callback input borrows handshake storage for that call.
 
-Nil preserves the pinned Baileys issuer-serial policy. **That default does not
-verify Noise certificate signatures or validity times.** TLS is its endpoint
-trust anchor. Exposing the callback does not supply a new root-key policy or
-constitute an independent cryptographic audit.
+Nil selects native verification of root/intermediate/leaf signatures, issuer
+linkage, validity windows and constant-time leaf-key binding to the decrypted
+Noise server static key. Signatures cover the original serialized details.
+The pinned public root and policy provenance are recorded in
+`tests/certificate_policy/root-pin.json`, from pinned Whatsmeow and Baileys
+sources. A genuine public server certificate independently verified with
+Whatsmeow/libsignal qualifies this implementation against the published pin;
+this does not establish an independent Meta trust-distribution guarantee.
+
+`strict_certificate_policy_at` accepts an explicit clock for deterministic
+qualification. Normal handshakes use the system clock. Explicit verifier callbacks
+replace this policy and own their trust decisions. `baileys_certificate_policy`
+retains the old issuer-only behavior for explicit compatibility fixtures; it
+does not verify signatures, key binding or validity and is not the default.
+The synthetic TCP fixture selects that compatibility callback explicitly;
+separate genuine-chain tests exercise the strict policy. None of these tests
+constitutes an independent cryptographic audit.
 
 ## Offline checks
 

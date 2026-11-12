@@ -3,7 +3,10 @@
 This fixture contacts only a fresh localhost listener. It never loads an account,
 contacts WhatsApp, pairs a device or sends an external message. The Python peer
 uses only the standard library; the Odin client uses the real native Surf TCP
-WebSocket transport and WhatsApp Noise implementation.
+WebSocket transport and WhatsApp Noise implementation. It explicitly selects
+`baileys_certificate_policy` for the issuer-only synthetic transcript. Production
+keeps its strict nil-hook default; these transport tests do not qualify strict
+certificate signatures, root trust or leaf-to-server-static binding.
 
 ```sh
 python3 shared/whatsapp/tests/loopback_noise/run.py \
@@ -21,7 +24,8 @@ The peer checks RFC6455 client masking, the expected ClientHello and ClientFinis
 and encrypted application payload bytes against pinned independent Node/Baileys
 6.7.23 test vectors. It sends the ServerHello in five-byte TCP writes. Four fresh
 connections cover successful encrypted exchange and clean peer close, truncated
-Noise envelope inside a complete WebSocket message followed by EOF, partial-WebSocket-frame timeout with a 200 ms handshake deadline, and a fresh
+Noise envelope inside a complete WebSocket message followed by EOF, a partial
+WebSocket frame timeout with a 200 ms handshake deadline, and a fresh
 successful exchange after both failures. Failed clients must erase private and
 Noise read keys. The client allocation tracker must return to zero retained bytes
 and zero invalid frees after each connection closes.

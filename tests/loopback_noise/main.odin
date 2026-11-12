@@ -13,11 +13,13 @@ import "core:time"
 
 // Pinned independent Node/Baileys handshake fixture keys, never account keys.
 // This explicitly replaces only this test connection's ephemeral before I/O.
+// Issuer-only synthetic certificates use explicit compatibility, never strict trust.
 fixture_client :: proc(client: ^wa.Client, connection: ^surf.WebSocket_Conn) {
 	credentials: wa.Noise_Credentials
 	for &byte, index in credentials.static_private_key {byte = u8(index + 65)}
 	assert(wa.client_init(client, connection, credentials,
-		{max_frame_payload = 256, handshake_timeout = 200*time.Millisecond}).kind == .None)
+		{max_frame_payload = 256, handshake_timeout = 200*time.Millisecond,
+			verify_certificate = wa.baileys_certificate_policy}).kind == .None)
 	wa.noise_clear(&client.noise)
 	for &byte, index in client.ephemeral_private {byte = u8(index + 1)}
 	x25519.scalarmult_basepoint(client.ephemeral_public[:], client.ephemeral_private[:])

@@ -1,0 +1,10 @@
+{
+  "root_public_key_hex": "142375574d0a587166aae71ebe516437c4a28b73e3695c6ce1f7f9545da8ee6b",
+  "root_bytes_sha256": "8f5c9b62980545504f24221417a5ebd80fafd0c4f85f0b33e3aed78445a0cd7d",
+  "identical_in_both_sources": true,
+  "issuer_serial": 0,
+  "whatsmeow_commit": "c88388f983b4bc43dfd0bcc2b46969fcde82d61f",
+  "whatsmeow_handshake_sha256": "52d9f712eaf4d818fe352daea0b2e34d3e7669ece348b12853adddf1724c7820",
+  "baileys_commit": "81345beb67ca3fb0eb79a2c20cd4ac24da517929",
+  "baileys_defaults_sha256": "596ce97cbf0a179673c623f8cc4f01753d945a622d982a11be1c098c97708de1"
+}
