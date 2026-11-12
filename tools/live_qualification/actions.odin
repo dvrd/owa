@@ -12,6 +12,10 @@ qualification_text :: "Mesa WhatsApp qualification: synthetic text transport che
 qualification_pdf := string(#load("payloads/qualification.pdf"))
 
 runner_scope_guard :: proc(options: Options, storage: ^Storage) -> Tool_Error {
+ if options.command == .Watch {
+  return watch_scope_guard(options, storage, false)
+ }
+ if storage.canary != nil {return {kind = .Scope, storage = .Outbox_Unsafe}}
  if error := storage_scope_guard_offline(storage, options.command == .Pair,
   options.group_subject); error != .None {return {kind = .Scope, storage = error}}
  if !options.send {
@@ -85,7 +89,8 @@ runner_target :: proc(runner: ^Runner) -> Tool_Error {
  if selection_error.kind != .None {return selection_error}
  owned, allocation := strings.clone(selected)
  if allocation != nil {return {kind = .Allocation}}
- runner.target_jid = owned
+ accepted := false
+ defer {if !accepted {delete(owned)}}
  if error := runner_query_budget(runner); error.kind != .None {return error}
  group, metadata_error := wa.socket_group_metadata(&runner.socket, owned)
  if metadata_error.kind != .None {return {kind = .Protocol, socket = metadata_error}}
@@ -96,6 +101,9 @@ runner_target :: proc(runner: ^Runner) -> Tool_Error {
  if error := storage_scope_target(&runner.storage, owned); error != .None {
   return {kind = .Scope, storage = error}
  }
+ delete(runner.target_jid)
+ runner.target_jid = owned
+ accepted = true
  phase_print(.TARGET_READY)
  return {}
 }
@@ -128,11 +136,7 @@ runner_send :: proc(runner: ^Runner, document: bool) -> Tool_Error {
  if !runner.options.send || runner.options.command != .Qualify {return {kind = .Usage}}
  kind := document ? "pdf" : "text"
  payload := document ? qualification_pdf : qualification_text
- metadata := "v1|text\n"
- if document {
-  metadata = "v1|document|application/pdf|mesa-qualification.pdf|Synthetic PDF transport check.\n"
- }
- fingerprint := action_fingerprint_parts(metadata, transmute([]u8)payload)
+ fingerprint := action_fingerprint_parts(action_metadata(document), transmute([]u8)payload)
  defer delete(fingerprint)
  if fingerprint == "" {return {kind = .Allocation}}
  id, prepare_error := storage_journal_prepare(&runner.storage, kind, fingerprint)
@@ -172,4 +176,11 @@ runner_actions :: proc(runner: ^Runner) -> Tool_Error {
  if !runner.options.send {return {}}
  if error := runner_send(runner, false); error.kind != .None {return error}
  return runner_send(runner, true)
+}
+
+action_metadata :: proc(document: bool) -> string {
+ if document {
+  return "v1|document|application/pdf|mesa-qualification.pdf|Synthetic PDF transport check.\n"
+ }
+ return "v1|text\n"
 }

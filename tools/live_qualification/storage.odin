@@ -46,6 +46,7 @@ Storage :: struct {
  auth: wa.Auth_State,
  prekeys: wa.Prekey_Store,
  state: wa.State_Store,
+ canary: ^Canary_Ledger,
  directory, auth_path, prekey_path, state_path: string,
  target_subject, target_jid: string,
  marker: Storage_Marker,
@@ -242,7 +243,8 @@ storage_resume :: proc(s: ^Storage) -> Storage_Error {
  if wa.state_store_load(&s.state, s.state_path, s.marker.identity).kind != .None {return .Store_Invalid}
  if e := storage_read(s, "scope.journal", storage_bytes(&s.journal)); e != .None {return e}
  if !storage_record_valid(&s.journal) {return .Journal_Invalid}
- return storage_journal_validate(s)
+ if error := storage_journal_validate(s); error != .None {return error}
+ return canary_ledger_load(s)
 }
 
 storage_journal_validate :: proc(s: ^Storage) -> Storage_Error {
@@ -275,6 +277,7 @@ storage_scope_guard_offline :: proc(s: ^Storage, pair: bool, subject: string) ->
    entry := &s.journal.intents[index]
    if record.name == string(entry.id[:entry.id_size]) {known = true; break}
   }
+  if !known {_, known = canary_find(s, record.name)}
   if !known {return .Outbox_Unsafe}
   document, decoded := wa.binary_node_decode(record.data)
   if decoded.kind != .None {return .Outbox_Unsafe}
@@ -285,6 +288,10 @@ storage_scope_guard_offline :: proc(s: ^Storage, pair: bool, subject: string) ->
     target_count += 1; matches = attribute.value == s.target_jid
    }
    if attribute.key == "id" && attribute.value == record.name {id_matches = true}
+  }
+  if index, canary := canary_find(s, record.name); canary &&
+   record.kind == .Outbound_Content && !canary_content_matches(s, index, document.root) {
+   wa.binary_document_destroy(&document); return .Outbox_Unsafe
   }
   valid_tag := record.kind == .Outbound_Content ? document.root.tag == "saved" :
    document.root.tag == "message"
@@ -339,6 +346,9 @@ storage_journal_prepare :: proc(s: ^Storage, kind, fingerprint: string) -> (stri
 }
 
 storage_release :: proc(s: ^Storage) {
+ if s.canary != nil {
+  crypto.zero_explicit(s.canary, size_of(Canary_Ledger)); free(s.canary); s.canary = nil
+ }
  wa.state_store_clear(&s.state)
  wa.prekey_store_clear(&s.prekeys)
  wa.auth_state_clear(&s.auth)

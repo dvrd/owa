@@ -22,7 +22,9 @@ PIXELS_PER_MODULE = 8
 PHASES = frozenset({"STORAGE_READY", "VERSION_DISCOVERY", "VERSION_DISCOVERED",
     "VERSION_PINNED", "CONNECTING", "PAIRED", "RECONNECTING", "ONLINE", "TARGET_READY",
     "TEXT_QUEUED", "PDF_QUEUED", "ACK_WAIT", "SERVER_ACKED", "ACK_PENDING", "COMPLETE",
-    "PREVIEW_READY", "RESUME_UNKNOWN", "CONNECTED_HOLD"})
+    "PREVIEW_READY", "RESUME_UNKNOWN", "CONNECTED_HOLD",
+    "WATCH_RECONNECTING", "WATCH_COMPLETE", "CANARY_PREPARED", "CANARY_TEXT_ACKED",
+    "CANARY_PDF_ACKED", "CANARY_COMPLETE", "CANARY_UNKNOWN"})
 
 
 class DisplayError(Exception):
@@ -64,6 +66,39 @@ def native_group_counts(line):
     if total > 10000 or empty + exact > total:
         return None
     return dict(total=total, empty_subjects=empty, exact_matches=exact)
+
+
+WATCH_VERSION = re.compile(rb"WATCH_VERSION major=([0-9]{1,10}) "
+    rb"minor=([0-9]{1,10}) patch=([0-9]{1,10})\n")
+WATCH_HEALTH = re.compile(rb"WATCH_HEALTH uptime_seconds=([0-9]{1,6}) reconnects=([0-9]{1,4})\n")
+CANARY_STATUS = re.compile(rb"CANARY_STATUS completed_cycles=([0-9]{1,2}) "
+    rb"durable_completed_cycles=([0-9]{1,20}) first_ack_unix_seconds=([0-9]{1,19}) "
+    rb"last_ack_unix_seconds=([0-9]{1,19})\n")
+
+
+def native_watch_metadata(line):
+    found = WATCH_VERSION.fullmatch(line)
+    if found:
+        values = tuple(map(int,found.groups()))
+        if all(value <= 0xffffffff for value in values):
+            return dict(phase="WATCH_VERSION",major=values[0],minor=values[1],patch=values[2])
+        return None
+    found = WATCH_HEALTH.fullmatch(line)
+    if found:
+        elapsed,reconnects = map(int,found.groups())
+        if elapsed <= 172800 and reconnects <= 1000:
+            return dict(phase="WATCH_HEALTH",process_elapsed_seconds=elapsed,reconnects=reconnects)
+        return None
+    found = CANARY_STATUS.fullmatch(line)
+    if found:
+        cycles,durable,first,last = map(int,found.groups())
+        if (cycles <= 48 and durable <= 0xffffffffffffffff and cycles <= durable and
+                first <= last <= 0x7fffffffffffffff and
+                ((durable == 0 and first == last == 0) or (durable > 0 and first > 0))):
+            return dict(phase="CANARY_STATUS",completed_cycles=cycles,
+                durable_completed_cycles=durable,first_ack_unix_seconds=first,
+                last_ack_unix_seconds=last)
+    return None
 
 
 def drain_diagnostics(stream, state):
@@ -170,7 +205,8 @@ def render_private(auth_dir):
     directory = private_directory(auth_dir)
     temporary = None
     try:
-        descriptor = os.open("qr.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+        descriptor = os.open("qr.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                             dir_fd=directory)
         try:
             info = os.fstat(descriptor)
             if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or
@@ -268,6 +304,11 @@ def launch(args, native):
                 break
             if len(line) > STATUS_LINE_MAX or not line.endswith(b"\n"):
                 raise DisplayError("PROBE_STATUS_INVALID")
+            metadata = native_watch_metadata(line)
+            if metadata is not None:
+                phase = metadata.pop("phase")
+                status(phase,details=metadata)
+                continue
             counts = native_group_counts(line)
             if counts is not None:
                 status("GROUP_COUNTS", details=counts)

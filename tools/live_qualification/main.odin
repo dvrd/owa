@@ -10,22 +10,24 @@ import "core:strconv"
 import "core:time"
 import "core:unicode/utf8"
 
-Command :: enum {None, Pair, Inspect, Qualify, Preview, Retarget}
+Command :: enum {None, Pair, Inspect, Qualify, Preview, Retarget, Watch}
 Options :: struct {
  command: Command,
  auth_dir, group_subject, previous_group_subject: string,
- send, preview: bool,
- timeout_seconds, hold_seconds: int,
+ send, preview, allow_scoped_retries, retry_unknown_canary: bool,
+ timeout_seconds, hold_seconds, canary_interval_seconds: int,
 }
 Tool_Error_Kind :: enum {
  None, Usage, Storage, Trust, Connect, Timeout, Protocol, QR, IO, Allocation,
- Target_Not_Found, Target_Ambiguous, Scope, Send, Journal, Unexpected_Pairing,
+ Target_Not_Found, Target_Ambiguous, Scope, Send, Journal, Unexpected_Pairing, Canary_Unknown,
 }
 Tool_Error :: struct {kind: Tool_Error_Kind, storage: Storage_Error, socket: wa.Socket_Error}
 Phase :: enum {
  STORAGE_READY, VERSION_DISCOVERY, VERSION_DISCOVERED, VERSION_PINNED,
  CONNECTED_HOLD, CONNECTING, PAIRED, RECONNECTING, ONLINE, TARGET_READY, TEXT_QUEUED,
- PDF_QUEUED, ACK_WAIT, SERVER_ACKED, ACK_PENDING, RESUME_UNKNOWN, COMPLETE, PREVIEW_READY,
+ WATCH_RECONNECTING, WATCH_COMPLETE, PDF_QUEUED, ACK_WAIT, SERVER_ACKED, ACK_PENDING,
+ RESUME_UNKNOWN, COMPLETE, PREVIEW_READY, CANARY_PREPARED, CANARY_TEXT_ACKED,
+ CANARY_PDF_ACKED, CANARY_COMPLETE, CANARY_UNKNOWN,
 }
 Runner :: struct {
  storage: Storage,
@@ -36,6 +38,9 @@ Runner :: struct {
  deadline: time.Tick,
  target_jid: string,
  restarts: int,
+ canary_completed: int,
+ canary_due_tick: time.Tick,
+ canary_due_set: bool,
 }
 
 phase_print :: proc(value: Phase) {fmt.printf("PHASE %v\n", value); os.flush(os.stdout)}
@@ -51,13 +56,22 @@ options_parse :: proc(args: []string) -> (Options, Tool_Error) {
  case "qualify": options.command = .Qualify
  case "preview": options.command = .Preview
  case "retarget": options.command = .Retarget
+ case "watch": options.command = .Watch; options.timeout_seconds = 86400
  case: return {}, {kind = .Usage}
  }
  index := 1
- timeout_seen, hold_seen := false, false
+ timeout_seen, hold_seen, canary_seen := false, false, false
  for index < len(args) {
   flag := args[index]; index += 1
   if flag == "--help" {return {}, {}}
+  if flag == "--retry-unknown-canary" {
+   if options.retry_unknown_canary {return {}, {kind = .Usage}}
+   options.retry_unknown_canary = true; continue
+  }
+  if flag == "--allow-scoped-retries" {
+   if options.allow_scoped_retries {return {}, {kind = .Usage}}
+   options.allow_scoped_retries = true; continue
+  }
   if flag == "--send" || flag == "--preview" {
    if flag == "--send" {
     if options.send {return {}, {kind = .Usage}}; options.send = true
@@ -84,21 +98,36 @@ options_parse :: proc(args: []string) -> (Options, Tool_Error) {
    seconds, valid := strconv.parse_int(value)
    if hold_seen || !valid || seconds < 0 || seconds > 300 {return {}, {kind = .Usage}}
    options.hold_seconds, hold_seen = seconds, true
+  case "--canary-interval-seconds":
+   seconds, valid := strconv.parse_int(value)
+   if canary_seen || !valid || seconds < 3600 || seconds > 86400 {return {}, {kind = .Usage}}
+   options.canary_interval_seconds, canary_seen = seconds, true
   case "--timeout-seconds":
    seconds, valid := strconv.parse_int(value)
-   if timeout_seen || !valid || seconds < 10 || seconds > 600 {return {}, {kind = .Usage}}
+   low := options.command == .Watch ? 60 : 10
+   high := options.command == .Watch ? 172800 : 600
+   if timeout_seen || !valid || seconds < low || seconds > high {return {}, {kind = .Usage}}
    options.timeout_seconds, timeout_seen = seconds, true
   case: return {}, {kind = .Usage}
   }
  }
+ if options.retry_unknown_canary && !canary_enabled(options) {return {}, {kind = .Usage}}
+ if options.allow_scoped_retries && options.command != .Watch {return {}, {kind = .Usage}}
  if options.command == .Retarget {
   if options.auth_dir == "" || !subject_valid(options.group_subject) ||
    !subject_valid(options.previous_group_subject) || options.send || options.preview ||
-   hold_seen || timeout_seen {return {}, {kind = .Usage}}
+   hold_seen || timeout_seen || canary_seen {return {}, {kind = .Usage}}
   return options, {}
  }
+ if canary_seen && (options.command != .Watch || !options.send ||
+  !options.allow_scoped_retries) {return {}, {kind = .Usage}}
+ if options.command == .Watch && ((options.send && !canary_seen) || options.preview || hold_seen) {
+  return {}, {kind = .Usage}
+ }
  if options.previous_group_subject != "" {return {}, {kind = .Usage}}
- if options.send && options.command != .Qualify {return {}, {kind = .Usage}}
+ if options.send && options.command != .Qualify && options.command != .Watch {
+  return {}, {kind = .Usage}
+ }
  if options.command == .Preview || options.preview {return options, {}}
  if options.auth_dir == "" || !subject_valid(options.group_subject) {return {}, {kind = .Usage}}
  return options, {}
@@ -115,6 +144,9 @@ runner_prepare :: proc(runner: ^Runner) -> Tool_Error {
  mode := options.command == .Pair ? Storage_Mode.Pair_New : .Qualify_Resume
  if error := storage_open(&runner.storage, options.auth_dir, mode, options.group_subject);
     error != .None {return {kind = .Storage, storage = error}}
+ if options.retry_unknown_canary && !canary_has_unknown(&runner.storage) {
+  return {kind = .Usage}
+ }
  if error := runner_scope_guard(options, &runner.storage); error.kind != .None {return error}
  phase_print(.STORAGE_READY)
  if tls.root_pool_load_system(&runner.roots).kind != .None {return {kind = .Trust}}
@@ -127,6 +159,10 @@ runner_prepare :: proc(runner: ^Runner) -> Tool_Error {
   timeout = 5 * time.Second, max_redirects = 2})
  runner.config.payload.version = version.version
  phase_print(version.source == .Pinned ? .VERSION_PINNED : .VERSION_DISCOVERED)
+ if options.command == .Watch {
+  fmt.printf("WATCH_VERSION major=%d minor=%d patch=%d\n", version.version[0],
+   version.version[1], version.version[2]); os.flush(os.stdout)
+ }
  return {}
 }
 
@@ -148,6 +184,7 @@ run_command :: proc(options: Options) -> Tool_Error {
  runner.deadline = time.tick_add(time.tick_now(), budget)
  defer runner_close(runner)
  if error := runner_prepare(runner); error.kind != .None {return error}
+ if options.command == .Watch {return runner_watch(runner)}
  if error := runner_online(runner); error.kind != .None {return error}
  if error := runner_hold(runner); error.kind != .None {return error}
  if options.command != .Pair {
@@ -162,7 +199,8 @@ main :: proc() {
  options, error := options_parse(os.args[1:])
  if error.kind != .None || options.command == .None {
   fmt.println("Usage: live_qualification pair|inspect|qualify --auth-dir /private/owned-dir")
-  fmt.println("       network modes require --group-subject; only qualify accepts --send")
+  fmt.println("       network modes require --group-subject")
+  fmt.println("       --send: qualify, or watch with --canary-interval-seconds and scoped retries")
   fmt.println("       retarget requires --previous-group-subject and --group-subject; offline only")
   fmt.println("       preview or --preview performs no network or session initialization")
   if error.kind != .None {os.exit(2)}

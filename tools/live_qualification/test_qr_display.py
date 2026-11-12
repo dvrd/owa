@@ -2,7 +2,8 @@
 import binascii, contextlib, importlib.util, io, json, os, stat, struct, tempfile, unittest, zlib
 from pathlib import Path
 from unittest import mock
-SPEC = importlib.util.spec_from_file_location('qr_display', Path(__file__).with_name('qr_display.py'))
+SPEC = importlib.util.spec_from_file_location(
+    'qr_display', Path(__file__).with_name('qr_display.py'))
 QR = importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(QR)
 
 class QRTests(unittest.TestCase):
@@ -186,5 +187,23 @@ class QRTests(unittest.TestCase):
         self.assertEqual([json.loads(line) for line in out.getvalue().splitlines()],
             [{'phase': 'CONNECTED_HOLD'}, {'phase': 'GROUP_COUNTS', 'total': 3,
               'empty_subjects': 1, 'exact_matches': 0}, {'phase': 'COMPLETE'}])
+
+    def test_watch_version_canary_metadata_and_phases_are_strictly_typed(self):
+        self.assertEqual(QR.native_watch_metadata(
+            b'WATCH_VERSION major=2 minor=3000 patch=4294967295\n'),
+            {'phase':'WATCH_VERSION','major':2,'minor':3000,'patch':4294967295})
+        line=(b'CANARY_STATUS completed_cycles=3 durable_completed_cycles=10 '
+              b'first_ack_unix_seconds=100 last_ack_unix_seconds=200\n')
+        self.assertEqual(QR.native_watch_metadata(line)['durable_completed_cycles'],10)
+        for phase in ('CANARY_PREPARED','CANARY_TEXT_ACKED','CANARY_PDF_ACKED',
+                      'CANARY_COMPLETE','CANARY_UNKNOWN','WATCH_COMPLETE'):
+            self.assertEqual(QR.native_phase(('PHASE '+phase+'\n').encode()),phase)
+        for invalid in (b'WATCH_VERSION major=4294967296 minor=0 patch=0\n',
+                        line.replace(b'cycles=3 ',b'cycles=49 '),
+                        line.replace(b'cycles=10 ',b'cycles=2 '),
+                        line.replace(b'seconds=100 ',b'seconds=201 '),
+                        line[:-1]+b' private-token\n',
+                        b'CANARY_STATUS completed_cycles=1\n'):
+            self.assertIsNone(QR.native_watch_metadata(invalid))
 
 if __name__ == '__main__': unittest.main()

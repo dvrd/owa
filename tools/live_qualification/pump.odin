@@ -62,7 +62,11 @@ runner_pump_inner :: proc(runner: ^Runner) -> (bool, Tool_Error) {
 runner_online :: proc(runner: ^Runner) -> Tool_Error {
  for attempt in 0..<3 {
   if remaining(runner) <= 0 {return {kind = .Timeout}}
-  if error := runner_scope_guard(runner.options, &runner.storage); error.kind != .None {
+  guard: Tool_Error
+  if runner.options.command == .Watch {
+   guard = watch_scope_guard(runner.options, &runner.storage, true)
+  } else {guard = runner_scope_guard(runner.options, &runner.storage)}
+  if error := guard; error.kind != .None {
    return error
   }
   phase_print(.CONNECTING)
