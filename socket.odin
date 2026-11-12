@@ -44,6 +44,8 @@ Socket_Error_Kind :: enum {
 	Queue_Full,
 	Device_Failed,
 	Deadline_Failed,
+	// A tracked outgoing message was rejected; explicit caller retry/cancel only.
+	Message_Rejected,
 }
 Socket_Error :: struct {
 	kind:       Socket_Error_Kind,

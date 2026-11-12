@@ -143,6 +143,15 @@ socket_message_ack_process :: proc(
 	if class == "message" {
 		id, _ := pairing_node_attr(node, "id")
 		if id != "" {
+			// An error attribute is a negative ACK, even if empty or malformed.
+			// Retain intent and ciphertext: retries/cancellation remain explicit.
+			if _, rejected := pairing_node_attr(node, "error"); rejected {
+				_, pending := state_store_get(socket.store, .Outbound_Message, id)
+				_, retained := state_store_get(socket.store, .Outbound_Content, id)
+				if pending || retained {return {}, {kind = .Message_Rejected}}
+				return {}, {}
+			}
+
 			candidate: State_Store
 			defer state_store_clear(&candidate)
 			if e := socket_store_clone(&candidate, socket.store);
