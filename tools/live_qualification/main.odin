@@ -151,8 +151,10 @@ main :: proc() {
  if options.command == .Preview || options.preview {phase_print(.PREVIEW_READY); return}
  failure := run_command(options)
  if failure.kind != .None {
-  fmt.eprintf("ERROR %v STORAGE %v SOCKET %v CERTIFICATE %v\n", failure.kind,
-   failure.storage, failure.socket.kind, failure.socket.session.client.certificate)
+  fmt.eprintf("ERROR %v STORAGE %v SOCKET %v CERTIFICATE %v SESSION %v CODE %d\n",
+   failure.kind, failure.storage, failure.socket.kind,
+   failure.socket.session.client.certificate, failure.socket.session.kind,
+   failure.socket.session.server_code)
   os.exit(1)
  }
 }

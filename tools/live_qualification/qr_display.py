@@ -33,15 +33,23 @@ class DisplayError(Exception):
 
 ERROR_LINE = re.compile(rb"ERROR ([A-Za-z_][A-Za-z_0-9]{0,63}) STORAGE "
     rb"([A-Za-z_][A-Za-z_0-9]{0,63}) SOCKET ([A-Za-z_][A-Za-z_0-9]{0,63}) "
-    rb"CERTIFICATE ([A-Za-z_][A-Za-z_0-9]{0,63})\n")
+    rb"CERTIFICATE ([A-Za-z_][A-Za-z_0-9]{0,63})"
+    rb"(?: SESSION ([A-Za-z_][A-Za-z_0-9]{0,63}) CODE ([0-9]{1,5}))?\n")
 
 
 def native_error(line):
     found = ERROR_LINE.fullmatch(line)
     if found is None:
         return None
-    return dict(zip(("error", "storage", "socket", "certificate"),
-                    (field.decode("ascii") for field in found.groups())))
+    fields = found.groups()
+    details = dict(zip(("error", "storage", "socket", "certificate"),
+                       (field.decode("ascii") for field in fields[:4])))
+    if fields[4] is not None:
+        code = int(fields[5])
+        if code > 65535:
+            return None
+        details.update(session=fields[4].decode("ascii"), server_code=code)
+    return details
 
 
 def drain_diagnostics(stream, state):

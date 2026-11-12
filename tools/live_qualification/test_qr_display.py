@@ -90,6 +90,26 @@ class QRTests(unittest.TestCase):
         self.assertNotIn('raw-qr-secret', out.getvalue())
         self.assertLess(len(repr(state)), 512)
 
+    def test_extended_typed_diagnostic_has_bounded_session_and_numeric_code(self):
+        prefix = b'ERROR Protocol STORAGE None SOCKET Session_Failed CERTIFICATE None'
+        for code in (0, 515, 65535):
+            line = prefix + b' SESSION QR_Expired CODE ' + str(code).encode() + b'\n'
+            parsed = QR.native_error(line)
+            self.assertIsNotNone(parsed)
+            self.assertEqual(parsed['session'], 'QR_Expired')
+            self.assertEqual(parsed['server_code'], code)
+        for suffix in (b' SESSION QR_Expired', b' SESSION QR_Expired CODE -1',
+                       b' SESSION QR_Expired CODE 65536', b' SESSION QR_Expired CODE 999999',
+                       b' SESSION QR_Expired CODE 1.5', b' SESSION QR_Expired CODE 1 secret',
+                       b' SESSION raw/token CODE 1', b' SESSION ' + b'x' * 65 + b' CODE 1',
+                       b' SESSION QR_Expired CODE \xff'):
+            self.assertIsNone(QR.native_error(prefix + suffix + b'\n'))
+        state = {'last': None}
+        valid = prefix + b' SESSION Stream_Error CODE 515\n'
+        QR.drain_diagnostics(io.BytesIO(b'raw-qr-secret\n' + valid), state)
+        self.assertEqual(state['last']['server_code'], 515)
+        self.assertNotIn('raw-qr-secret', repr(state))
+
     def test_safe_typed_failure_reaches_structured_output(self):
         child = mock.Mock()
         child.stdout = io.BytesIO(b'PHASE STORAGE_READY\n')
@@ -106,5 +126,23 @@ class QRTests(unittest.TestCase):
                          'error': 'Storage', 'storage': 'Locked',
                          'socket': 'None', 'certificate': 'None'})
         self.assertNotIn('raw-qr-secret', out.getvalue())
+
+    def test_extended_failure_reaches_output_without_unmatched_stderr(self):
+        child = mock.Mock()
+        child.stdout = io.BytesIO(b'PHASE CONNECTING\n')
+        child.stderr = io.BytesIO(b'private-token-must-not-escape\nERROR Protocol '
+            b'STORAGE None SOCKET Session_Failed CERTIFICATE None '
+            b'SESSION Stream_Error CODE 515\n')
+        child.wait.return_value = 1; child.poll.return_value = 1
+        args = mock.Mock(binary=Path('/fake'), command='pair', auth_dir=Path('/private'))
+        out = io.StringIO()
+        with mock.patch.object(QR, 'arguments', return_value=(args, [])):
+            with mock.patch.object(QR.subprocess, 'Popen', return_value=child):
+                with contextlib.redirect_stdout(out): self.assertEqual(QR.main([]), 2)
+        rows = [json.loads(line) for line in out.getvalue().splitlines()]
+        self.assertEqual(rows[-1], {'phase': 'FAILED', 'reason': 'PROBE_FAILED',
+            'error': 'Protocol', 'storage': 'None', 'socket': 'Session_Failed',
+            'certificate': 'None', 'session': 'Stream_Error', 'server_code': 515})
+        self.assertNotIn('private-token-must-not-escape', out.getvalue())
 
 if __name__ == '__main__': unittest.main()
