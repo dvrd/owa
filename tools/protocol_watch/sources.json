@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "sources": [
+    {
+      "name": "baileys", "repository": "WhiskeySockets/Baileys", "branch": "master",
+      "reference_commit": "e05b16b4aa0d7d3eb2594677e015454af1225b75",
+      "reference_scope": "Baileys 6.7.23 historical wire reference; head is not automatically compatible",
+      "paths": ["src/Socket/socket.ts", "src/Socket/messages-send.ts", "src/Socket/messages-recv.ts", "src/Utils/validate-connection.ts", "src/Utils/noise-handler.ts", "src/Defaults/baileys-version.json", "src/WABinary/constants.ts", "WAProto/WAProto.proto"]
+    },
+    {
+      "name": "whatsmeow", "repository": "tulir/whatsmeow", "branch": "main",
+      "reference_commit": "c88388f983b4bc43dfd0bcc2b46969fcde82d61f",
+      "reference_scope": "Certificate oracle only; other files are comparison references, not Odin parity",
+      "paths": ["client.go", "connectionevents.go", "handshake.go", "pair.go", "send.go", "retry.go", "store/clientpayload.go", "binary/token/token.go", "proto/waE2E/WAWebProtobufsE2E.proto"]
+    }
+  ]
+}
