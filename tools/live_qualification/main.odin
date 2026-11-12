@@ -10,12 +10,12 @@ import "core:strconv"
 import "core:time"
 import "core:unicode/utf8"
 
-Command :: enum {None, Pair, Inspect, Qualify, Preview}
+Command :: enum {None, Pair, Inspect, Qualify, Preview, Retarget}
 Options :: struct {
  command: Command,
- auth_dir, group_subject: string,
+ auth_dir, group_subject, previous_group_subject: string,
  send, preview: bool,
- timeout_seconds: int,
+ timeout_seconds, hold_seconds: int,
 }
 Tool_Error_Kind :: enum {
  None, Usage, Storage, Trust, Connect, Timeout, Protocol, QR, IO, Allocation,
@@ -24,7 +24,7 @@ Tool_Error_Kind :: enum {
 Tool_Error :: struct {kind: Tool_Error_Kind, storage: Storage_Error, socket: wa.Socket_Error}
 Phase :: enum {
  STORAGE_READY, VERSION_DISCOVERY, VERSION_DISCOVERED, VERSION_PINNED,
- CONNECTING, PAIRED, RECONNECTING, ONLINE, TARGET_READY, TEXT_QUEUED,
+ CONNECTED_HOLD, CONNECTING, PAIRED, RECONNECTING, ONLINE, TARGET_READY, TEXT_QUEUED,
  PDF_QUEUED, ACK_WAIT, SERVER_ACKED, ACK_PENDING, RESUME_UNKNOWN, COMPLETE, PREVIEW_READY,
 }
 Runner :: struct {
@@ -50,10 +50,11 @@ options_parse :: proc(args: []string) -> (Options, Tool_Error) {
  case "inspect": options.command = .Inspect
  case "qualify": options.command = .Qualify
  case "preview": options.command = .Preview
+ case "retarget": options.command = .Retarget
  case: return {}, {kind = .Usage}
  }
  index := 1
- timeout_seen := false
+ timeout_seen, hold_seen := false, false
  for index < len(args) {
   flag := args[index]; index += 1
   if flag == "--help" {return {}, {}}
@@ -71,9 +72,18 @@ options_parse :: proc(args: []string) -> (Options, Tool_Error) {
   case "--auth-dir":
    if options.auth_dir != "" || !filepath.is_abs(value) {return {}, {kind = .Usage}}
    options.auth_dir = value
+  case "--previous-group-subject":
+   if options.previous_group_subject != "" || !subject_valid(value) {
+    return {}, {kind = .Usage}
+   }
+   options.previous_group_subject = value
   case "--group-subject":
    if options.group_subject != "" || !subject_valid(value) {return {}, {kind = .Usage}}
    options.group_subject = value
+  case "--hold-seconds":
+   seconds, valid := strconv.parse_int(value)
+   if hold_seen || !valid || seconds < 0 || seconds > 300 {return {}, {kind = .Usage}}
+   options.hold_seconds, hold_seen = seconds, true
   case "--timeout-seconds":
    seconds, valid := strconv.parse_int(value)
    if timeout_seen || !valid || seconds < 10 || seconds > 600 {return {}, {kind = .Usage}}
@@ -81,6 +91,13 @@ options_parse :: proc(args: []string) -> (Options, Tool_Error) {
   case: return {}, {kind = .Usage}
   }
  }
+ if options.command == .Retarget {
+  if options.auth_dir == "" || !subject_valid(options.group_subject) ||
+   !subject_valid(options.previous_group_subject) || options.send || options.preview ||
+   hold_seen || timeout_seen {return {}, {kind = .Usage}}
+  return options, {}
+ }
+ if options.previous_group_subject != "" {return {}, {kind = .Usage}}
  if options.send && options.command != .Qualify {return {}, {kind = .Usage}}
  if options.command == .Preview || options.preview {return options, {}}
  if options.auth_dir == "" || !subject_valid(options.group_subject) {return {}, {kind = .Usage}}
@@ -122,6 +139,7 @@ runner_close :: proc(runner: ^Runner) {
 }
 
 run_command :: proc(options: Options) -> Tool_Error {
+ if options.command == .Retarget {return run_retarget(options)}
  runner, allocation := new(Runner)
  if allocation != nil || runner == nil {return {kind = .Allocation}}
  defer free(runner)
@@ -131,6 +149,7 @@ run_command :: proc(options: Options) -> Tool_Error {
  defer runner_close(runner)
  if error := runner_prepare(runner); error.kind != .None {return error}
  if error := runner_online(runner); error.kind != .None {return error}
+ if error := runner_hold(runner); error.kind != .None {return error}
  if options.command != .Pair {
   if error := runner_actions(runner); error.kind != .None {return error}
  }
@@ -144,6 +163,7 @@ main :: proc() {
  if error.kind != .None || options.command == .None {
   fmt.println("Usage: live_qualification pair|inspect|qualify --auth-dir /private/owned-dir")
   fmt.println("       network modes require --group-subject; only qualify accepts --send")
+  fmt.println("       retarget requires --previous-group-subject and --group-subject; offline only")
   fmt.println("       preview or --preview performs no network or session initialization")
   if error.kind != .None {os.exit(2)}
   return
@@ -157,4 +177,18 @@ main :: proc() {
    failure.socket.session.server_code)
   os.exit(1)
  }
+}
+
+run_retarget :: proc(options: Options) -> Tool_Error {
+ storage, allocation := new(Storage)
+ if allocation != nil || storage == nil {return {kind = .Allocation}}
+ defer free(storage)
+ defer storage_close(storage)
+ if error := storage_open(storage, options.auth_dir, .Qualify_Resume,
+  options.previous_group_subject); error != .None {return {kind = .Storage, storage = error}}
+ if error := storage_scope_retarget(storage, options.group_subject); error != .None {
+  return {kind = .Scope, storage = error}
+ }
+ phase_print(.COMPLETE)
+ return {}
 }

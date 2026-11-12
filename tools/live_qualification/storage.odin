@@ -411,3 +411,25 @@ storage_record_write :: proc(s: ^Storage, name: string, record: ^$T) -> Storage_
  record.checksum = storage_digest(storage_bytes(record))
  return storage_write(s, name, storage_bytes(record))
 }
+
+// Correct an unused test scope without replacing any generated session keys.
+// Explicit old-subject opening has already proved ownership before this call.
+storage_scope_retarget :: proc(s: ^Storage, new_subject: string) -> Storage_Error {
+ sync.mutex_lock(&storage_mutex); defer sync.mutex_unlock(&storage_mutex)
+ if s == nil || !s.opened || storage_owner != s {return .Ownership}
+ if !subject_valid(new_subject) {return .Scope_Mismatch}
+ if !storage_record_valid(&s.journal) {return .Journal_Invalid}
+ if e := storage_journal_validate(s); e != .None {return e}
+ if s.journal.count != 0 || s.journal.target_size != 0 {return .Scope_Mismatch}
+ for record in s.state.records {
+  if record.kind == .Outbound_Message || record.kind == .Outbound_Content {
+   return .Outbox_Unsafe
+  }
+ }
+ candidate := s.journal
+ candidate.subject = {}
+ candidate.subject_size = u32(copy(candidate.subject[:], new_subject))
+ if e := storage_record_write(s, "scope.journal", &candidate); e != .None {return e}
+ s.journal = candidate
+ return storage_journal_validate(s)
+}

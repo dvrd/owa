@@ -22,7 +22,7 @@ PIXELS_PER_MODULE = 8
 PHASES = frozenset({"STORAGE_READY", "VERSION_DISCOVERY", "VERSION_DISCOVERED",
     "VERSION_PINNED", "CONNECTING", "PAIRED", "RECONNECTING", "ONLINE", "TARGET_READY",
     "TEXT_QUEUED", "PDF_QUEUED", "ACK_WAIT", "SERVER_ACKED", "ACK_PENDING", "COMPLETE",
-    "PREVIEW_READY", "RESUME_UNKNOWN"})
+    "PREVIEW_READY", "RESUME_UNKNOWN", "CONNECTED_HOLD"})
 
 
 class DisplayError(Exception):
@@ -50,6 +50,20 @@ def native_error(line):
             return None
         details.update(session=fields[4].decode("ascii"), server_code=code)
     return details
+
+
+GROUP_COUNTS_LINE = re.compile(rb"GROUP_COUNTS total=([0-9]{1,5}) "
+    rb"empty_subjects=([0-9]{1,5}) exact_matches=([0-9]{1,5})\n")
+
+
+def native_group_counts(line):
+    found = GROUP_COUNTS_LINE.fullmatch(line)
+    if found is None:
+        return None
+    total, empty, exact = (int(field) for field in found.groups())
+    if total > 10000 or empty + exact > total:
+        return None
+    return dict(total=total, empty_subjects=empty, exact_matches=exact)
 
 
 def drain_diagnostics(stream, state):
@@ -254,6 +268,10 @@ def launch(args, native):
                 break
             if len(line) > STATUS_LINE_MAX or not line.endswith(b"\n"):
                 raise DisplayError("PROBE_STATUS_INVALID")
+            counts = native_group_counts(line)
+            if counts is not None:
+                status("GROUP_COUNTS", details=counts)
+                continue
             phase = native_phase(line)
             status(phase)
             if phase == "QR_READY":

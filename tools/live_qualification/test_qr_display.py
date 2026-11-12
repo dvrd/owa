@@ -145,4 +145,46 @@ class QRTests(unittest.TestCase):
             'certificate': 'None', 'session': 'Stream_Error', 'server_code': 515})
         self.assertNotIn('private-token-must-not-escape', out.getvalue())
 
+    def test_hold_phase_and_arguments_are_forwarded_without_implicit_action(self):
+        self.assertEqual(QR.native_phase(b'PHASE CONNECTED_HOLD\n'), 'CONNECTED_HOLD')
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = Path(tmp)/'probe'; binary.write_text('not executable')
+            args, native = QR.arguments(['--live', '--auth-dir', tmp, '--binary',
+                str(binary), 'inspect', '--', '--group-subject', 'offline',
+                '--hold-seconds', '300'])
+            self.assertEqual(args.command, 'inspect')
+            self.assertEqual(native[-2:], ['--hold-seconds', '300'])
+            self.assertNotIn('--send', native)
+
+    def test_group_counts_are_bounded_numeric_and_never_include_private_fields(self):
+        expected = {'total': 3, 'empty_subjects': 1, 'exact_matches': 1}
+        self.assertEqual(QR.native_group_counts(
+            b'GROUP_COUNTS total=3 empty_subjects=1 exact_matches=1\n'), expected)
+        self.assertEqual(QR.native_group_counts(
+            b'GROUP_COUNTS total=0 empty_subjects=0 exact_matches=0\n')['total'], 0)
+        for line in [b'GROUP_COUNTS total=10001 empty_subjects=0 exact_matches=0\n',
+                     b'GROUP_COUNTS total=1 empty_subjects=2 exact_matches=0\n',
+                     b'GROUP_COUNTS total=1 empty_subjects=1 exact_matches=1\n',
+                     b'GROUP_COUNTS total=-1 empty_subjects=0 exact_matches=0\n',
+                     b'GROUP_COUNTS total=1 empty_subjects=0 exact_matches=0 name=secret\n',
+                     b'GROUP_COUNTS total=1 empty_subjects=0 exact_matches=0',
+                     b'GROUP_COUNTS total=1 empty_subjects=0 exact_matches=\xff\n']:
+            self.assertIsNone(QR.native_group_counts(line))
+
+    def test_hold_and_count_output_is_structured_through_launcher(self):
+        child = mock.Mock()
+        child.stdout = io.BytesIO(b'PHASE CONNECTED_HOLD\nGROUP_COUNTS total=3 '
+                                 b'empty_subjects=1 exact_matches=0\nPHASE COMPLETE\n')
+        child.stderr = io.BytesIO(b'')
+        child.wait.return_value = 0; child.poll.return_value = 0
+        args = mock.Mock(binary=Path('/fake'), command='inspect', auth_dir=Path('/private'))
+        out = io.StringIO()
+        with mock.patch.object(QR.subprocess, 'Popen', return_value=child) as start:
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(QR.launch(args, ['--hold-seconds', '60']), 0)
+        self.assertEqual(start.call_args.args[0][-2:], ['--hold-seconds', '60'])
+        self.assertEqual([json.loads(line) for line in out.getvalue().splitlines()],
+            [{'phase': 'CONNECTED_HOLD'}, {'phase': 'GROUP_COUNTS', 'total': 3,
+              'empty_subjects': 1, 'exact_matches': 0}, {'phase': 'COMPLETE'}])
+
 if __name__ == '__main__': unittest.main()

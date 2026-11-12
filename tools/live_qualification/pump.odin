@@ -47,7 +47,7 @@ runner_event :: proc(runner: ^Runner, event: wa.Socket_Event) -> (bool, Tool_Err
  return false, {}
 }
 
-runner_pump :: proc(runner: ^Runner) -> (bool, Tool_Error) {
+runner_pump_inner :: proc(runner: ^Runner) -> (bool, Tool_Error) {
  if remaining(runner) <= 0 {return false, {kind = .Timeout}}
  event, tick_error := wa.socket_tick(&runner.socket, time.now())
  if tick_error.kind != .None {return false, {kind = .Protocol, socket = tick_error}}
@@ -81,4 +81,62 @@ runner_online :: proc(runner: ^Runner) -> Tool_Error {
   phase_print(.RECONNECTING)
  }
  return {kind = .Timeout}
+}
+
+hold_budget :: proc(hold_seconds: int, available: time.Duration) -> time.Duration {
+ if hold_seconds <= 0 || available <= 0 {return 0}
+ return min(time.Duration(min(hold_seconds, 300)) * time.Second, available)
+}
+
+runner_hold :: proc(runner: ^Runner) -> Tool_Error {
+ if runner.options.hold_seconds == 0 {return {}}
+ budget := hold_budget(runner.options.hold_seconds, remaining(runner))
+ if budget <= 0 {return {kind = .Timeout}}
+ outer_deadline := runner.deadline
+ runner.deadline = time.tick_add(time.tick_now(), budget)
+ if runner.deadline._nsec > outer_deadline._nsec {runner.deadline = outer_deadline}
+ defer runner.deadline = outer_deadline
+ phase_print(.CONNECTED_HOLD)
+ for remaining(runner) > 0 {
+  restart, error := runner_pump(runner)
+  if error.kind == .Timeout && remaining(runner) <= 0 {break}
+  if read_timeout(error) && remaining(runner) <= 0 {
+   error.kind = .Timeout; return error
+  }
+  if error.kind != .None {return error}
+  // A restart invalidates this connected hold. Never silently reconnect/replay.
+  if restart {return {kind = .Protocol}}
+ }
+ if time.tick_diff(time.tick_now(), outer_deadline) <= 0 {return {kind = .Timeout}}
+ return {}
+}
+
+read_timeout :: proc(error: Tool_Error) -> bool {
+ if error.kind != .Protocol || error.socket.kind != .Session_Failed ||
+  error.socket.session.kind != .Client_Failed {return false}
+ stream := error.socket.session.client.transport.websocket.stream
+ return stream.transport.kind == .Timeout || stream.tls.transport.kind == .Timeout
+}
+
+runner_pump :: proc(runner: ^Runner) -> (bool, Tool_Error) {
+ if remaining(runner) <= 0 {return false, {kind = .Timeout}}
+ budget := min(remaining(runner), 5 * time.Second)
+ timeout := runner.socket.config.query_timeout
+ runner.socket.config.query_timeout = budget
+ defer runner.socket.config.query_timeout = timeout
+ deadline := time.time_add(time.now(), budget)
+ if error := wa.socket_write_deadline(&runner.socket, deadline); error.kind != .None {
+  wa.socket_close(&runner.socket)
+  return false, {kind = .Protocol, socket = error}
+ }
+ restart, error := runner_pump_inner(runner)
+ if error.kind != .None {
+  wa.socket_close(&runner.socket)
+  return restart, error
+ }
+ if cleared := wa.socket_write_deadline(&runner.socket, {}); cleared.kind != .None {
+  wa.socket_close(&runner.socket)
+  return false, {kind = .Protocol, socket = cleared}
+ }
+ return restart, {}
 }

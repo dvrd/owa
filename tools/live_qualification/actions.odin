@@ -3,6 +3,8 @@ package main
 import wa "../.."
 import "core:crypto/sha2"
 import "core:encoding/hex"
+import "core:fmt"
+import "core:os"
 import "core:strings"
 import "core:time"
 
@@ -37,6 +39,18 @@ group_select :: proc(groups: []wa.Socket_Group_Summary,
  return found, {}
 }
 
+// Public diagnostics contain counts only, never group names or addresses.
+Group_Counts :: struct {total, empty_subjects, exact_matches: int}
+
+group_counts :: proc(groups: []wa.Socket_Group_Summary, subject: string) -> Group_Counts {
+ counts := Group_Counts{total = len(groups)}
+ for group in groups {
+  if group.subject == "" {counts.empty_subjects += 1}
+  if group.subject == subject {counts.exact_matches += 1}
+ }
+ return counts
+}
+
 action_fingerprint :: proc(data: []u8) -> string {
  return action_fingerprint_parts("", data)
 }
@@ -63,6 +77,10 @@ runner_target :: proc(runner: ^Runner) -> Tool_Error {
  groups, group_error := wa.socket_groups_participating(&runner.socket)
  if group_error.kind != .None {return {kind = .Protocol, socket = group_error}}
  defer wa.socket_group_summaries_destroy(&groups)
+ counts := group_counts(groups[:], runner.options.group_subject)
+ fmt.printf("GROUP_COUNTS total=%d empty_subjects=%d exact_matches=%d\n",
+  counts.total, counts.empty_subjects, counts.exact_matches)
+ os.flush(os.stdout)
  selected, selection_error := group_select(groups[:], runner.options.group_subject)
  if selection_error.kind != .None {return selection_error}
  owned, allocation := strings.clone(selected)

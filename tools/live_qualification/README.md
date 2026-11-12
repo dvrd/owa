@@ -110,6 +110,12 @@ with its existing ID; this does not claim exactly-once recipient delivery.
 
 ## Bounds and evidence
 
+`--hold-seconds 0..300` (default 0) pumps the existing connection after `ONLINE`,
+before pair completion or the group query. `CONNECTED_HOLD` marks the interval.
+It is limited by the remaining overall budget. Budget expiry or a requested
+restart fails closed, without silently reconnecting. This tests connection
+duration; it does not prove history synchronization or fix phone loading.
+
 Native timeout is 10–600 seconds (default 300). Polls, scoped reads, queries, QR
 refresh, and restart attempts are bounded. Native system DNS/TCP dial cannot be
 interrupted by this timeout; use the Python launcher, whose outer 615-second
@@ -128,3 +134,22 @@ recipient observations. Do not include session files, QR artifacts, keys, phone
 numbers, message IDs, or unrelated personal content in reports. Stopping the
 process does not unlink the device; remove it through the phone's linked-device
 controls when qualification finishes.
+
+## Retarget an unused qualification session offline
+
+When the selected test group changes, explicitly name both the previously bound
+subject and the new exact subject. This command is offline: it locks and verifies
+the existing owned registered session, updates only the tool's scope journal,
+and exits before trust loading, version discovery, or connection setup.
+
+```sh
+/tmp/whatsapp-live-qualification retarget \
+  --auth-dir /absolute/private/whatsapp-qualification-406 \
+  --previous-group-subject 'Bot Testing Env' --group-subject 'botlab'
+```
+
+Retarget refuses an already resolved target or any prepared or retained outbound
+intent. It never clears work to permit a target change, changes auth/prekey/state
+files, or sends a message. `--send`, `--preview`, `--hold-seconds`, and
+`--timeout-seconds` are rejected. A subsequent inspection must still resolve the
+unique new exact subject and confirm fresh group metadata.
