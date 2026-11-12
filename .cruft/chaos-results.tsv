@@ -1,0 +1,18 @@
+timestamp	experiment_name	hypothesis	blast_radius	duration	result	surprises
+2026-11-12T20:09:34.131782+00:00	before-commit	Uncommitted in-memory ratchet changes do not reach the reopened store.	owned-disposable-child	0.039147	INCONCLUSIVE	none
+2026-11-12T20:10:35.370535+00:00	before-commit	Uncommitted in-memory ratchet changes do not reach the reopened store.	owned-disposable-child	0.144826	CONFIRMED	none
+2026-11-12T20:10:35.370664+00:00	after-intent	Durable caller intent preserves its ID, without inventing queued wire or delivery.	owned-disposable-child	0.145342	CONFIRMED	none
+2026-11-12T20:10:35.370667+00:00	after-pending-wire	Committed ratchet, content and exact pending packet survive; replay keeps ID.	owned-disposable-child	0.148853	CONFIRMED	none
+2026-11-12T20:10:35.370669+00:00	after-positive-ack	ACK removes wire but queued caller journal remains UNKNOWN after crash.	owned-disposable-child	0.147236	CONFIRMED	none
+2026-11-12T20:10:35.370671+00:00	after-ack-journal	Durable caller ACK evidence survives; it still never establishes delivery.	owned-disposable-child	0.148247	CONFIRMED	none
+2026-11-12T20:12:36.769747+00:00	before-commit	Uncommitted in-memory ratchet changes do not reach the reopened store.	owned-disposable-child	0.140118	CONFIRMED	none
+2026-11-12T20:12:36.769945+00:00	after-intent	Durable caller intent preserves its ID, without inventing queued wire or delivery.	owned-disposable-child	0.140861	CONFIRMED	none
+2026-11-12T20:12:36.769948+00:00	after-pending-wire	Committed ratchet, content and exact pending packet survive; replay keeps ID.	owned-disposable-child	0.142851	CONFIRMED	none
+2026-11-12T20:12:36.769950+00:00	after-positive-ack	ACK removes wire but queued caller journal remains UNKNOWN after crash.	owned-disposable-child	0.142408	CONFIRMED	none
+2026-11-12T20:12:36.769952+00:00	after-ack-journal	Durable caller ACK evidence survives; it still never establishes delivery.	owned-disposable-child	0.141309	CONFIRMED	none
+2026-11-12T20:13:22.896758+00:00	before-commit	Uncommitted in-memory ratchet changes do not reach the reopened store.	owned-disposable-child	0.695594	CONFIRMED	none
+2026-11-12T20:13:22.896928+00:00	after-intent	Durable caller intent preserves its ID, without inventing queued wire or delivery.	owned-disposable-child	0.697930	CONFIRMED	none
+2026-11-12T20:13:22.896931+00:00	after-pending-wire	Committed ratchet, content and exact pending packet survive; replay keeps ID.	owned-disposable-child	0.700811	CONFIRMED	none
+2026-11-12T20:13:22.896933+00:00	after-positive-ack	ACK removes wire but queued caller journal remains UNKNOWN after crash.	owned-disposable-child	0.702035	CONFIRMED	none
+2026-11-12T20:13:22.896934+00:00	after-ack-journal	Durable caller ACK evidence survives; it still never establishes delivery.	owned-disposable-child	0.702649	CONFIRMED	none
+2026-11-12T20:15:23.682864+00:00	harness-readiness-diagnosis	Readiness must leave child alive until the owned SIGKILL	owned-disposable-child	0	CONFIRMED	Initial stdout-pipe fsync assert trapped before kill; fixture corrected and both full campaigns passed
