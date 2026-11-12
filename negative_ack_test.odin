@@ -1,6 +1,8 @@
 package whatsapp
 
 import "core:bytes"
+import network_client "../surf"
+import ws "../websocket"
 import "core:fmt"
 import "core:os"
 import "core:testing"
@@ -128,4 +130,78 @@ negative_ack_positive_control_commits_pending_removal_and_retains_content :: pro
  _, durable_content := state_store_get(&restored, .Outbound_Content, "owned-id")
  testing.expect(t, !durable_pending && durable_content)
  testing.expect_value(t, restored.revision, revision + 1)
+}
+
+Negative_Ack_Stream :: struct {
+ input: [2048]u8,
+ size, read_at, writes: int,
+}
+
+negative_ack_stream_read :: proc(data: rawptr, destination: []u8) ->
+ (int, network_client.WebSocket_Stream_Error) {
+ stream := cast(^Negative_Ack_Stream)data
+ n := min(len(destination), stream.size - stream.read_at, 3)
+ if n == 0 {return 0, {kind = .EOF}}
+ copy(destination[:n], stream.input[stream.read_at:][:n]); stream.read_at += n
+ return n, {}
+}
+
+negative_ack_stream_write :: proc(data: rawptr, source: []u8) ->
+ (int, network_client.WebSocket_Stream_Error) {
+ stream := cast(^Negative_Ack_Stream)data
+ stream.writes += 1
+ return len(source), {}
+}
+
+negative_ack_stream_close :: proc(data: rawptr) -> network_client.WebSocket_Stream_Error {
+ return {}
+}
+
+negative_ack_encrypted_stream :: proc(f: ^Negative_Ack_Fixture, stream: ^Negative_Ack_Stream) {
+ encoded, ciphertext, envelope: [1024]u8
+ node := Binary_Node{tag = "ack", attrs = {
+  {"class", "message"}, {"id", "owned-id"}, {"error", "479"}}}
+ plain_size, binary_error := binary_node_encode(encoded[:], node)
+ assert(binary_error.kind == .None)
+ key: [32]u8
+ for &byte, index in key {byte = u8(index + 1)}
+ peer := Noise_State{phase = .Transport, write_key = key}; defer noise_clear(&peer)
+ encrypted_size, encrypted := noise_encrypt(&peer, ciphertext[:], encoded[:plain_size])
+ assert(encrypted == .None)
+ envelope_size, framed := frame_encode(envelope[:], ciphertext[:encrypted_size])
+ assert(framed == .None)
+ frame_size, websocket_error := ws.frame_encode(stream.input[:], true, .Binary,
+  envelope[:envelope_size], {}, masked = false)
+ assert(websocket_error == .None); stream.size = frame_size
+ socket := &f.socket
+ socket.websocket = {phase = .Open, allocator = context.allocator,
+  config = {host = "synthetic.invalid", max_message_size = 4096},
+  stream = {data = stream, read = negative_ack_stream_read,
+   write = negative_ack_stream_write, close = negative_ack_stream_close}}
+ socket.client = {phase = .Noise_Ready, websocket = &socket.websocket,
+  config = {max_frame_payload = 4096}, noise = {phase = .Transport, read_key = key}}
+ assert(frame_transport_init(&socket.client.frames, &socket.websocket, 4096).kind == .None)
+ socket.client.frames.intro_sent = true
+ socket.session = {phase = .Login_Accepted, client = &socket.client, auth = &f.auth}
+}
+
+@(test)
+negative_ack_encrypted_socket_read_surfaces_rejection_before_pending_absence :: proc(t: ^testing.T) {
+ f := negative_ack_fixture(); defer negative_ack_destroy(f)
+ stream: Negative_Ack_Stream
+ negative_ack_encrypted_stream(f, &stream)
+ defer socket_close(&f.socket)
+ before := negative_ack_disk(f); defer delete(before)
+ revision, durable := f.store.revision, f.store.durable_revision
+ event, error := socket_read(&f.socket)
+ testing.expect_value(t, error.kind, .Message_Rejected)
+ testing.expect_value(t, event.kind, .None)
+ testing.expect_value(t, f.socket.client.noise.read_counter, u64(1))
+ testing.expect_value(t, stream.read_at, stream.size)
+ testing.expect_value(t, stream.writes, 0)
+ // The tool's pending-absence success gate must remain unreachable after this error.
+ _, pending := state_store_get(&f.store, .Outbound_Message, "owned-id")
+ _, retained := state_store_get(&f.store, .Outbound_Content, "owned-id")
+ testing.expect(t, pending && retained)
+ negative_ack_unchanged(t, f, before, revision, durable)
 }
