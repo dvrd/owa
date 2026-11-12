@@ -1,10 +1,16 @@
-# Native WhatsApp client
+# OWA — Odin WhatsApp
 
 This package implements the WhatsApp Web protocol in Odin: authenticated
 TLS/WebSocket transport, Noise, Signal sessions and group Sender Keys,
 pairing/prekeys, persistent protocol state, group messages and image/document
 media. It is an unofficial protocol client, with a pinned Baileys 6.7.23
 reference and independent synthetic fixtures. It is not Meta's Cloud API.
+
+The Odin package name remains `whatsapp`. This repository is a shared package
+from the Webtools stack; native builds require its matching Odin compiler and
+shared dependencies. The daily [protocol review workflow](.github/workflows/protocol-review.yml)
+runs public upstream checks and Python tooling tests independently of a phone or
+local computer. See [CI setup and limits](tools/protocol_watch/README.md#github-actions).
 
 ## Reliability contracts
 

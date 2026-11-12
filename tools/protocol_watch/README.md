@@ -63,3 +63,30 @@ Success means `ELIGIBLE_FOR_REVIEW`, never deployment authorization. Preserve th
 historical reference when proposing a reviewed baseline update. Roll back code
 only with known persisted-state compatibility; never roll Signal/auth state back
 or fork a live session to make an older build appear healthy.
+
+## GitHub Actions
+
+`.github/workflows/protocol-review.yml` runs on GitHub-hosted Linux at15:00 UTC
+(09:00 Mexico City), manually, and when protocol tooling changes are pushed.
+It runs the offline Python tooling tests and a bounded public scan, retaining
+public evidence for30 days. Drift deliberately fails the check to request human
+review; it does not prove a runtime regression. Each runner starts a fresh
+observation, so historical-reference differences remain visible every day.
+No account pairing, canary sending, session state or production deployment runs
+in CI. This workflow does not build or qualify the Odin/native dependency stack.
+
+Optional read-only Codex triage uses the official OpenAI action. Add a dedicated
+`OPENAI_API_KEY` repository Actions secret and set the repository variable
+`OWA_AGENT_REVIEW=true` to opt in. Missing authentication with opt-in fails the
+agent job; without opt-in the public deterministic check still runs. API usage
+is billed to that key. No local login or WhatsApp credential is uploaded. The
+agent cannot downgrade the deterministic check or automatically change code.
+Its final structured message is retained in the action run; the public scan
+artifact is independently retained even when review is required.
+
+Scheduling requires the workflow on the default branch and Actions enabled.
+GitHub can delay/drop scheduled runs under load; public repositories may have
+schedules disabled after60 days of inactivity. This removes the laptop uptime
+dependency, not the need to monitor job timestamps/results. Keep the local daily
+job until the first hosted execution has been verified. The separate live soak
+and canary jobs remain local and are not transferred to hosted runners.
