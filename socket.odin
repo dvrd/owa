@@ -65,6 +65,9 @@ Socket_Config :: struct {
 	port:                               int,
 	tls:                                tls.Config,
 	http_execute:                       Media_HTTP_Execute,
+	// Nil retains the existing issuer-serial-only policy; verified TLS is still required.
+	// Applications may reject the Noise certificate before ClientFinish is sent.
+	verify_certificate:                 Certificate_Verifier,
 	payload:                            Payload_Config,
 	auth_path, prekey_path, state_path: string,
 	query_timeout:                      time.Duration,
@@ -160,11 +163,7 @@ socket_connect :: proc(
 	if websocket_error := socket_websocket_dial(socket, settings);
 	   websocket_error.kind != .None do return websocket_error
 
-	if e := client_init(
-		&socket.client,
-		&socket.websocket,
-		{static_private_key = auth.credentials.noise_private},
-	); e.kind != .None {
+	if e := socket_client_init(socket, settings); e.kind != .None {
 		return socket_fail(
 			socket,
 			{
@@ -202,6 +201,17 @@ socket_connect :: proc(
 	socket.phase = .Pairing
 	socket.queue = make([dynamic]^Socket_Message)
 	return {}
+}
+
+// The initialized transport and caller-owned auth stay pinned through the handshake.
+@(private)
+socket_client_init :: proc(socket: ^Socket, settings: Socket_Config) -> Client_Error {
+	assert(socket != nil && socket.auth != nil)
+	return client_init(
+		&socket.client, &socket.websocket,
+		{static_private_key = socket.auth.credentials.noise_private},
+		{verify_certificate = settings.verify_certificate},
+	)
 }
 
 socket_websocket_dial :: proc(socket: ^Socket, settings: Socket_Config) -> Socket_Error {

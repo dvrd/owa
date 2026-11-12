@@ -252,6 +252,7 @@ socket_send_text :: proc(
 	socket: ^Socket,
 	group, text: string,
 	quote: ^Socket_Message = nil,
+	message_id: string = "",
 ) -> (
 	string,
 	Socket_Error,
@@ -293,7 +294,7 @@ socket_send_text :: proc(
 		return "", {kind = .Message_Failed, message = err}
 	}
 
-	return socket_send_group(socket, group, buffer[:n])
+	return socket_send_group(socket, group, buffer[:n], message_id = message_id)
 }
 
 // Returns an owned message ID. Caller releases it after retaining its value
@@ -315,6 +316,9 @@ socket_send_group :: proc(
 		return "", {kind = .Invalid_State}
 	}
 
+	if id, handled, error := socket_group_existing_send(
+		socket, group, media_type, message_id, only_device, protobuf,
+	); handled {return id, error}
 	metadata, meta_err := socket_group_metadata(socket, group)
 	if meta_err.kind != .None do return "", meta_err
 
@@ -355,7 +359,8 @@ socket_send_group :: proc(
 
 	defer delete(canonical_me)
 	return socket_group_send_prepared(
-		socket, group, mode, media_type, message_id, only_device, canonical_me, protobuf, devices,
+		socket, group, mode, media_type, message_id, only_device,
+		canonical_me, protobuf, devices,
 	)
 }
 
@@ -739,9 +744,75 @@ socket_group_content_stage :: proc(
 	return {}
 }
 
+// Receipt-triggered device retries must reencrypt for that device; an ordinary
+// repeated pending send instead reuses its exact durable ciphertext.
+socket_group_existing_send :: proc(
+	socket: ^Socket, group, media_type, id, only_device: string, protobuf: []u8,
+) -> (string, bool, Socket_Error) {
+	if id == "" {return "", false, {}}
+	if _, error := socket_group_existing_intent(socket, group, media_type, id, protobuf);
+	   error.kind != .None {return "", true, error}
+	if only_device == "" {
+		if wire, pending := state_store_get(socket.store, .Outbound_Message, id); pending {
+			owned, error := socket_group_pending_replay(socket, id, wire)
+			return owned, true, error
+		}
+	}
+	// No durable ACK marker exists; absence of wire must not fabricate success.
+	// Equal retained content without pending wire keeps the existing resend path.
+	return "", false, {}
+}
+
+// Explicit IDs name an immutable intent while its content is retained. Reusing
+// one for a different destination or payload must not replace a pending packet.
+socket_group_existing_intent :: proc(
+	socket: ^Socket, group, media_type, id: string, protobuf: []u8,
+) -> (bool, Socket_Error) {
+	if !socket_inbox_id_valid(id) {return false, {kind = .Invalid_Config}}
+	if socket.store == nil || !socket.store.initialized {return false, {kind = .Invalid_State}}
+	content, exists := state_store_get(socket.store, .Outbound_Content, id)
+	if !exists {
+		if _, pending := state_store_get(socket.store, .Outbound_Message, id); pending {
+			return false, {kind = .Invalid_State}
+		}
+		return false, {}
+	}
+	document, decoded := binary_node_decode(content)
+	if decoded.kind != .None {return false, {kind = .Binary_Failed, binary = decoded}}
+	defer binary_document_destroy(&document)
+	stored_group, _ := pairing_node_attr(document.root, "to")
+	stored_media, _ := pairing_node_attr(document.root, "mediatype")
+	stored_protobuf, valid := document.root.content.([]u8)
+	if document.root.tag != "saved" || !valid {return false, {kind = .Protocol_Error}}
+	if group != stored_group || media_type != stored_media {
+		return false, {kind = .Invalid_Config}
+	}
+	if !bytes.equal(protobuf, stored_protobuf) {return false, {kind = .Invalid_Config}}
+	return true, {}
+}
+
+// Replay uses the committed packet, never a second Signal encryption. A retained
+// content record without pending wire is not treated as an ACK receipt here.
+socket_group_pending_replay :: proc(
+	socket: ^Socket, message_id: string, pending: []u8,
+) -> (string, Socket_Error) {
+	id, id_error := strings.clone(message_id)
+	if id_error != nil {return "", {kind = .Allocation_Failed, allocation = id_error}}
+	wire, wire_error := make([]u8, len(pending))
+	if wire_error != nil {
+		delete(id)
+		return "", {kind = .Allocation_Failed, allocation = wire_error}
+	}
+	defer {crypto.zero_explicit(raw_data(wire), len(wire)); delete(wire)}
+	copy(wire, pending)
+	return id, socket_write(socket, wire)
+}
+
 socket_group_outbound_commit :: proc(
 	socket: ^Socket, group, media_type, id: string, protobuf, wire: []u8,
 ) -> Socket_Error {
+	if _, intent_error := socket_group_existing_intent(socket, group, media_type, id, protobuf);
+	   intent_error.kind != .None {return intent_error}
 	if content_error := socket_group_content_stage(socket, group, media_type, id, protobuf);
 	   content_error.kind != .None do return content_error
 	if e := state_store_set(
@@ -781,8 +852,8 @@ socket_group_dispatch :: proc(
 	)
 	if wire_error.kind != .None do return "", wire_error
 	defer delete(wire)
-	if commit_error := socket_group_outbound_commit(socket, group, media_type, id, protobuf, wire);
-	   commit_error.kind != .None do return "", commit_error
+	commit_error := socket_group_outbound_commit(socket, group, media_type, id, protobuf, wire)
+	if commit_error.kind != .None do return "", commit_error
 
 	success = true
 	if e := socket_write(socket, wire); e.kind != .None {

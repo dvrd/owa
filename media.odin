@@ -1887,6 +1887,7 @@ media_upload_json_depth_validate :: proc(src: []u8) -> Media_Error {
 // Tries at most16 advertised hosts. No redirects: media authentication tokens
 // and encrypted uploads must stay on the selected server. Refreshing expired
 // media_conn authentication is explicit in the caller's IQ orchestration.
+// Config.timeout is one budget across all hosts (zero selects 30 seconds).
 media_upload :: proc(
 	encrypted: []u8,
 	kind: Media_Kind,
@@ -1901,35 +1902,20 @@ media_upload :: proc(
 	exchange := execute
 	if exchange == nil do exchange = media_http_native
 
-	if len(connection.hosts) == 0 ||
-	   len(connection.hosts) > MAX_MEDIA_HOSTS {
-		return {}, {kind = .Invalid_Connection}
-	}
-
-	if len(encrypted) < 26 ||
-	   len(encrypted) > MAX_MEDIA_SIZE_LIMIT + 26 {
-		return {}, {kind = .Invalid_Encrypted_Length}
-	}
-
-	if len(encrypted) > http.MAX_BODY_SIZE {
-		return {}, {kind = .Media_Oversized}
-	}
-
-	if metadata.file_length > cast(u64)MAX_MEDIA_SIZE_LIMIT ||
-	   cast(u64)len(encrypted) !=
-		   (metadata.file_length / 16 + 1) * 16 + 10 {
-		return {}, {kind = .Invalid_Encrypted_Length}
-	}
-
-	if media_hash(encrypted) != metadata.file_enc_sha256 {
-		return {}, {kind = .Encrypted_Hash_Mismatch}
-	}
+	if error := media_upload_input_validate(encrypted, metadata, len(connection.hosts));
+	   error.kind != .None {return {}, error}
 
 	settings := config; settings.max_redirects = 0
 	settings.max_body_size = 16384; settings.allow_http = false
-	last := Media_Error {
-		kind = .Invalid_Connection,
+	if settings.timeout < 0 {
+		return {}, {kind = .HTTP_Failed, http = {kind = .Invalid_Config,
+			phase = .Configuration, write_effect = .Not_Sent}}
 	}
+	budget := settings.timeout
+	if budget == 0 do budget = 30 * time.Second
+	started := time.tick_now()
+	last := Media_Error{kind = .Invalid_Connection}
+	effect: network_client.HTTP_Write_Effect = .Not_Sent
 	for host in connection.hosts {
 		if host.max_content_length != 0 &&
 		   cast(u64)len(encrypted) > host.max_content_length {
@@ -1948,11 +1934,58 @@ media_upload :: proc(
 		)
 		if e.kind != .None do return {}, e
 
+		// A failed host consumes the same operation budget as its fallback.
+		// Monotonic elapsed time avoids extending it on wall-clock adjustments.
+		remaining := budget - time.tick_since(started)
+		if remaining <= 0 {
+			return {}, {kind = .HTTP_Failed, http = {kind = .Deadline_Failed,
+				phase = .Deadline, write_effect = effect}}
+		}
+		settings.timeout = remaining
 		result, exchange_error := media_upload_exchange(exchange, url, encrypted, settings)
 		if exchange_error.kind == .None do return result, {}
+		if exchange_error.kind == .HTTP_Failed {
+			if exchange_error.http.write_effect == .Unknown || effect == .Not_Sent {
+				effect = exchange_error.http.write_effect
+			}
+		} else if effect == .Not_Sent {
+			effect = .Response_Received
+		}
 		last = exchange_error
 	}
+	// A later dial failure cannot erase an earlier attempt's uncertain effect.
+	if last.kind == .HTTP_Failed do last.http.write_effect = effect
 	return {}, last
+}
+
+// Reject malformed or oversized inputs before any upload can consume its budget.
+@(private)
+media_upload_input_validate :: proc(encrypted: []u8, metadata: Media_Metadata,
+	host_count: int) -> Media_Error {
+	if host_count == 0 ||
+	   host_count > MAX_MEDIA_HOSTS {
+		return {kind = .Invalid_Connection}
+	}
+
+	if len(encrypted) < 26 ||
+	   len(encrypted) > MAX_MEDIA_SIZE_LIMIT + 26 {
+		return {kind = .Invalid_Encrypted_Length}
+	}
+
+	if len(encrypted) > http.MAX_BODY_SIZE {
+		return {kind = .Media_Oversized}
+	}
+
+	if metadata.file_length > cast(u64)MAX_MEDIA_SIZE_LIMIT ||
+	   cast(u64)len(encrypted) !=
+		   (metadata.file_length / 16 + 1) * 16 + 10 {
+		return {kind = .Invalid_Encrypted_Length}
+	}
+
+	if media_hash(encrypted) != metadata.file_enc_sha256 {
+		return {kind = .Encrypted_Hash_Mismatch}
+	}
+	return {}
 }
 
 media_upload_exchange :: proc(
@@ -2679,8 +2712,8 @@ socket_http_worker :: proc(data: rawptr) {
 		sync.atomic_store(&job.done, true)
 	}
 	// A canceled multi-host upload does not begin another request. The active
-	// request retains a bounded I/O deadline; DNS/TCP connection setup retains
-	// the native HTTP client's platform resolver/dial limits.
+	// request retains Surf's total DNS/TCP/TLS/I/O budget. Upload fallback
+	// consumes one shared budget rather than restarting it for each host.
 	config := job.config
 	if config.timeout == 0 || config.timeout > 30 * time.Second {
 		config.timeout = 30 * time.Second
@@ -2886,6 +2919,7 @@ socket_send_document :: proc(
 	file_name: string,
 	caption: string = "",
 	mime_type: string = "application/pdf",
+	message_id: string = "",
 ) -> (
 	string,
 	Socket_Error,
@@ -2898,6 +2932,7 @@ socket_send_document :: proc(
 		caption,
 		mime_type,
 		file_name,
+		message_id,
 	)
 }
 
@@ -2946,6 +2981,7 @@ socket_send_media :: proc(
 	plaintext: []u8,
 	kind: Media_Kind,
 	caption, mime_type, file_name: string,
+	message_id: string = "",
 ) -> (
 	string,
 	Socket_Error,
@@ -2953,6 +2989,10 @@ socket_send_media :: proc(
 	if validation_error := socket_media_send_validate(
 		socket, group, plaintext, kind, caption, mime_type, file_name,
 	); validation_error.kind != .None do return "", validation_error
+
+	if id, handled, error := socket_media_existing_send(
+		socket, group, plaintext, kind, caption, mime_type, file_name, message_id,
+	); handled {return id, error}
 
 	key, ke := media_key_generate()
 	defer crypto.zero_explicit(&key, size_of(key))
@@ -2978,8 +3018,53 @@ socket_send_media :: proc(
 	uploaded, upload_error := socket_media_upload(socket, ciphertext[:n], kind, &metadata)
 	if upload_error.kind != .None do return "", upload_error
 	return socket_media_message_send(
-		socket, group, kind, caption, mime_type, file_name, &uploaded, &metadata,
+		socket, group, kind, caption, mime_type, file_name,
+		&uploaded, &metadata, message_id,
 	)
+}
+
+// Media encryption/upload is randomized. Match the original plaintext intent
+// first, then resend its retained protobuf rather than uploading a new object.
+socket_media_existing_send :: proc(
+	socket: ^Socket, group: string, plaintext: []u8, kind: Media_Kind,
+	caption, mime_type, file_name, id: string,
+) -> (string, bool, Socket_Error) {
+	if id == "" {return "", false, {}}
+	if !socket_inbox_id_valid(id) {return "", true, {kind = .Invalid_Config}}
+	if socket.store == nil || !socket.store.initialized {
+		return "", true, {kind = .Invalid_State}
+	}
+	content, exists := state_store_get(socket.store, .Outbound_Content, id)
+	if !exists {
+		if _, pending := state_store_get(socket.store, .Outbound_Message, id); pending {
+			return "", true, {kind = .Invalid_State}
+		}
+		return "", false, {}
+	}
+	document, decoded := binary_node_decode(content)
+	if decoded.kind != .None {return "", true, {kind = .Binary_Failed, binary = decoded}}
+	defer binary_document_destroy(&document)
+	stored_group, _ := pairing_node_attr(document.root, "to")
+	stored_type, _ := pairing_node_attr(document.root, "mediatype")
+	protobuf, valid := document.root.content.([]u8)
+	if document.root.tag != "saved" || !valid {return "", true, {kind = .Protocol_Error}}
+	message, parsed := media_message_decode(protobuf)
+	if parsed.kind != .None {return "", true, {kind = .Media_Failed, media = parsed}}
+	metadata, metadata_error := media_metadata_from_message(message)
+	defer media_metadata_clear(&metadata)
+	if metadata_error.kind != .None {
+		return "", true, {kind = .Media_Failed, media = metadata_error}
+	}
+	expected_type := kind == .Document ? "document" : "image"
+	if stored_group != group || stored_type != expected_type || message.kind != kind {
+		return "", true, {kind = .Invalid_Config}
+	}
+	if message.caption != caption || message.mime_type != mime_type ||
+	   message.file_name != file_name {return "", true, {kind = .Invalid_Config}}
+	if metadata.file_length != u64(len(plaintext)) ||
+	   metadata.file_sha256 != media_hash(plaintext) {return "", true, {kind = .Invalid_Config}}
+	owned, error := socket_send_group(socket, group, protobuf, expected_type, id)
+	return owned, true, error
 }
 
 socket_media_send_validate :: proc(
@@ -3084,12 +3169,12 @@ socket_media_upload :: proc(
 
 socket_media_message_send :: proc(
 	socket: ^Socket, group: string, kind: Media_Kind, caption, mime_type, file_name: string,
-	uploaded: ^Media_Upload_Result, metadata: ^Media_Metadata,
+	uploaded: ^Media_Upload_Result, metadata: ^Media_Metadata, message_id: string = "",
 ) -> (string, Socket_Error) {
 	message := Media_Message {
 		kind                    = kind,
 		url                     = cast(string)uploaded.url[:uploaded.url_size],
-		direct_path             = cast(string)uploaded.direct_path[:uploaded.direct_path_size],
+		direct_path = cast(string)uploaded.direct_path[:uploaded.direct_path_size],
 		mime_type               = mime_type,
 		caption                 = caption,
 		file_name               = file_name,
@@ -3123,7 +3208,7 @@ socket_media_message_send :: proc(
 	media_type := "image"
 	if kind == .Document do media_type = "document"
 
-	return socket_send_group(socket, group, protobuf, media_type)
+	return socket_send_group(socket, group, protobuf, media_type, message_id)
 }
 
 // Caller owns message/protobuf and destination. A404/410 CDN response triggers
