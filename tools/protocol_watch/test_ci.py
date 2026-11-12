@@ -17,10 +17,11 @@ class Tests(unittest.TestCase):
             result = C.prepare(Path(tmp)/'state', output, lambda _: report)
             self.assertEqual(result['status'], 'REVIEW_REQUIRED')
             self.assertFalse(result['compatibility_approved'])
-            self.assertTrue(result['agent_input_ready'])
+            self.assertTrue(result['report_ready'])
             self.assertEqual(json.loads((output/'report.json').read_text()), report)
-            self.assertIn(b'PUBLIC REPORT JSON:', (output/'prompt.txt').read_bytes())
-            self.assertEqual(stat.S_IMODE((output/'prompt.txt').stat().st_mode), 0o600)
+            self.assertFalse((output/'prompt.txt').exists())
+            self.assertFalse((output/'schema.json').exists())
+            self.assertEqual(stat.S_IMODE((output/'report.json').stat().st_mode), 0o600)
 
     def test_failure_does_not_make_agent_input_or_leak_raw_error(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -28,7 +29,7 @@ class Tests(unittest.TestCase):
             output = Path(tmp)/'output'
             result = C.prepare(Path(tmp)/'state', output, fail)
             self.assertEqual(result['status'], 'FAILED')
-            self.assertFalse(result['agent_input_ready'])
+            self.assertFalse(result['report_ready'])
             self.assertFalse((output/'prompt.txt').exists())
             self.assertNotIn('private-secret', (output/'result.json').read_text())
 

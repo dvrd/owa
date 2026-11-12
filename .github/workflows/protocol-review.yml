@@ -23,8 +23,6 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     timeout-minutes: 8
-    outputs:
-      agent_ready: ${{ steps.scan.outputs.agent_ready }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -37,6 +35,14 @@ jobs:
           python3 tools/protocol_watch/ci.py
           --state-dir "$RUNNER_TEMP/protocol-state"
           --output-dir "$RUNNER_TEMP/protocol-report"
+      - name: Track human review in Webtools
+        env:
+          LINEAR_API: ${{ secrets.LINEAR_API }}
+        run: >-
+          python3 tools/protocol_watch/linear_review.py
+          --report "$RUNNER_TEMP/protocol-report/report.json"
+          --output "$RUNNER_TEMP/protocol-report/linear-result.json"
+          --run-url "https://github.com/dvrd/owa/actions/runs/$GITHUB_RUN_ID"
       - name: Retain public evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -45,31 +51,3 @@ jobs:
           path: ${{ runner.temp }}/protocol-report/
           retention-days: 30
           if-no-files-found: error
-      - name: Require review of deterministic drift
-        if: steps.scan.outputs.status == 'REVIEW_REQUIRED'
-        run: |
-          echo '::error::Monitored public paths differ from pinned references. Review the public-protocol-report artifact; this does not prove a protocol regression.'
-          exit 1
-
-  agent:
-    # Opt in after configuring OPENAI_API_KEY; deterministic checks need no key.
-    if: ${{ !cancelled() && needs.scan.outputs.agent_ready == 'true' && vars.OWA_AGENT_REVIEW == 'true' }}
-    needs: scan
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: public-protocol-report
-          path: public-protocol-report
-      - name: Read-only agent triage
-        uses: openai/codex-action@bdf19a4a223ec2549a3e2274a0cf61556bc07675 # v1
-        with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          prompt-file: public-protocol-report/prompt.txt
-          sandbox: read-only
-          safety-strategy: drop-sudo
-          codex-args: '["--ephemeral", "--output-schema", "public-protocol-report/schema.json"]'

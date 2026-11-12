@@ -26,7 +26,7 @@ Responses are capped at 4 MiB, manifests at two sources/16 paths each, reports a
 of socket timeout. Platform DNS/body trickle can exceed admission deadlines; use a
 process watchdog for unattended execution.
 
-## Daily review
+## Legacy local agent runner (not installed)
 
 `schedule.py plist --state-dir ABS` prepares, but does not install, a launchd job
 for 09:00 local time. `schedule.py run --state-dir ABS` checks upstream first, then
@@ -69,20 +69,28 @@ or fork a live session to make an older build appear healthy.
 `.github/workflows/protocol-review.yml` runs on GitHub-hosted Linux at15:00 UTC
 (09:00 Mexico City), manually, and when protocol tooling changes are pushed.
 It runs the offline Python tooling tests and a bounded public scan, retaining
-public evidence for30 days. Drift deliberately fails the check to request human
-review; it does not prove a runtime regression. Each runner starts a fresh
-observation, so historical-reference differences remain visible every day.
+public evidence for30 days. No agent or OpenAI API key is used. Each runner
+starts a fresh observation; historical-reference differences remain visible.
 No account pairing, canary sending, session state or production deployment runs
 in CI. This workflow does not build or qualify the Odin/native dependency stack.
 
-Optional read-only Codex triage uses the official OpenAI action. Add a dedicated
-`OPENAI_API_KEY` repository Actions secret and set the repository variable
-`OWA_AGENT_REVIEW=true` to opt in. Missing authentication with opt-in fails the
-agent job; without opt-in the public deterministic check still runs. API usage
-is billed to that key. No local login or WhatsApp credential is uploaded. The
-agent cannot downgrade the deterministic check or automatically change code.
-Its final structured message is retained in the action run; the public scan
-artifact is independently retained even when review is required.
+Store `LINEAR_API` as an encrypted repository Actions secret. The tracking step
+creates a Backlog review issue in the Webtools Linear project when drift is
+detected. Its stable content fingerprint and deterministic issue UUID deduplicate
+repeated runs, including already closed or archived issues. Upstream commits that
+do not change monitored bytes do not create another issue. A changed monitored
+snapshot produces a new review issue. An ambiguous create is queried, never
+blindly repeated; the next run uses the same UUID. API/credential failures fail
+the job and retain public scan evidence for manual review.
+
+Successful tracking keeps CI green even while human review remains open. A
+green run means the scan and handoff succeeded, not protocol compatibility.
+The issue contains immutable reference/observed links, changed file hashes,
+source-run evidence and a checklist: inspect actual differences, classify their
+relevance, and organize scoped fix issues with tests. No automatic fix, baseline
+approval, version adoption, code change or review-issue closure is performed.
+`linear-result.json` and the Actions summary link the issue. No account state,
+local CLI login or Linear credential is written to public artifacts or logs.
 
 Scheduling requires the workflow on the default branch and Actions enabled.
 GitHub can delay/drop scheduled runs under load; public repositories may have
