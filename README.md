@@ -16,6 +16,10 @@ reference and independent synthetic fixtures. It is not Meta's Cloud API.
   persistence can succeed before the wire write fails. Pending messages retain
   their original encrypted stanza for recovery; local send success is not
   delivery or application completion.
+- A tracked message ACK containing an error returns `Message_Rejected` without
+  deleting pending wire or content. Stop automatic reconnect/replay and choose
+  explicit retry/cancel handling; rejection must never count as successful
+  acceptance or delivery. Mesa stops its reconnect loop for this error.
 - Explicit IDs identify immutable destination/media/content while retained.
   Conflicting reuse fails before replacing pending intent. An ordinary repeat
   of identical pending content reuses the saved packet rather than advancing
