@@ -90,3 +90,25 @@ Keep the Mac awake for a continuous soak. Both monotonic and wall-clock silence
 of 180s trigger CHILD_STALLED before fresh post-wake output is drained. Sleep,
 restart, reconnect gaps and incomplete cycles must not be counted as a clean 24h
 qualification. This tool does not change the user's power policy.
+
+## Continuing after qualification
+
+`periodic_canary.py` polls metadata every15 minutes and waits for a completed,
+qualified primary soak. Pin its primary run ID, binary SHA256 and scope SHA256.
+Use distinct primary state, primary finish, periodic state and controller
+directories. `plist` prepares a private launchd plist; it does not install it.
+`poll` performs one check. The public helper and its reviewed dependencies must
+remain together in the frozen bundle.
+
+After qualification, a pair is due six hours after the latest durable pair ACK.
+The controller starts one finite180-second supervisor run, retaining native
+message-ID ownership and exact group verification. A new successful cycle,
+fresh text/PDF ACKs, health coverage and the qualified version are required.
+Active jobs are left alone; failed, interrupted, unknown or changed evidence
+suspends the controller with a local alert. Durable launch intent prevents blind
+retries when a launcher outcome is uncertain. There is no automatic resume or
+unknown-message override. Recipient receipt is not inferred from a server ACK.
+
+The jobs depend on this Mac/user environment and do not establish a deployed
+always-on service. Inspect a suspension before making an explicit recovery
+decision; never clear account stores or controller state merely to pass a gate.
