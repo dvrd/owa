@@ -492,7 +492,7 @@ socket_receive_inner :: proc(
 			   (slice.contains(
 						   // The server can send offline_preview before activation
 						   // finishes. Request its batch immediately, as Baileys does.
-						   []string{"message", "notification", "ib"},
+						   []string{"message", "status", "notification", "ib"},
 						   event.node.tag,
 					   )) {
 			output, e := socket_process_node(socket, event.node)

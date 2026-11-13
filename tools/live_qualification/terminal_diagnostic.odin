@@ -6,7 +6,7 @@ import "core:fmt"
 Terminal_Node :: enum {Unknown, Failure, Stream_Error}
 Terminal_Detail :: enum {
  None, Conflict, Replaced, Device_Removed, Unauthorized, Internal_Server_Error,
- Policy_Violation, Resource_Constraint, System_Shutdown, Other, Multiple,
+ Policy_Violation, Resource_Constraint, System_Shutdown, Ack, Other, Multiple,
 }
 Terminal_Diagnostic :: struct {node: Terminal_Node, detail: Terminal_Detail, unknown_children: u8}
 
@@ -21,6 +21,7 @@ terminal_detail :: proc(value: string) -> Terminal_Detail {
  case "policy-violation": return .Policy_Violation
  case "resource-constraint": return .Resource_Constraint
  case "system-shutdown": return .System_Shutdown
+ case "ack": return .Ack
  case: return .Other
  }
 }

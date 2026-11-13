@@ -34,6 +34,10 @@ socket_process_node :: proc(
 	}
 
 	switch node.tag {
+	case "status":
+		// Top-level status deliveries need their own transport ACK, including
+		// the offline batch. This does not emit a chat event or viewed receipt.
+		return {}, socket_acknowledge(socket, node)
 	case "message":
 		return socket_message_node_process(socket, node)
 	case "ack":

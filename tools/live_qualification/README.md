@@ -265,3 +265,12 @@ addresses and content are never printed. Code0 remains ambiguous and does not
 become retryable. Other errors retain their existing output and stop policy.
 The supervisor carries these typed fields into the private failure handoff.
 These categories aid diagnosis; they do not prove the cause of an earlier run.
+
+`Ack` identifies a terminal `ack` child using the fixed category only; it does
+not retain the child's class, type, IDs, or routing attributes and cannot by
+itself establish a missing status ACK. Top-level `status` deliveries now receive
+a plain transport ACK during online and provisioning/offline processing. This
+sends no viewed receipt and emits no chat event. Offline encrypted fixture tests
+cover the protocol behavior; a fresh long live soak is required to assess the
+50-minute failure. Reference behavior: [whatsmeow status handler](https://github.com/tulir/whatsmeow/commit/a238105488)
+and the [Baileys incident report](https://github.com/WhiskeySockets/Baileys/issues/2858).
