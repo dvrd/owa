@@ -1,0 +1,37 @@
+from pathlib import Path
+import json,subprocess,hashlib
+root=Path(__file__).resolve().parent
+base={'id':'synthetic-ack-id','from':'222@s.whatsapp.net'}
+cases=[]
+for label,extra in [('untyped',{}),('typed',{'type':'text'}),('empty-type',{'type':''}),('participants',{'type':'media','participant':'333:4@s.whatsapp.net','recipient':'444@s.whatsapp.net'}),('empty-optional',{'type':'','participant':'','recipient':''})]:
+ for local in ['', '111:1@s.whatsapp.net']:
+  for error in [None,0,487]: cases.append({'name':label+'-'+('local'if local else'no-local')+'-'+str(error),'node':{'tag':'message','attrs':base|extra},'local':local,'error':error})
+for label,attrs in [('missing-id',{'from':base['from']}),('empty-id',base|{'id':''}),('missing-from',{'id':base['id']}),('empty-from',base|{'from':''})]:cases.append({'name':label,'node':{'tag':'message','attrs':attrs},'local':'111:1@s.whatsapp.net','error':0})
+for kind in [None, '', 'text']:
+ for local in ['', '111:1@s.whatsapp.net']:
+  for error in [0,487]:
+   attrs=base|({}if kind is None else {'type':kind})
+   cases.append({'name':'unavailable-'+str(kind)+'-'+('local'if local else'no-local')+'-'+str(error),'node':{'tag':'message','attrs':attrs,'content':[{'tag':'unavailable','attrs':{}}]},'local':local,'error':error})
+(root/'cases.json').write_text(json.dumps(cases,indent=2)+'\n')
+(root/'baileys-oracle.mts').write_text("import {readFileSync} from 'node:fs';\nimport {buildAckStanza} from './baileys-stanza-ack.ts';\nconst rows=JSON.parse(readFileSync(new URL('./cases.json',import.meta.url),'utf8'));\nconsole.log(JSON.stringify(rows.map(row=>({name:row.name,ack:buildAckStanza(row.node,row.error===null?undefined:row.error,row.local||undefined)}))));\n")
+result=subprocess.run(['node',str(root/'baileys-oracle.mts')],capture_output=True,text=True,timeout=30);assert result.returncode==0,result.stderr;(root/'baileys-oracle.json').write_text(json.dumps(json.loads(result.stdout),indent=2)+'\n')
+godir=root/'go-oracle';godir.mkdir(exist_ok=True);(godir/'binary').mkdir(exist_ok=True);(godir/'types').mkdir(exist_ok=True)
+(godir/'go.mod').write_text('module ackcontract\n\ngo 1.27\n')
+(godir/'binary/node.go').write_text('package binary\ntype Attrs map[string]any\ntype Node struct {Tag string `json:"tag"`; Attrs Attrs `json:"attrs"`}\n')
+(godir/'types/jid.go').write_text('package types\ntype JID struct {User,Server string}\nconst BotServer="bot"\nvar BotJIDMap=map[JID]JID{}\n')
+src=(root/'whatsmeow-receipt.go').read_text();first=src.index('func (cli *Client) sendAck(');last=src.index('// MarkRead',first);method=src[first:last].rstrip();(root/'whatsmeow-method.sha256').write_text(hashlib.sha256(method.encode()).hexdigest()+'\n')
+program='''// Source method below: Tulir Asokan, MPL-2.0, pinned receipt.go.
+// Names/types/transport are bounded test doubles; sendAck body is byte unchanged.
+package main
+import ("context";"encoding/json";"os";"fmt";waBinary "ackcontract/binary";"ackcontract/types")
+type Logger struct{}
+func (Logger) Warnf(format string,args ...any){panic(fmt.Sprintf(format,args...))}
+type Client struct{Log Logger;Output waBinary.Node}
+func (cli *Client)sendNode(_ context.Context,n waBinary.Node)error{cli.Output=n;return nil}
+'''+method+'''
+func main(){var rows []struct{Name string `json:"name"`;Node waBinary.Node `json:"node"`;Error *int `json:"error"`};if err:=json.NewDecoder(os.Stdin).Decode(&rows);err!=nil{panic(err)};out:=make([]map[string]any,0,len(rows));for _,r:=range rows{cli:=Client{};code:=0;if r.Error!=nil{code=*r.Error};cli.sendAck(context.Background(),&r.Node,code);out=append(out,map[string]any{"name":r.Name,"ack":cli.Output})};if err:=json.NewEncoder(os.Stdout).Encode(out);err!=nil{panic(err)}}
+'''
+(godir/'main.go').write_text(program)
+env={'PATH':'/opt/homebrew/bin:/usr/bin:/bin','HOME':str(root/'go-home'),'GOCACHE':str(root/'go-cache'),'GOPROXY':'off','GOTOOLCHAIN':'local','CGO_ENABLED':'0'}
+result=subprocess.run(['/opt/homebrew/bin/go','run','.'],cwd=godir,env=env,input=json.dumps(cases),capture_output=True,text=True,timeout=90);assert result.returncode==0,result.stderr;(root/'whatsmeow-oracle.json').write_text(json.dumps(json.loads(result.stdout),indent=2)+'\n')
+print('Executed',len(cases),'synthetic maps through native TS builder and exact extracted Go sendAck body; no network/transport.')

@@ -1,0 +1,1746 @@
+{
+  "reference_pins": [
+    {
+      "repo": "WhiskeySockets/Baileys",
+      "commit": "81345beb67ca3fb0eb79a2c20cd4ac24da517929",
+      "path": "src/Utils/stanza-ack.ts",
+      "git_blob": "5e2e478fa6548383aef8e7516e9b0345b4f86751",
+      "sha256": "4e552af0a0552fafc7b99aa83c49f7326300f95b78de7089612b887d6aaeb5ce",
+      "url": "https://github.com/WhiskeySockets/Baileys/blob/81345beb67ca3fb0eb79a2c20cd4ac24da517929/src/Utils/stanza-ack.ts"
+    },
+    {
+      "repo": "WhiskeySockets/Baileys",
+      "commit": "81345beb67ca3fb0eb79a2c20cd4ac24da517929",
+      "path": "src/Socket/messages-recv.ts",
+      "git_blob": "02d0a584091fc89648eb5869e58b40affb7c99dd",
+      "sha256": "c7b9ee43b5c4f03e479a831fd517bb1be453f387c1bf668d81941d5b7f33944c",
+      "url": "https://github.com/WhiskeySockets/Baileys/blob/81345beb67ca3fb0eb79a2c20cd4ac24da517929/src/Socket/messages-recv.ts"
+    },
+    {
+      "repo": "tulir/whatsmeow",
+      "commit": "fcb7bdeb35921905b60984025945a571eb8f39b6",
+      "path": "receipt.go",
+      "git_blob": "5bba2fe19ef132758c46c7c723a1718e440ef81c",
+      "sha256": "33703d49a56bd1a5fad823e7defcfdd1e78027dd48669e77141859bb671d7c9a",
+      "url": "https://github.com/tulir/whatsmeow/blob/fcb7bdeb35921905b60984025945a571eb8f39b6/receipt.go"
+    }
+  ],
+  "cases": [
+    {
+      "input": {
+        "name": "untyped-no-local-None",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net"
+          }
+        },
+        "local": "",
+        "error": null
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": true,
+      "equal_after_numeric_error_scalar_normalization": true
+    },
+    {
+      "input": {
+        "name": "untyped-no-local-0",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net"
+          }
+        },
+        "local": "",
+        "error": 0
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": true,
+      "equal_after_numeric_error_scalar_normalization": true
+    },
+    {
+      "input": {
+        "name": "untyped-no-local-487",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net"
+          }
+        },
+        "local": "",
+        "error": 487
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "error": "487"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "error": 487,
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": true
+    },
+    {
+      "input": {
+        "name": "untyped-local-None",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net"
+          }
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": null
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "untyped-local-0",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net"
+          }
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": 0
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "untyped-local-487",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net"
+          }
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": 487
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "error": "487",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "error": 487,
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "typed-no-local-None",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": "text"
+          }
+        },
+        "local": "",
+        "error": null
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "type": "text"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "typed-no-local-0",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": "text"
+          }
+        },
+        "local": "",
+        "error": 0
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "type": "text"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "typed-no-local-487",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": "text"
+          }
+        },
+        "local": "",
+        "error": 487
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "error": "487",
+          "type": "text"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "error": 487,
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "typed-local-None",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": "text"
+          }
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": null
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "type": "text",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "typed-local-0",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": "text"
+          }
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": 0
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "type": "text",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "typed-local-487",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": "text"
+          }
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": 487
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "error": "487",
+          "type": "text",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "error": 487,
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "empty-type-no-local-None",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": ""
+          }
+        },
+        "local": "",
+        "error": null
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": true,
+      "equal_after_numeric_error_scalar_normalization": true
+    },
+    {
+      "input": {
+        "name": "empty-type-no-local-0",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": ""
+          }
+        },
+        "local": "",
+        "error": 0
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": true,
+      "equal_after_numeric_error_scalar_normalization": true
+    },
+    {
+      "input": {
+        "name": "empty-type-no-local-487",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": ""
+          }
+        },
+        "local": "",
+        "error": 487
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "error": "487"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "error": 487,
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": true
+    },
+    {
+      "input": {
+        "name": "empty-type-local-None",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": ""
+          }
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": null
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "empty-type-local-0",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": ""
+          }
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": 0
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "empty-type-local-487",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": ""
+          }
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": 487
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "error": "487",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "error": 487,
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "participants-no-local-None",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": "media",
+            "participant": "333:4@s.whatsapp.net",
+            "recipient": "444@s.whatsapp.net"
+          }
+        },
+        "local": "",
+        "error": null
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "participant": "333:4@s.whatsapp.net",
+          "recipient": "444@s.whatsapp.net",
+          "type": "media"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "participant": "333:4@s.whatsapp.net",
+          "recipient": "444@s.whatsapp.net",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "participants-no-local-0",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": "media",
+            "participant": "333:4@s.whatsapp.net",
+            "recipient": "444@s.whatsapp.net"
+          }
+        },
+        "local": "",
+        "error": 0
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "participant": "333:4@s.whatsapp.net",
+          "recipient": "444@s.whatsapp.net",
+          "type": "media"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "participant": "333:4@s.whatsapp.net",
+          "recipient": "444@s.whatsapp.net",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "participants-no-local-487",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": "media",
+            "participant": "333:4@s.whatsapp.net",
+            "recipient": "444@s.whatsapp.net"
+          }
+        },
+        "local": "",
+        "error": 487
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "error": "487",
+          "participant": "333:4@s.whatsapp.net",
+          "recipient": "444@s.whatsapp.net",
+          "type": "media"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "error": 487,
+          "id": "synthetic-ack-id",
+          "participant": "333:4@s.whatsapp.net",
+          "recipient": "444@s.whatsapp.net",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "participants-local-None",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": "media",
+            "participant": "333:4@s.whatsapp.net",
+            "recipient": "444@s.whatsapp.net"
+          }
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": null
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "participant": "333:4@s.whatsapp.net",
+          "recipient": "444@s.whatsapp.net",
+          "type": "media",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "participant": "333:4@s.whatsapp.net",
+          "recipient": "444@s.whatsapp.net",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "participants-local-0",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": "media",
+            "participant": "333:4@s.whatsapp.net",
+            "recipient": "444@s.whatsapp.net"
+          }
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": 0
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "participant": "333:4@s.whatsapp.net",
+          "recipient": "444@s.whatsapp.net",
+          "type": "media",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "participant": "333:4@s.whatsapp.net",
+          "recipient": "444@s.whatsapp.net",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "participants-local-487",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": "media",
+            "participant": "333:4@s.whatsapp.net",
+            "recipient": "444@s.whatsapp.net"
+          }
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": 487
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "error": "487",
+          "participant": "333:4@s.whatsapp.net",
+          "recipient": "444@s.whatsapp.net",
+          "type": "media",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "error": 487,
+          "id": "synthetic-ack-id",
+          "participant": "333:4@s.whatsapp.net",
+          "recipient": "444@s.whatsapp.net",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "empty-optional-no-local-None",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": "",
+            "participant": "",
+            "recipient": ""
+          }
+        },
+        "local": "",
+        "error": null
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "participant": "",
+          "recipient": "",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "empty-optional-no-local-0",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": "",
+            "participant": "",
+            "recipient": ""
+          }
+        },
+        "local": "",
+        "error": 0
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "participant": "",
+          "recipient": "",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "empty-optional-no-local-487",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": "",
+            "participant": "",
+            "recipient": ""
+          }
+        },
+        "local": "",
+        "error": 487
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "error": "487"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "error": 487,
+          "id": "synthetic-ack-id",
+          "participant": "",
+          "recipient": "",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "empty-optional-local-None",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": "",
+            "participant": "",
+            "recipient": ""
+          }
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": null
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "participant": "",
+          "recipient": "",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "empty-optional-local-0",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": "",
+            "participant": "",
+            "recipient": ""
+          }
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": 0
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "participant": "",
+          "recipient": "",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "empty-optional-local-487",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": "",
+            "participant": "",
+            "recipient": ""
+          }
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": 487
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "error": "487",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "error": 487,
+          "id": "synthetic-ack-id",
+          "participant": "",
+          "recipient": "",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "missing-id",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "from": "222@s.whatsapp.net"
+          }
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": 0
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": null,
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "empty-id",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "",
+            "from": "222@s.whatsapp.net"
+          }
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": 0
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "missing-from",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id"
+          }
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": 0
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "class": "message",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "to": null
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "empty-from",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": ""
+          }
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": 0
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "",
+          "class": "message",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "to": ""
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "unavailable-None-no-local-0",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net"
+          },
+          "content": [
+            {
+              "tag": "unavailable",
+              "attrs": {}
+            }
+          ]
+        },
+        "local": "",
+        "error": 0
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": true,
+      "equal_after_numeric_error_scalar_normalization": true
+    },
+    {
+      "input": {
+        "name": "unavailable-None-no-local-487",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net"
+          },
+          "content": [
+            {
+              "tag": "unavailable",
+              "attrs": {}
+            }
+          ]
+        },
+        "local": "",
+        "error": 487
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "error": "487"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "error": 487,
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": true
+    },
+    {
+      "input": {
+        "name": "unavailable-None-local-0",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net"
+          },
+          "content": [
+            {
+              "tag": "unavailable",
+              "attrs": {}
+            }
+          ]
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": 0
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "unavailable-None-local-487",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net"
+          },
+          "content": [
+            {
+              "tag": "unavailable",
+              "attrs": {}
+            }
+          ]
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": 487
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "error": "487",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "error": 487,
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "unavailable--no-local-0",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": ""
+          },
+          "content": [
+            {
+              "tag": "unavailable",
+              "attrs": {}
+            }
+          ]
+        },
+        "local": "",
+        "error": 0
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": true,
+      "equal_after_numeric_error_scalar_normalization": true
+    },
+    {
+      "input": {
+        "name": "unavailable--no-local-487",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": ""
+          },
+          "content": [
+            {
+              "tag": "unavailable",
+              "attrs": {}
+            }
+          ]
+        },
+        "local": "",
+        "error": 487
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "error": "487"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "error": 487,
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": true
+    },
+    {
+      "input": {
+        "name": "unavailable--local-0",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": ""
+          },
+          "content": [
+            {
+              "tag": "unavailable",
+              "attrs": {}
+            }
+          ]
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": 0
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "unavailable--local-487",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": ""
+          },
+          "content": [
+            {
+              "tag": "unavailable",
+              "attrs": {}
+            }
+          ]
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": 487
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "error": "487",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "error": 487,
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "unavailable-text-no-local-0",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": "text"
+          },
+          "content": [
+            {
+              "tag": "unavailable",
+              "attrs": {}
+            }
+          ]
+        },
+        "local": "",
+        "error": 0
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "type": "text"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "unavailable-text-no-local-487",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": "text"
+          },
+          "content": [
+            {
+              "tag": "unavailable",
+              "attrs": {}
+            }
+          ]
+        },
+        "local": "",
+        "error": 487
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "error": "487",
+          "type": "text"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "error": 487,
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "unavailable-text-local-0",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": "text"
+          },
+          "content": [
+            {
+              "tag": "unavailable",
+              "attrs": {}
+            }
+          ]
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": 0
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "type": "text",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    },
+    {
+      "input": {
+        "name": "unavailable-text-local-487",
+        "node": {
+          "tag": "message",
+          "attrs": {
+            "id": "synthetic-ack-id",
+            "from": "222@s.whatsapp.net",
+            "type": "text"
+          },
+          "content": [
+            {
+              "tag": "unavailable",
+              "attrs": {}
+            }
+          ]
+        },
+        "local": "111:1@s.whatsapp.net",
+        "error": 487
+      },
+      "baileys": {
+        "tag": "ack",
+        "attrs": {
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net",
+          "class": "message",
+          "error": "487",
+          "type": "text",
+          "from": "111:1@s.whatsapp.net"
+        }
+      },
+      "whatsmeow": {
+        "tag": "ack",
+        "attrs": {
+          "class": "message",
+          "error": 487,
+          "id": "synthetic-ack-id",
+          "to": "222@s.whatsapp.net"
+        }
+      },
+      "equal": false,
+      "equal_after_numeric_error_scalar_normalization": false
+    }
+  ],
+  "executed_vectors": 46,
+  "differences": 40,
+  "limits": [
+    "Baileys pure builder executed unchanged through Node25 native type stripping.",
+    "Whatsmeow sendAck body extracted byte-identically; package types/log/transport are bounded test doubles. Only ordinary string attributes are exercised, not bot-recipient remapping or full upstream clients.",
+    "Missing/empty mandatory attributes characterize builders only, not upstream parser acceptance.",
+    "Both implementations are unofficial; agreement or disagreement is not a normative server contract.",
+    "No network transport, provider, account or private session was used."
+  ],
+  "raw_json_scalar_types_are_not_a_wire_disagreement": true,
+  "normalized_differences": 36
+}
