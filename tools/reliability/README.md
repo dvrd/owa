@@ -1,5 +1,9 @@
 # Finite watch supervisor
 
+> Optional diagnostic tooling. OWA does not require or schedule a continuous
+> soak, recurring live canary, or server installation. Use the
+> [manual release checklist](RELEASE_CHECKLIST.md) for routine qualification.
+
 This supervisor runs one reviewed native `watch` child for an explicit session and
 exact group. By default it does not enable new sends. Optional canary mode delegates fixed
 synthetic text/PDF cycles and durable message IDs to the native implementation.

@@ -9,6 +9,11 @@ on:
       - '.github/workflows/protocol-review.yml'
       - 'tools/protocol_watch/**'
 
+  pull_request:
+    paths:
+      - '.github/workflows/protocol-review.yml'
+      - 'tools/protocol_watch/**'
+
 permissions:
   contents: read
 
@@ -30,12 +35,14 @@ jobs:
       - name: Offline protocol tooling tests
         run: python3 -m unittest discover -s tools/protocol_watch -p 'test_*.py' -v
       - name: Scan bounded public upstream metadata
+        if: github.event_name != 'pull_request'
         id: scan
         run: >-
           python3 tools/protocol_watch/ci.py
           --state-dir "$RUNNER_TEMP/protocol-state"
           --output-dir "$RUNNER_TEMP/protocol-report"
       - name: Track human review in Webtools
+        if: github.event_name != 'pull_request'
         env:
           LINEAR_API: ${{ secrets.LINEAR_API }}
         run: >-
@@ -44,7 +51,7 @@ jobs:
           --output "$RUNNER_TEMP/protocol-report/linear-result.json"
           --run-url "https://github.com/dvrd/owa/actions/runs/$GITHUB_RUN_ID"
       - name: Retain public evidence
-        if: always()
+        if: always() && github.event_name != 'pull_request'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: public-protocol-report

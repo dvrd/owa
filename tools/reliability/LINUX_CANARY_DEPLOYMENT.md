@@ -1,5 +1,9 @@
 # Independent Linux canary deployment plan
 
+> Optional diagnostic tooling. OWA does not require or schedule a continuous
+> soak, recurring live canary, or server installation. Use the
+> [manual release checklist](RELEASE_CHECKLIST.md) for routine qualification.
+
 This is a focused preparation plan, not an installed service or a Linux live
 qualification. No host connection, credential/session transfer, unit activation
 or additional message send is part of this preparation. The existing Mac

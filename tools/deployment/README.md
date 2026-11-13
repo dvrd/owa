@@ -1,5 +1,9 @@
 # Offline Linux canary bundle and first-install preflight
 
+> Optional diagnostic tooling. OWA does not require or schedule a continuous
+> soak, recurring live canary, or server installation. Use the
+> [manual release checklist](../reliability/RELEASE_CHECKLIST.md) for routine qualification.
+
 `bundle.py` packages reviewed public inputs and produces a **read-only dry-run
 plan**. `install.py` implements an explicitly invoked first-install account/files
 transaction and a state-preserving rollback. Its filesystem transaction is tested

@@ -1,5 +1,9 @@
 # Deterministic completion handoff
 
+> Optional diagnostic tooling. OWA does not require or schedule a continuous
+> soak, recurring live canary, or server installation. Use the
+> [manual release checklist](RELEASE_CHECKLIST.md) for routine qualification.
+
 `finish_soak.py` is a finite local controller for a launchd `StartInterval` of
 300 seconds. It does not launch agents, use models, read account files, send
 WhatsApp messages, restart work, or change deployments. Root/operator installs

@@ -68,7 +68,8 @@ or fork a live session to make an older build appear healthy.
 
 `.github/workflows/protocol-review.yml` runs on GitHub-hosted Linux at15:00 UTC
 (09:00 Mexico City), manually, and when protocol tooling changes are pushed.
-It runs the offline Python tooling tests and a bounded public scan, retaining
+Pull requests run only the offline Python tooling tests, without a scan or
+Linear credential. Scheduled/manual/push runs also perform a bounded public scan, retaining
 public evidence for30 days. No agent or OpenAI API key is used. Each runner
 starts a fresh observation; historical-reference differences remain visible.
 No account pairing, canary sending, session state or production deployment runs
@@ -95,6 +96,6 @@ local CLI login or Linear credential is written to public artifacts or logs.
 Scheduling requires the workflow on the default branch and Actions enabled.
 GitHub can delay/drop scheduled runs under load; public repositories may have
 schedules disabled after60 days of inactivity. This removes the laptop uptime
-dependency, not the need to monitor job timestamps/results. Keep the local daily
-job until the first hosted execution has been verified. The separate live soak
-and canary jobs remain local and are not transferred to hosted runners.
+dependency, not the need to monitor job timestamps/results. No local daily job or recurring live canary is required. Hosted execution has
+been verified; live checks are manual before releases or significant protocol
+changes. See [the release checklist](../reliability/RELEASE_CHECKLIST.md).

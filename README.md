@@ -82,6 +82,16 @@ The maintained loopback fixture uses synthetic public keys/transcripts and a
 test-owned TCP listener. See its README for exact coverage and exclusions.
 It never pairs an account or sends an external WhatsApp message.
 
+## Maintenance and release checks
+
+OWA uses GitHub-hosted native regression tests and daily public upstream scans.
+No always-on host, local recurring canary or Mesa infrastructure is required.
+Before releases and after significant protocol changes, follow the
+[manual live-check checklist](tools/reliability/RELEASE_CHECKLIST.md) using the
+explicitly authorized isolated `botlab` group. CI never receives account sessions.
+An uninterrupted 24-hour connection is unqualified and is not a release gate.
+The existing soak/deployment tools are optional diagnostics, not scheduled services.
+
 ## Remaining qualification
 
 Passing fixtures and loopback do not establish current service interoperability.

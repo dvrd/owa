@@ -14,6 +14,16 @@ on:
       - 'tools/deployment/**'
       - '.github/workflows/native.yml'
 
+  pull_request:
+    paths:
+      - '*.odin'
+      - 'tests/**'
+      - 'tools/live_qualification/**'
+      - 'tools/native_ci/**'
+      - 'tools/reliability/**'
+      - 'tools/deployment/**'
+      - '.github/workflows/native.yml'
+
 permissions:
   contents: read
 

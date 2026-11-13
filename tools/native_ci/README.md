@@ -107,8 +107,9 @@ SHA256/platform/size in `qualification.json`, the exact compiler/source/SDK guar
 and `readelf` loader/version requirements on Linux or `otool -L -l` on macOS.
 The evidence checksum inventory covers the artifact too. No account credentials
 enter this build. This is an executable artifact, not a paired or deployed canary;
-target OS/libc compatibility, independent pairing and its fresh24h proof remain
-separate gates. A platform header check rejects a mislabeled output.
+target OS/libc compatibility and manual live interoperability remain separate
+checks. Continuous 24-hour connectivity is unqualified, not a required release
+gate. No host or service installation is part of CI. A platform header check rejects a mislabeled output.
 
 macOS uses the existing minimal optimization mode because the extra speed build
 exceeded its fixed600s compile budget on hosted runners. The compile bound is
