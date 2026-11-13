@@ -163,6 +163,10 @@ main :: proc() {
 	assert(len(os.args) == 4)
 	command, directory, argument := os.args[1], os.args[2], os.args[3]
 	switch command {
+	case "compat-produce":
+		assert(argument == "same-format"); compat_produce(directory)
+	case "compat-verify":
+		assert(argument == "same-format"); compat_verify(directory)
 	case "stage":
 		stage_run(directory, argument)
 	case "verify":

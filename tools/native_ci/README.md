@@ -71,3 +71,16 @@ sanitizer runtime and the shared libraries required by bundled LLVM22. macOS
 uses explicit upstream LLVM22 and the bundled compiler LLVM/zstd dylibs. Every child has a
 finite timeout and16MiB log cap. No OpenAI key or Linear secret is passed to
 native test children. Failures retain a failing qualification/checksum report.
+
+Each sanitizer also runs the offline same-format cross-commit compatibility
+check. Checkout fetches history containing pinned producer
+`fa2734f60b60cc9770809bb1be873cea60fe3c12`. The copied fixture has no `.git`;
+the gate passes `--repository` pointing to the original read-only checkout,
+`--current-revision` containing its exact captured commit SHA, and the already
+verified local SDK objects directory. The child performs no downloads or account
+calls. Normal producer/consumer exits and byte-identical old state/prekey files
+are required. `compatibility-*.json` receipts bind both runtime owners and are
+included with existing source-bound evidence. Manual invocation keeps its explicit
+`1d5160f384d3055eef314557c31c912bea5ce557` consumer default; CI supplies its own
+exact checkout commit. This adds same-format compatibility, not schema migration
+or full-stack upgrade certification.

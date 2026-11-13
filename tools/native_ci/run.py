@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import platform
 import re
+import secrets
 import shutil
 import signal
 import subprocess
@@ -19,6 +20,7 @@ import assets
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 MAX_LOG = 16 << 20
+COMPAT_PRIOR = "fa2734f60b60cc9770809bb1be873cea60fe3c12"
 
 
 class GateError(Exception): pass
@@ -148,6 +150,26 @@ def linker_runtime(platform_key, evidence, env, rows):
     return metadata
 
 
+def compatibility_argv(copied, repository, revision, downloads, clang, sanitizer, report_path):
+    if not re.fullmatch(r'[0-9a-f]{40}', revision): raise GateError('EXACT_COMPATIBILITY_REVISION_REQUIRED')
+    # The child exclusively creates this unpredictable direct /tmp path. It must
+    # not be inside the guarded SDK, checkout or evidence trees.
+    work = Path('/tmp')/('owa-format-compat-'+sanitizer+'-'+secrets.token_hex(12))
+    return [sys.executable, copied/'tests/encrypted_recovery/compatibility.py',
+            '--repository', repository, '--current-revision', revision,
+            '--assets-dir', downloads, '--clang', clang, '--sanitize', sanitizer,
+            '--work', work, '--report', report_path]
+
+
+def compatibility_result(path, revision):
+    result = json.loads(path.read_bytes())
+    if result.get('passed') is not True or result.get('current_commit') != revision or \
+            result.get('prior_commit') != COMPAT_PRIOR:
+        raise GateError('COMPATIBILITY_IDENTITY_OR_RESULT_MISMATCH')
+    return {'passed': True, 'prior_commit': result['prior_commit'],
+            'current_commit': revision, 'report_sha256': assets.digest(path)}
+
+
 def run(args, report):
     pin = json.loads((HERE/'pin.json').read_bytes())
     if pin.get('schema') != 1 or pin.get('repository') != assets.REPOSITORY:
@@ -212,6 +234,12 @@ def run(args, report):
                     '--shared-root', shared, '--sanitize', sanitizer, '--report', report_path]
                 if name == 'recovery_campaign': argv += ['--scorecard', args.evidence/('chaos-'+sanitizer+'.tsv')]
                 execute(argv, name+'-'+sanitizer, args.evidence, env, rows, 900)
+            compatibility_report = args.evidence/('compatibility-'+sanitizer+'.json')
+            argv = compatibility_argv(copied, REPO, report['checkout_commit'], downloads,
+                report['linker_runtime']['driver']['path'], sanitizer, compatibility_report)
+            execute(argv, 'compatibility-'+sanitizer, args.evidence, env, rows, 900)
+            report.setdefault('compatibility', {})[sanitizer] = compatibility_result(
+                compatibility_report, report['checkout_commit'])
             consumer = args.evidence/('consumer-'+sanitizer)
             execute([compiler, 'build', HERE/'consumer', *flags, *mode, '-out:'+str(consumer)],
                     'consumer-build-'+sanitizer, args.evidence, env, rows)

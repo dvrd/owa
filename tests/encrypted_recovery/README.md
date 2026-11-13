@@ -106,3 +106,45 @@ concurrent writers, an upgrade/migration or all multi-file crash transitions.
 They add evidence to the earlier standalone snapshots rather than substituting a
 processed-ID marker for a server ACK. The wider OKAMI-414 acceptance criteria
 still require separate upgrade and any explicitly requested ENOSPC qualification.
+
+## Same-format cross-commit compatibility (offline)
+
+`compatibility.py` prepares two isolated runtime owners from exact local Git
+commits: the earlier published OWA
+`fa2734f60b60cc9770809bb1be873cea60fe3c12` and the explicit committed consumer
+`1d5160f384d3055eef314557c31c912bea5ce557`. Uncommitted runtime changes are excluded. Each exported public
+root runtime source is checked against its Git blob identity and SHA256. The
+identical current synthetic fixture is overlaid onto both owners. Both binaries
+use the same hashlocked released compiler/Core and five sibling dependency bundle;
+`--assets-dir` is mandatory and no download occurs.
+
+The earlier runtime generates real Signal sessions and pending ciphertext plus
+StateStore and prekey files, then exits normally. Two fresh current-runtime
+processes load those prior-produced files, verify stable intent IDs, exact
+StateStore and session re-encoding, registration/counter metadata, consumed-key
+absence and prekey-file/snapshot consistency, and authenticate/decrypt the pending
+ciphertext in memory. Original state/prekey file bytes must remain identical.
+This path calls no Socket, HTTP or external network API and injects no failures.
+
+```sh
+python3 whatsapp/tests/encrypted_recovery/compatibility.py \
+  --assets-dir /tmp/owa-native-sdk-20261112-413 \
+  --clang /opt/homebrew/opt/llvm@22/bin/clang \
+  --current-revision 1d5160f384d3055eef314557c31c912bea5ce557 \
+  --sanitize address --work /tmp/owa-format-compat-address \
+  --report /tmp/owa-format-compat-address.json
+# Repeat with --sanitize thread and new work/report paths.
+```
+
+Work directories must be new direct children of `/tmp` with the shown prefix;
+they retain exported public sources and binaries for review. Generated synthetic
+state is disposable and removed after verification. Evidence records exact owner
+commits, Git blobs, source/binary/compiler hashes, normal exits and guards.
+This is **same-format cross-commit compatibility**, not historical schema migration,
+a full application/Socket upgrade, a compiler upgrade or a crash-recovery claim.
+
+When executing from an exported owner with no `.git`, pass `--repository` pointing
+to the original local Git repository. It is read-only and must contain both exact
+commits with the pinned producer as an ancestor. Moving refs and a different
+repository lacking that history are refused. Native CI passes the captured actual
+checkout SHA explicitly; the manual consumer default above remains unchanged.

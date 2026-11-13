@@ -194,4 +194,22 @@ class Tests(unittest.TestCase):
         self.assertEqual(before, tracked.read_bytes() if tracked.exists() else None)
 
 
+    def test_compatibility_ref_must_be_exact_and_result_must_match_checkout(self):
+        gate = self.gate()
+        with self.assertRaisesRegex(gate.GateError, 'EXACT_COMPATIBILITY_REVISION_REQUIRED'):
+            gate.compatibility_argv(Path('/copied'), Path('/repository'), 'HEAD',
+                                    Path('/objects'), '/clang', 'address', Path('/report'))
+        revision = '1'*40
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/'report.json'
+            for result in ({'passed': True, 'prior_commit': gate.COMPAT_PRIOR, 'current_commit': '2'*40},
+                           {'passed': True, 'prior_commit': '3'*40, 'current_commit': revision},
+                           {'passed': False, 'prior_commit': gate.COMPAT_PRIOR, 'current_commit': revision}):
+                path.write_text(json.dumps(result))
+                with self.assertRaisesRegex(gate.GateError, 'COMPATIBILITY_IDENTITY_OR_RESULT_MISMATCH'):
+                    gate.compatibility_result(path, revision)
+            path.write_text(json.dumps({'passed': True, 'prior_commit': gate.COMPAT_PRIOR,
+                                        'current_commit': revision}))
+            self.assertTrue(gate.compatibility_result(path, revision)['passed'])
+
 if __name__ == '__main__': unittest.main()
