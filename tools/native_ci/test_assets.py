@@ -12,6 +12,29 @@ import assets
 
 
 class Tests(unittest.TestCase):
+    def test_live_artifact_identity_checks_actual_platform_and_executable(self):
+        gate = self.gate()
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = Path(temporary)/'live'
+            elf = bytearray(32); elf[:6] = b'\x7fELF\x02\x01'; elf[18:20] = b'\x3e\x00'
+            binary.write_bytes(elf); binary.chmod(0o700)
+            self.assertEqual(gate.live_binary_identity(binary, 'linux-amd64')['sha256'],
+                             assets.digest(binary))
+            with self.assertRaisesRegex(gate.GateError, 'ARCHITECTURE_MISMATCH'):
+                gate.live_binary_identity(binary, 'macos-arm64')
+            mac = bytearray(32); mac[:4] = b'\xcf\xfa\xed\xfe'
+            mac[4:8] = (0x0100000c).to_bytes(4, 'little')
+            mac[12:16] = (2).to_bytes(4, 'little')
+            binary.write_bytes(mac)
+            self.assertEqual(gate.live_binary_identity(binary, 'macos-arm64')['platform'],
+                             'macos-arm64')
+            binary.chmod(0o600)
+            with self.assertRaisesRegex(gate.GateError, 'NOT_EXECUTABLE'):
+                gate.live_binary_identity(binary, 'macos-arm64')
+            link = Path(temporary)/'link'; link.symlink_to(binary)
+            with self.assertRaisesRegex(gate.GateError, 'NOT_EXECUTABLE'):
+                gate.live_binary_identity(link, 'macos-arm64')
+
     def gate(self):
         spec = importlib.util.spec_from_file_location('native_gate', Path(__file__).with_name('run.py'))
         gate = importlib.util.module_from_spec(spec); spec.loader.exec_module(gate)

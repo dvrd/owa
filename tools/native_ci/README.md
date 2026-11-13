@@ -95,3 +95,16 @@ handoffs, two ACKs and complete socket/process retirement. Callback-only or
 missing/forged peer summaries cannot satisfy this gate. This remains synthetic
 prepared metadata/pre-established Noise, not external server delivery or login;
 see `tests/encrypted_recovery/README.md` for the exact scope and retained defaults.
+
+## Native live-tool artifact
+
+After both requested sanitizer modes pass, the gate also builds the actual
+`tools/live_qualification` entry point with explicit `-o:speed`, strict vet and
+no sanitizer. It runs only `--help` and `preview`, which open no session or
+network connection. The uploaded evidence includes `owa-live-<platform>`, its
+SHA256/platform/size in `qualification.json`, the exact compiler/source/SDK guards,
+and `readelf` loader/version requirements on Linux or `otool -L` on macOS.
+The evidence checksum inventory covers the artifact too. No account credentials
+enter this build. This is an executable artifact, not a paired or deployed canary;
+target OS/libc compatibility, independent pairing and its fresh24h proof remain
+separate gates. A platform header check rejects a mislabeled output.

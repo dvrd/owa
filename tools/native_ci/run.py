@@ -193,6 +193,43 @@ def coupled_recovery_result(path, copied):
     return {'passed': True, 'report_sha256': assets.digest(path), **summary}
 
 
+def live_binary_identity(path, platform):
+    if path.is_symlink() or not path.is_file() or not os.access(path, os.X_OK):
+        raise GateError('LIVE_BINARY_NOT_EXECUTABLE')
+    if not 0 < path.stat().st_size <= 128 << 20:
+        raise GateError('LIVE_BINARY_SIZE_INVALID')
+    with path.open('rb') as stream: header = stream.read(32)
+    linux = (header[:6] == b'\x7fELF\x02\x01' and len(header) >= 20 and
+             header[18:20] == b'\x3e\x00')
+    mac = (header[:4] == b'\xcf\xfa\xed\xfe' and len(header) >= 16 and
+           int.from_bytes(header[4:8], 'little') == 0x0100000c and
+           int.from_bytes(header[12:16], 'little') == 2)
+    if not ((platform == 'linux-amd64' and linux) or (platform == 'macos-arm64' and mac)):
+        raise GateError('LIVE_BINARY_ARCHITECTURE_MISMATCH')
+    return {'file': path.name, 'platform': platform, 'bytes': path.stat().st_size,
+            'sha256': assets.digest(path), 'optimization': 'speed', 'sanitizer': 'none'}
+
+
+def build_live_binary(compiler, copied, flags, platform, evidence, env, rows):
+    binary = evidence/('owa-live-'+platform)
+    execute([compiler, 'build', copied/'tools/live_qualification', *flags,
+             '-o:speed', '-out:'+str(binary)], 'live-binary-build', evidence, env, rows, 600)
+    identity = live_binary_identity(binary, platform)
+    execute([binary, '--help'], 'live-binary-help', evidence, env, rows)
+    execute([binary, 'preview'], 'live-binary-preview', evidence, env, rows)
+    if (evidence/'live-binary-preview.log').read_text().strip() != 'PHASE PREVIEW_READY':
+        raise GateError('LIVE_BINARY_PREVIEW_FAILED')
+    tool, arguments = ('readelf', ['-h', '-l', '-d', '--version-info']) if platform == 'linux-amd64' \
+        else ('otool', ['-L'])
+    executable = shutil.which(tool, path=env['PATH'])
+    if executable is None: raise GateError('LIVE_BINARY_INSPECTION_TOOL_REQUIRED')
+    execute([executable, *arguments, binary], 'live-binary-loader', evidence, env, rows)
+    if live_binary_identity(binary, platform) != identity:
+        raise GateError('LIVE_BINARY_CHANGED_DURING_INSPECTION')
+    return {**identity, 'account_opened': False, 'provider_calls': False,
+            'inspection_log': 'live-binary-loader.log', 'offline_preview_passed': True}
+
+
 def run(args, report):
     pin = json.loads((HERE/'pin.json').read_bytes())
     if pin.get('schema') != 1 or pin.get('repository') != assets.REPOSITORY:
@@ -271,6 +308,8 @@ def run(args, report):
             execute([compiler, 'build', HERE/'consumer', *flags, *mode, '-out:'+str(consumer)],
                     'consumer-build-'+sanitizer, args.evidence, env, rows)
             execute([consumer], 'consumer-run-'+sanitizer, args.evidence, env, rows)
+        report['live_binary'] = build_live_binary(
+            compiler, copied, flags, key, args.evidence, env, rows)
         report['passed'] = True
     finally:
         report['input_after'] = snapshot(sdk)
