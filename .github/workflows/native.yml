@@ -34,7 +34,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Verify native bootstrap controls
-        run: python3 -m unittest discover -s tools/native_ci -p 'test_*.py' -v
+        run: |
+          python3 -m unittest discover -s tools/native_ci -p 'test_*.py' -v
+          python3 -m unittest discover -s tests/encrypted_recovery -p 'test_*.py' -v
       - name: Install explicit Linux linker and sanitizer runtime
         if: runner.os == 'Linux'
         run: |

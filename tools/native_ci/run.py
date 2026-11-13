@@ -206,7 +206,7 @@ def run(args, report):
                     '-define:ODIN_TEST_THREADS=1', '-define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true',
                     '-out:'+str(args.evidence/(name+'-'+sanitizer))],
                     name+'-'+sanitizer, args.evidence, env, rows, 600)
-            for name in ('loopback_noise', 'recovery_campaign'):
+            for name in ('loopback_noise', 'recovery_campaign', 'encrypted_recovery'):
                 report_path = args.evidence/(name+'-'+sanitizer+'.json')
                 argv = [sys.executable, copied/'tests'/name/'run.py', '--odin', compiler,
                     '--shared-root', shared, '--sanitize', sanitizer, '--report', report_path]
