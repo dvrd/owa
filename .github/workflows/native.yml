@@ -10,6 +10,7 @@ on:
       - 'tests/**'
       - 'tools/live_qualification/**'
       - 'tools/native_ci/**'
+      - 'tools/reliability/**'
       - '.github/workflows/native.yml'
 
 permissions:
@@ -38,6 +39,7 @@ jobs:
         run: |
           python3 -m unittest discover -s tools/native_ci -p 'test_*.py' -v
           python3 -m unittest discover -s tests/encrypted_recovery -p 'test_*.py' -v
+          python3 -m unittest discover -s tools/reliability -p 'test_*.py' -v
       - name: Install explicit Linux linker and sanitizer runtime
         if: runner.os == 'Linux'
         run: |
