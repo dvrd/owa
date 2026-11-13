@@ -177,7 +177,7 @@ def accept_completed(args,state,status,receipt,now):
     state.update(cadence_ack_unix=ack,cadence_durable_cycles=latest,
                  accepted_periodic_run_id=run_id,accepted_progress_sha256=digest)
 
-def launch(config,args):
+def launch_options(config,args):
     # Prepare opens only directory metadata; the reviewed native child alone opens stores.
     options=types.SimpleNamespace(state_dir=args.state_dir,auth_dir=Path(config['auth_dir']),
         binary=Path(config['binary']),group_subject=config['group_subject'],duration_seconds=DURATION,
@@ -186,7 +186,14 @@ def launch(config,args):
     prepared=periodic_config(args)
     if prepared['binary_sha256']!=config['binary_sha256']:
         raise ControllerError('BINARY_CHANGED')
-    return S.start(types.SimpleNamespace(state_dir=args.state_dir,live=True,resume=False))
+    return types.SimpleNamespace(state_dir=args.state_dir,live=True,resume=False)
+
+def launch(config,args):
+    return S.start(launch_options(config,args))
+
+def launch_owned(config,args,environment):
+    options=launch_options(config,args)
+    return S.start_owned(options,environment,expected_config=periodic_config(args))
 
 def inspect_periodic(args):
     if optional(args.state_dir,'status.json') is None: return None
@@ -258,18 +265,38 @@ def avoid_account_directory(args):
     if not isinstance(auth,str) or not Path(auth).is_absolute():
         raise ControllerError('PRIMARY_CONFIG_INVALID')
     paths=(args.primary_state_dir,args.primary_finish_dir,args.state_dir,args.controller_dir)
-    if Path(auth).resolve() in {path.resolve() for path in paths}:
+    account=Path(auth).resolve()
+    if any(account.is_relative_to(path.resolve()) or path.resolve().is_relative_to(account)
+           for path in paths):
         raise ControllerError('ACCOUNT_DIRECTORY_COLLISION')
     return True
 
-def poll(args,launcher=launch,inspector=inspect_periodic,now=None):
+MONITOR_GUARD='monitor-latch.json'
+
+def monitor_access(args,token=None):
+    # An armed guard is durable before spawn. All ordinary polls fail closed;
+    # only the same foreground invocation may finish its one owned job.
+    try: guard=optional(args.controller_dir,MONITOR_GUARD)
+    except (OSError,ValueError,TypeError,F.GateError,S.Failure): return False
+    if guard is None: return token is None
+    if token is None or not isinstance(guard,dict): return False
+    if guard.get('phase')!='ARMED' or guard.get('mode')!='periodic': return False
+    if guard.get('monitor_token')!=token: return False
+    return all(guard.get(key)==value for key,value in binding(args).items())
+
+def poll(args,launcher=launch,inspector=inspect_periodic,now=None,monitor_token=None):
     validate_args(args)
-    if not avoid_account_directory(args): return {'phase':'WAITING','reason':'PRIMARY_NOT_READY'}
+    ready=avoid_account_directory(args)
+    if not monitor_access(args,monitor_token):
+        return {'phase':'SUSPENDED','reason':'MONITOR_REVIEW_REQUIRED'}
+    if not ready: return {'phase':'WAITING','reason':'PRIMARY_NOT_READY'}
     directory=F.private_directory(args.controller_dir,create=True); owner=None
     state={**binding(args),'phase':'WAITING'}
     try:
         owner=os.open('periodic.lock',os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600,dir_fd=directory)
         F.checked_file(owner); fcntl.flock(owner,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        if not monitor_access(args,monitor_token):
+            return {'phase':'SUSPENDED','reason':'MONITOR_REVIEW_REQUIRED'}
         try: previous=F.read_json(directory,'controller.json')[0]
         except FileNotFoundError: previous=None
         if previous is not None:

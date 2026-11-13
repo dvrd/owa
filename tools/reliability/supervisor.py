@@ -113,10 +113,11 @@ def event(directory, events, value):
     events.append({'time_unix':int(time.time()), **value}); del events[:-128]
     write_json(directory, 'events.json', events)
 
-def stop_child(child):
+def stop_child(child, grace_seconds=5):
+    if not 0<grace_seconds<=15: raise Failure('CHILD_GRACE_INVALID')
     if child.poll() is None:
         child.terminate()
-        try: child.wait(timeout=5)
+        try: child.wait(timeout=grace_seconds)
         except subprocess.TimeoutExpired:
             child.kill(); child.wait(timeout=5)
 
@@ -250,15 +251,18 @@ def native_command(config):
                         str(config['canary_interval_seconds'])])
     return command
 
-def start(args):
+def start_owned(args, environment=None, expected_config=None, require_fresh=False):
+    """Return the real child handle; caller must retain and reap it."""
     if not args.live: raise Failure('LIVE_OPT_IN_REQUIRED')
     directory = private_dir(args.state_dir); owner = None
     try:
         owner = lock(directory,'owner.lock')
-        validate_config(read_json(directory,'config.json'))
+        config=validate_config(read_json(directory,'config.json'))
+        if expected_config is not None and config!=expected_config: raise Failure('CONFIG_CHANGED')
         previous = None
         try: previous = read_json(directory,'status.json')
         except FileNotFoundError: pass
+        if require_fresh and previous is not None: raise Failure('STATE_ALREADY_USED')
         if previous and previous['phase'] not in ('COMPLETE','STOPPED') and not args.resume:
             raise Failure('RESUME_REQUIRED')
         if args.resume and not previous: raise Failure('NO_RUN_TO_RESUME')
@@ -266,20 +270,23 @@ def start(args):
         run_id = previous['run_id'] if args.resume else secrets.token_hex(16)
         remove(directory,'stop.json'); remove(directory,'alert.json')
         write_json(directory,'status.json',{'phase':'STARTING','run_id':run_id,'pid':None})
-        env = dict(os.environ, WHATSAPP_SUPERVISOR_LOCK=str(owner))
+        env = dict(os.environ if environment is None else environment,
+                   WHATSAPP_SUPERVISOR_LOCK=str(owner))
         child = subprocess.Popen([sys.executable,str(Path(__file__).resolve()),'_run',
             '--state-dir',str(args.state_dir)],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,pass_fds=(owner,),start_new_session=True,env=env)
-        pid = child.pid
-        # This short-lived launcher deliberately transfers process ownership.
-        # The detached worker owns child cleanup, state and its finite deadline.
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore',ResourceWarning)
-            del child
-        return {'phase':'STARTED','run_id':run_id,'pid':pid}
+        return {'phase':'STARTED','run_id':run_id,'pid':child.pid},child
     finally:
         if owner is not None: os.close(owner)
         os.close(directory)
+
+def start(args):
+    # Preserve the detached launcher API; the worker still owns native cleanup.
+    result,child=start_owned(args)
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore',ResourceWarning)
+        del child
+    return result
 
 def worker(args):
     directory = private_dir(args.state_dir); owner = None; auth = None; session = None
