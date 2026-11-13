@@ -270,6 +270,24 @@ class Tests(unittest.TestCase):
             self.assertIn('synthetic', scorecard.read_text())
         self.assertEqual(before, tracked.read_bytes() if tracked.exists() else None)
 
+    def test_recovery_timeout_retains_failed_command_without_retry(self):
+        path = Path(__file__).resolve().parents[2]/'tests/recovery_campaign/run.py'
+        spec = importlib.util.spec_from_file_location('timed_recovery_fixture', path)
+        recovery = importlib.util.module_from_spec(spec); spec.loader.exec_module(recovery)
+        records = []
+        error = recovery.subprocess.TimeoutExpired(['synthetic-child'], 120,
+                                                   output=b'partial', stderr=b'diagnostic')
+        with mock.patch.object(recovery.subprocess, 'run', side_effect=error) as run:
+            with self.assertRaises(recovery.subprocess.TimeoutExpired):
+                recovery.execute(['synthetic-child'], records)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_args.kwargs['timeout'], 120)
+        self.assertEqual(records[0]['stdout'], 'partial')
+        self.assertEqual(records[0]['stderr'], 'diagnostic')
+        self.assertTrue(records[0]['timed_out'])
+        self.assertEqual(records[0]['timeout_seconds'], 120)
+        self.assertIsNone(records[0]['returncode'])
+
 
     def test_compatibility_ref_must_be_exact_and_result_must_match_checkout(self):
         gate = self.gate()

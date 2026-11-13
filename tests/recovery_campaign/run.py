@@ -24,6 +24,7 @@ STAGES = {
 }
 FOCUSED = ['send_id_test.odin', 'negative_ack_test.odin', 'media_retry_test.odin',
            'media_deadline_test.odin', 'certificate_policy_test.odin']
+COMPILE_TIMEOUT = 300
 
 
 def digest(path):
@@ -45,9 +46,18 @@ def snapshot(shared):
 
 def execute(command, receipt, timeout=120):
     start = time.monotonic()
-    result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        def text(value):
+            return value.decode(errors='replace') if isinstance(value, bytes) else value or ''
+        receipt.append(dict(command=command, returncode=None, stdout=text(error.stdout),
+                            stderr=text(error.stderr), timeout_seconds=timeout, timed_out=True,
+                            elapsed_seconds=time.monotonic()-start))
+        raise
     row = dict(command=command, returncode=result.returncode, stdout=result.stdout,
-               stderr=result.stderr, elapsed_seconds=time.monotonic()-start)
+               stderr=result.stderr, timeout_seconds=timeout,
+               elapsed_seconds=time.monotonic()-start)
     receipt.append(row)
     assert result.returncode == 0, row
     return row
@@ -134,7 +144,8 @@ def main():
             parser.error('--scorecard must be an absolute path outside the source checkout')
     assert os.name == 'posix' and args.odin.is_file()
     report = dict(passed=False, candidate_release_gate=False, sanitizer=args.sanitize,
-                  commands=[], experiments=[], scope='synthetic offline process + owned loopback')
+                  commands=[], experiments=[], compile_timeout_seconds=COMPILE_TIMEOUT,
+                  scope='synthetic offline process + owned loopback')
     before = snapshot(args.shared_root)
     report['source_before'] = before
     report['compiler'] = dict(path=str(args.odin), sha256=digest(args.odin),
@@ -154,7 +165,7 @@ def main():
             compile_command = [str(args.odin), 'build', str(HERE), '-thread-count:1',
                                '-warnings-as-errors', '-vet', '-out:'+str(binary)]
             if args.sanitize != 'none': compile_command.append('-sanitize:'+args.sanitize)
-            execute(compile_command, report['commands'])
+            execute(compile_command, report['commands'], COMPILE_TIMEOUT)
             report['binary_sha256'] = digest(binary)
             control(binary, report['commands'])
             report['steady_state_and_rollback_verified'] = True
@@ -173,11 +184,16 @@ def main():
                 finally:
                     row['duration_seconds'] = time.monotonic()-start
             names = focused_names(args.shared_root)
-            command = [str(args.odin), 'test', str(args.shared_root/'whatsapp'), '-thread-count:1',
+            focused = Path(tmp)/'focused'
+            command = [str(args.odin), 'build', str(args.shared_root/'whatsapp'),
+                       '-build-mode:test', '-thread-count:1',
                        '-define:ODIN_TEST_THREADS=1', '-define:ODIN_TEST_NAMES='+','.join(names),
-                       '-warnings-as-errors', '-vet', '-out:'+str(Path(tmp)/'focused')]
+                       '-warnings-as-errors', '-vet', '-out:'+str(focused)]
             if args.sanitize != 'none': command.append('-sanitize:'+args.sanitize)
-            execute(command, report['commands'])
+            execute(command, report['commands'], COMPILE_TIMEOUT)
+            focused_result = execute([str(focused)], report['commands'])
+            assert re.search(r'Finished\s+' + str(len(names)) + r'\s+tests\b',
+                             focused_result['stdout'] + focused_result['stderr'])
             report['focused_test_names'] = names
             wire_report = Path(tmp)/'noise.json'
             execute(['python3', str(args.shared_root/'whatsapp/tests/loopback_noise/run.py'),

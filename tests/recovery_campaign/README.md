@@ -50,6 +50,12 @@ receipts, elapsed times, results, gaps, and `candidate_release_gate`. Source or
 compiler changes make that gate false. The repository TSV logs each experiment;
 detailed artifacts and executables stay under `/tmp`.
 
+Compiler invocations have a separate 300-second bound. Focused tests are built
+with `-build-mode:test`, then executed with the existing 120-second runtime bound;
+the campaign's shorter child and wire deadlines are unchanged. Timed-out commands
+remain in the receipt and are never retried automatically. Use `--scorecard` with
+an absolute path outside the checkout to retain the TSV without changing it.
+
 See [experiment definitions](../../docs/chaos/recovery-experiments.md) and
 [resilience scope](../../docs/chaos/recovery-resilience-report.md). Linux, real
 power loss, disk-full/corruption, network partition/DNS failure, live Signal
