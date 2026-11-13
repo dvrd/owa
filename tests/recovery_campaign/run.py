@@ -107,9 +107,9 @@ def focused_names(shared):
     return names
 
 
-def tsv_log(rows):
-    path = HERE.parents[1]/'.cruft/chaos-results.tsv'
-    path.parent.mkdir(exist_ok=True)
+def tsv_log(rows, path=None):
+    path = path or HERE.parents[1]/'.cruft/chaos-results.tsv'
+    path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
         path.write_text('timestamp\texperiment_name\thypothesis\tblast_radius\tduration\tresult\tsurprises\n')
     with path.open('a') as output:
@@ -125,8 +125,13 @@ def main():
     parser.add_argument('--shared-root', type=Path, default=SHARED)
     parser.add_argument('--report', required=True, type=Path)
     parser.add_argument('--sanitize', choices=['none', 'address', 'thread'], default='address')
+    parser.add_argument('--scorecard', type=Path, help='Optional external TSV evidence path')
     args = parser.parse_args()
     args.odin = args.odin.resolve(); args.shared_root = args.shared_root.resolve()
+    if args.scorecard:
+        if not args.scorecard.is_absolute() or any(args.scorecard.resolve().is_relative_to(root)
+                for root in (HERE.parents[1].resolve(), args.shared_root/'whatsapp')):
+            parser.error('--scorecard must be an absolute path outside the source checkout')
     assert os.name == 'posix' and args.odin.is_file()
     report = dict(passed=False, candidate_release_gate=False, sanitizer=args.sanitize,
                   commands=[], experiments=[], scope='synthetic offline process + owned loopback')
@@ -192,7 +197,7 @@ def main():
             'overall': 'RESILIENT_WITHIN_EXECUTED_SYNTHETIC_SCOPE' if report['passed'] else 'UNQUALIFIED'}
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(json.dumps(report, indent=2)+'\n')
-        tsv_log(report['experiments'])
+        tsv_log(report['experiments'], args.scorecard)
     assert report['passed'], 'candidate gate failed; inspect report'
     print('WHATSAPP_RECOVERY_CAMPAIGN_PASS '+args.sanitize)
 

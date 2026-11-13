@@ -1,0 +1,57 @@
+name: Native OWA qualification
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 15 * * *'
+  push:
+    paths:
+      - '*.odin'
+      - 'tests/**'
+      - 'tools/live_qualification/**'
+      - 'tools/native_ci/**'
+      - '.github/workflows/native.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-owa-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Verify native bootstrap controls
+        run: python3 -m unittest discover -s tools/native_ci -p 'test_*.py' -v
+      - name: Install explicit Linux linker and sanitizer runtime
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang-18 libclang-rt-18-dev libedit2 libxml2 libz3-4
+          echo /usr/bin >> "$GITHUB_PATH"
+      - name: Execute immutable native ASan and TSan gates
+        run: >-
+          python3 tools/native_ci/run.py
+          --work "$RUNNER_TEMP/owa-native-work"
+          --evidence "$RUNNER_TEMP/owa-native-evidence"
+      - name: Retain source-bound native evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-owa-${{ matrix.os }}
+          path: ${{ runner.temp }}/owa-native-evidence/
+          retention-days: 30
+          if-no-files-found: error

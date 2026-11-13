@@ -1,0 +1,62 @@
+{
+  "compiler_source_revision": "c826157de61987cbe706b1203e35d138e61429f9",
+  "compiler_version": "dev-2026-11:c826157de",
+  "core_source_revision": "2e8d3048cace57fc58d28e02ade252059727f6bd",
+  "dependencies": {
+    "archive": {
+      "bytes": 519832,
+      "name": "dependencies-222b68ac349a547c.tar.gz",
+      "sha256": "222b68ac349a547cbfc19b6a303e5628de7a46070f11d78d55b32e6e34fcd57f"
+    },
+    "manifest": {
+      "bytes": 38790,
+      "name": "dependencies-9c767516d56ddc84.manifest.json",
+      "sha256": "9c767516d56ddc8479be4daca30c0cc3ab79525e7577b5bdfd76990efb475777"
+    },
+    "top": "dependencies"
+  },
+  "platforms": {
+    "linux-amd64": {
+      "archive": {
+        "bytes": 49857714,
+        "name": "sdk-linux-amd64-d82edb581480e32c.tar.gz",
+        "sha256": "d82edb581480e32c571b8ce9da29ee8f58ec2ff283069fb744e4574e2241991a"
+      },
+      "manifest": {
+        "bytes": 171328,
+        "name": "sdk-linux-amd64-b7b9bddae73aed54.manifest.json",
+        "sha256": "b7b9bddae73aed549c04669e868541f56537cb21fe4b79f6d730bb7391a34f40"
+      },
+      "top": "odin-linux-amd64"
+    },
+    "macos-arm64": {
+      "archive": {
+        "bytes": 40899113,
+        "name": "sdk-macos-arm64-f2196394cf05b979.tar.gz",
+        "sha256": "f2196394cf05b9795c17a143717437141e704bcce1e9a131c9212f913548b8a4"
+      },
+      "manifest": {
+        "bytes": 171613,
+        "name": "sdk-macos-arm64-bab055285cb7147a.manifest.json",
+        "sha256": "bab055285cb7147ab0e56e7066454f730c44ae4681166b7adddc76596c385945"
+      },
+      "top": "odin-macos-arm64"
+    }
+  },
+  "release_tag": "native-sdk-2e8d3048-v1",
+  "repository": "dvrd/owa",
+  "schema": 1,
+  "source": {
+    "archive": {
+      "bytes": 88138869,
+      "name": "source-a5a1a3f741c8ba07.tar.gz",
+      "sha256": "a5a1a3f741c8ba070ef597ce93d19fe55f967efbdca6527dbef45c743acc70bd"
+    },
+    "manifest": {
+      "bytes": 621969,
+      "name": "source-1135654641891b36.manifest.json",
+      "sha256": "1135654641891b364eac810367e076f2bbe267a4871277a73e8cda676f1b4954"
+    },
+    "top": "odin-source"
+  }
+}
