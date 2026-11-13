@@ -21,7 +21,10 @@ Tool_Error_Kind :: enum {
  None, Usage, Storage, Trust, Connect, Timeout, Protocol, QR, IO, Allocation,
  Target_Not_Found, Target_Ambiguous, Scope, Send, Journal, Unexpected_Pairing, Canary_Unknown,
 }
-Tool_Error :: struct {kind: Tool_Error_Kind, storage: Storage_Error, socket: wa.Socket_Error}
+Tool_Error :: struct {
+ kind: Tool_Error_Kind, storage: Storage_Error, socket: wa.Socket_Error,
+ server_node: Terminal_Node, server_detail: Terminal_Detail, server_unknown_children: u8,
+}
 Phase :: enum {
  STORAGE_READY, VERSION_DISCOVERY, VERSION_DISCOVERED, VERSION_PINNED,
  CONNECTED_HOLD, CONNECTING, PAIRED, RECONNECTING, ONLINE, TARGET_READY, TEXT_QUEUED,
@@ -41,6 +44,7 @@ Runner :: struct {
  canary_completed: int,
  canary_due_tick: time.Tick,
  canary_due_set: bool,
+ terminal: Terminal_Diagnostic,
 }
 
 phase_print :: proc(value: Phase) {fmt.printf("PHASE %v\n", value); os.flush(os.stdout)}
@@ -153,7 +157,8 @@ runner_prepare :: proc(runner: ^Runner) -> Tool_Error {
  runner.config = {tls = {root_cas = runner.roots.roots[:runner.roots.count]},
   payload = wa.default_payload_config(), query_timeout = 10 * time.Second,
   auth_path = runner.storage.auth_path, prekey_path = runner.storage.prekey_path,
-  state_path = runner.storage.state_path}
+  state_path = runner.storage.state_path,
+  observe_node = terminal_observe, observer_data = runner}
  phase_print(.VERSION_DISCOVERY)
  version := wa.web_version_discover({tls = runner.config.tls,
   timeout = 5 * time.Second, max_redirects = 2})
@@ -184,11 +189,11 @@ run_command :: proc(options: Options) -> Tool_Error {
  runner.deadline = time.tick_add(time.tick_now(), budget)
  defer runner_close(runner)
  if error := runner_prepare(runner); error.kind != .None {return error}
- if options.command == .Watch {return runner_watch(runner)}
- if error := runner_online(runner); error.kind != .None {return error}
- if error := runner_hold(runner); error.kind != .None {return error}
+ if options.command == .Watch {return terminal_failure(runner, runner_watch(runner))}
+ if error := runner_online(runner); error.kind != .None {return terminal_failure(runner, error)}
+ if error := runner_hold(runner); error.kind != .None {return terminal_failure(runner, error)}
  if options.command != .Pair {
-  if error := runner_actions(runner); error.kind != .None {return error}
+  if error := runner_actions(runner); error.kind != .None {return terminal_failure(runner, error)}
  }
  phase_print(.COMPLETE)
  return {}
@@ -209,10 +214,8 @@ main :: proc() {
  if options.command == .Preview || options.preview {phase_print(.PREVIEW_READY); return}
  failure := run_command(options)
  if failure.kind != .None {
-  fmt.eprintf("ERROR %v STORAGE %v SOCKET %v CERTIFICATE %v SESSION %v CODE %d\n",
-   failure.kind, failure.storage, failure.socket.kind,
-   failure.socket.session.client.certificate, failure.socket.session.kind,
-   failure.socket.session.server_code)
+  buffer: [1024]u8
+  fmt.eprintf("%s", terminal_failure_format(buffer[:], failure))
   os.exit(1)
  }
 }

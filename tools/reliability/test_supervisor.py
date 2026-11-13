@@ -99,6 +99,22 @@ class Tests(unittest.TestCase):
                 self.assertNotIn('private-token',repr(result))
             finally: os.close(d)
 
+    def test_monitor_retains_only_allowlisted_terminal_node_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chmod(tmp,0o700); d=S.private_dir(tmp)
+            try:
+                child=self.fake_child(b'PHASE ONLINE\n',
+                    b'private-token\nERROR Protocol STORAGE None SOCKET Session_Failed '
+                    b'CERTIFICATE None SESSION Server_Failure CODE 0 NODE Stream_Error '
+                    b'DETAIL Conflict UNKNOWN_CHILDREN 1\n',1)
+                result=S.monitor(child,d,60)
+                self.assertEqual(result['phase'],'FAILED')
+                self.assertEqual(result['server_node'],'Stream_Error')
+                self.assertEqual(result['server_detail'],'Conflict')
+                self.assertEqual(result['server_unknown_children'],1)
+                self.assertNotIn('private-token',repr(result))
+            finally: os.close(d)
+
     def test_watchdog_and_stop_do_not_retry_child(self):
         with tempfile.TemporaryDirectory() as tmp:
             os.chmod(tmp,0o700); d=S.private_dir(tmp)

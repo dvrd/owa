@@ -36,7 +36,10 @@ class DisplayError(Exception):
 ERROR_LINE = re.compile(rb"ERROR ([A-Za-z_][A-Za-z_0-9]{0,63}) STORAGE "
     rb"([A-Za-z_][A-Za-z_0-9]{0,63}) SOCKET ([A-Za-z_][A-Za-z_0-9]{0,63}) "
     rb"CERTIFICATE ([A-Za-z_][A-Za-z_0-9]{0,63})"
-    rb"(?: SESSION ([A-Za-z_][A-Za-z_0-9]{0,63}) CODE ([0-9]{1,5}))?\n")
+    rb"(?: SESSION ([A-Za-z_][A-Za-z_0-9]{0,63}) CODE ([0-9]{1,5})"
+    rb"(?: NODE (Unknown|Failure|Stream_Error) DETAIL "
+    rb"(None|Conflict|Replaced|Device_Removed|Unauthorized|Internal_Server_Error|Policy_Violation|Resource_Constraint|System_Shutdown|Other|Multiple)"
+    rb" UNKNOWN_CHILDREN ([0-9]{1,2}))?)?\n")
 
 
 def native_error(line):
@@ -51,6 +54,12 @@ def native_error(line):
         if code > 65535:
             return None
         details.update(session=fields[4].decode("ascii"), server_code=code)
+    if fields[6] is not None:
+        unknown = int(fields[8])
+        if unknown > 32 or details.get('session') != 'Server_Failure':
+            return None
+        details.update(server_node=fields[6].decode('ascii'),
+                       server_detail=fields[7].decode('ascii'), server_unknown_children=unknown)
     return details
 
 

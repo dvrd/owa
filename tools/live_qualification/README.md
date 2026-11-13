@@ -255,3 +255,13 @@ the supervisor must persist these independently of its bounded event ring.
 and backoff, not connection availability. During a run, a monotonic deadline also
 protects the interval from forward wall-clock jumps; at most 48 cycles complete
 per run. On restart, persisted due time permits one due cycle, without catch-up.
+
+## Terminal session diagnostics
+
+Server failures retain fixed node/detail categories and an unknown-child count
+through the existing protocol observer before the SDK frees its document. Only
+allowlisted enums and a count capped at32 are emitted; raw attributes, child tags,
+addresses and content are never printed. Code0 remains ambiguous and does not
+become retryable. Other errors retain their existing output and stop policy.
+The supervisor carries these typed fields into the private failure handoff.
+These categories aid diagnosis; they do not prove the cause of an earlier run.

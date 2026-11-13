@@ -7,6 +7,25 @@ SPEC = importlib.util.spec_from_file_location(
 QR = importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(QR)
 
 class QRTests(unittest.TestCase):
+    def test_terminal_node_context_survives_typed_error_without_raw_strings(self):
+        line = (b'ERROR Protocol STORAGE None SOCKET Session_Failed CERTIFICATE None '
+                b'SESSION Server_Failure CODE 0 NODE Stream_Error DETAIL Conflict UNKNOWN_CHILDREN 1\n')
+        value = QR.native_error(line)
+        self.assertIsNotNone(value)
+        self.assertEqual(value['server_node'], 'Stream_Error')
+        self.assertEqual(value['server_detail'], 'Conflict')
+        self.assertEqual(value['server_unknown_children'], 1)
+
+    def test_terminal_diagnostics_reject_unknown_values_or_unbounded_counts(self):
+        prefix = (b'ERROR Protocol STORAGE None SOCKET Session_Failed CERTIFICATE None '
+                  b'SESSION Server_Failure CODE 0 ')
+        for tail in (b'NODE private_secret DETAIL Conflict UNKNOWN_CHILDREN 0',
+                     b'NODE Failure DETAIL private_secret UNKNOWN_CHILDREN 0',
+                     b'NODE Stream_Error DETAIL Conflict UNKNOWN_CHILDREN 33',
+                     b'NODE Stream_Error DETAIL Conflict UNKNOWN_CHILDREN -1',
+                     b'NODE Stream_Error DETAIL Conflict UNKNOWN_CHILDREN 0 private_secret'):
+            self.assertIsNone(QR.native_error(prefix+tail+b'\n'))
+
     def matrix(self, size=21):
         return {'size': size, 'modules': [i % 3 == 0 for i in range(size * size)]}
 
