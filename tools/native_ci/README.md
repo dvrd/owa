@@ -54,12 +54,20 @@ Work/evidence directories must be fresh, external and separate. CI requires a
 clean committed checkout and the matching real host. For explicit local candidate
 validation add `--allow-local --allow-dirty --assets-dir "$NEW_ASSET_DIRECTORY"`;
 the report records that scope/dirty status and still rejects changing source.
+Set `OWA_NATIVE_CLANG` to the explicit upstream Clang executable (LLVM22 on
+macOS, Ubuntu Clang18 on Linux). The gate controls the effective `clang` PATH,
+records ambient/selected versions and byte identities, hashes both sanitizer
+runtimes and checks they stay unchanged. macOS additionally verifies the LLVM
+ASan ABI symbol and actual loaded ASan/TSan dylib paths during empty execution.
+Apple Clang's vendor ASan ABI is incompatible with this LLVM22 compiler's
+`__asan_version_mismatch_check_v8`; implicit CLT selection is refused.
+
 Local execution is not a hosted CI pass. `--sanitizers address` can select one
 debugging leg; the maintained workflow always requires both.
 
 Public runner labels are pinned by OS rather than `latest`; actual architecture
 and Ubuntu release are checked at runtime. Linux installs the explicit Clang18
 sanitizer runtime and the shared libraries required by bundled LLVM22. macOS
-uses its command-line tools and the bundled LLVM/zstd dylibs. Every child has a
+uses explicit upstream LLVM22 and the bundled compiler LLVM/zstd dylibs. Every child has a
 finite timeout and16MiB log cap. No OpenAI key or Linear secret is passed to
 native test children. Failures retain a failing qualification/checksum report.

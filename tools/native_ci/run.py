@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import signal
 import subprocess
@@ -64,6 +65,7 @@ def terminate(child):
 
 def execute(argv, label, evidence, env, rows, timeout=240):
     log = evidence/(label+'.log'); exceeded = threading.Event()
+    print(json.dumps({'phase': 'COMMAND_STARTED', 'name': label}), flush=True)
     child = subprocess.Popen(list(map(str, argv)), stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
     def drain():
@@ -90,6 +92,8 @@ def execute(argv, label, evidence, env, rows, timeout=240):
            'elapsed_seconds': time.monotonic()-started, 'failure': failure,
            'log': log.name, 'log_sha256': assets.digest(log)}
     rows.append(row)
+    print(json.dumps({'phase': 'COMMAND_FINISHED', 'name': label,
+                      'exit_code': child.returncode, 'failure': failure}), flush=True)
     if failure or exceeded.is_set() or child.returncode: raise GateError('COMMAND_FAILED: '+label)
 
 
@@ -98,6 +102,50 @@ def environment(sdk):
     value.update(ODIN_ROOT=str(sdk), PYTHONDONTWRITEBYTECODE='1', AWS_EC2_METADATA_DISABLED='true')
     if platform.system() == 'Darwin': value['DYLD_LIBRARY_PATH'] = str(sdk/'lib')
     return value
+
+
+def file_identity(path):
+    path = path.resolve(strict=True)
+    if not path.is_file(): raise GateError('TOOLCHAIN_FILE_REQUIRED')
+    return {'path': str(path), 'bytes': path.stat().st_size, 'sha256': assets.digest(path)}
+
+
+def linker_runtime(platform_key, evidence, env, rows):
+    selected = os.environ.get('OWA_NATIVE_CLANG', '')
+    if not selected or not Path(selected).is_absolute(): raise GateError('EXPLICIT_CLANG_REQUIRED')
+    driver = Path(selected).resolve(strict=True)
+    if not os.access(driver, os.X_OK): raise GateError('CLANG_EXECUTABLE_REQUIRED')
+    ambient = shutil.which('clang', path=env.get('PATH'))
+    metadata = {'driver': file_identity(driver), 'ambient_driver': None, 'sanitizer_runtimes': {}}
+    if ambient:
+        metadata['ambient_driver'] = file_identity(Path(ambient))
+        execute([ambient, '--version'], 'ambient-clang-version', evidence, env, rows)
+        metadata['ambient_version'] = (evidence/'ambient-clang-version.log').read_text().strip()
+    env['PATH'] = str(driver.parent)+os.pathsep+env.get('PATH', '')
+    effective = shutil.which('clang', path=env['PATH'])
+    if effective is None or Path(effective).resolve() != driver:
+        raise GateError('CLANG_PATH_SELECTION_MISMATCH')
+    execute([driver, '--version'], 'selected-clang-version', evidence, env, rows)
+    version = (evidence/'selected-clang-version.log').read_text().strip()
+    metadata['version'] = version
+    match = re.search(r'\bclang version ([0-9]+)\.', version)
+    expected = 22 if platform_key == 'macos-arm64' else 18
+    if match is None or int(match[1]) != expected: raise GateError('CLANG_MAJOR_MISMATCH')
+    execute([driver, '-print-resource-dir'], 'selected-clang-resource', evidence, env, rows)
+    resource = Path((evidence/'selected-clang-resource.log').read_text().strip())
+    if not resource.is_absolute() or not resource.is_dir(): raise GateError('CLANG_RESOURCE_INVALID')
+    metadata['resource_directory'] = str(resource.resolve())
+    for sanitizer in ('address', 'thread'):
+        short = 'asan' if sanitizer == 'address' else 'tsan'
+        relative = ('lib/darwin/libclang_rt.'+short+'_osx_dynamic.dylib'
+                    if platform_key == 'macos-arm64' else 'lib/linux/libclang_rt.'+short+'-x86_64.a')
+        metadata['sanitizer_runtimes'][sanitizer] = file_identity(resource/relative)
+    if platform_key == 'macos-arm64':
+        execute(['/usr/bin/nm', '-gU', metadata['sanitizer_runtimes']['address']['path']],
+                'asan-runtime-abi', evidence, env, rows)
+        if '___asan_version_mismatch_check_v8' not in (evidence/'asan-runtime-abi.log').read_text():
+            raise GateError('ASAN_RUNTIME_ABI_MISMATCH')
+    return metadata
 
 
 def run(args, report):
@@ -133,7 +181,11 @@ def run(args, report):
                      for path in HERE.rglob('*') if path.is_file() and '__pycache__' not in path.parts}
     report['runner_source_before'] = source_before
     try:
+        report['linker_runtime'] = linker_runtime(key, args.evidence, env, rows)
         execute([compiler, 'version'], 'compiler-version', args.evidence, env, rows)
+        report['compiler_version'] = (args.evidence/'compiler-version.log').read_text().strip()
+        if pin['compiler_version'] not in report['compiler_version']:
+            raise GateError('COMPILER_VERSION_MISMATCH')
         flags = ['-collection:shared='+str(shared), '-vet', '-warnings-as-errors', '-thread-count:1']
         probe = args.evidence/'empty'; probe.mkdir()
         (probe/'main.odin').write_text('package main\nimport "core:fmt"\nmain :: proc(){fmt.println("NATIVE_SANITIZER_EXECUTED")}\n')
@@ -142,7 +194,13 @@ def run(args, report):
             binary = args.evidence/('empty-'+sanitizer)
             execute([compiler, 'build', probe, *flags, *mode, '-out:'+str(binary)],
                     'empty-build-'+sanitizer, args.evidence, env, rows)
-            execute([binary], 'empty-run-'+sanitizer, args.evidence, env, rows)
+            probe_env = dict(env)
+            if key == 'macos-arm64': probe_env['DYLD_PRINT_LIBRARIES'] = '1'
+            execute([binary], 'empty-run-'+sanitizer, args.evidence, probe_env, rows)
+            if key == 'macos-arm64':
+                runtime = report['linker_runtime']['sanitizer_runtimes'][sanitizer]['path']
+                if runtime not in (args.evidence/('empty-run-'+sanitizer+'.log')).read_text():
+                    raise GateError('LOADED_SANITIZER_RUNTIME_MISMATCH')
             for name, package in [('unit', copied), ('qualification-tools', copied/'tools/live_qualification')]:
                 execute([compiler, 'test', package, *flags, *mode,
                     '-define:ODIN_TEST_THREADS=1', '-define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true',
@@ -167,8 +225,12 @@ def run(args, report):
         report['runner_source_after'] = {str(path.relative_to(HERE)): assets.digest(path)
             for path in HERE.rglob('*') if path.is_file() and '__pycache__' not in path.parts}
         report['runner_unchanged'] = source_before == report['runner_source_after']
+        identities = report.get('linker_runtime', {})
+        selected = [identities['driver']] if identities.get('driver') else []
+        selected += list(identities.get('sanitizer_runtimes', {}).values())
+        report['linker_runtime_unchanged'] = all(file_identity(Path(item['path'])) == item for item in selected)
         report['passed'] = report['passed'] and report['source_unchanged'] and \
-            report['checkout_unchanged'] and report['runner_unchanged']
+            report['checkout_unchanged'] and report['runner_unchanged'] and report['linker_runtime_unchanged']
         assets.verify_tree(sdk, expected_sdk, extra_root='shared')
         assets.verify_tree(shared, expected_dependencies, extra_root='whatsapp')
     if not report['passed']: raise GateError('INPUTS_CHANGED')

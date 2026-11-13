@@ -142,6 +142,44 @@ class Tests(unittest.TestCase):
             result = json.loads((root/'evidence/qualification.json').read_text())
             self.assertFalse(result['passed'])
 
+    def test_linker_selection_is_explicit(self):
+        gate = self.gate()
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(gate.os.environ, {}, clear=True):
+            with self.assertRaisesRegex(gate.GateError, 'EXPLICIT_CLANG_REQUIRED'):
+                gate.linker_runtime('linux-amd64', Path(tmp), {}, [])
+
+    def fake_clang(self, root, version):
+        directory = root/'tools'; directory.mkdir()
+        resource = root/'resource'; (resource/'lib/linux').mkdir(parents=True)
+        for name in ('asan', 'tsan'):
+            (resource/'lib/linux'/('libclang_rt.'+name+'-x86_64.a')).write_bytes(b'synthetic-runtime')
+        driver = directory/'clang'
+        driver.write_text('#!'+sys.executable+'\nimport sys\n'
+            'print('+repr('clang version '+version)+' if "--version" in sys.argv else '+repr(str(resource))+')\n')
+        driver.chmod(0o700)
+        return driver
+
+    def test_selected_linker_controls_path_and_records_runtime_bytes(self):
+        gate = self.gate()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); driver = self.fake_clang(root, '18.1.8')
+            env = {'PATH': str(driver.parent)}
+            with mock.patch.dict(gate.os.environ, {'OWA_NATIVE_CLANG': str(driver)}):
+                value = gate.linker_runtime('linux-amd64', root, env, [])
+            self.assertEqual(value['driver']['path'], str(driver.resolve()))
+            self.assertTrue(env['PATH'].startswith(str(driver.resolve().parent)))
+            for runtime in value['sanitizer_runtimes'].values():
+                self.assertEqual(runtime['sha256'], assets.digest(Path(runtime['path'])))
+
+    def test_incompatible_clang_major_fails_before_probe_or_native_tests(self):
+        gate = self.gate()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); driver = self.fake_clang(root, '21.0.0'); rows = []
+            with mock.patch.dict(gate.os.environ, {'OWA_NATIVE_CLANG': str(driver)}):
+                with self.assertRaisesRegex(gate.GateError, 'CLANG_MAJOR_MISMATCH'):
+                    gate.linker_runtime('macos-arm64', root, {'PATH': str(driver.parent)}, rows)
+            self.assertEqual([row['name'] for row in rows], ['ambient-clang-version', 'selected-clang-version'])
+
     def test_external_recovery_scorecard_preserves_checkout(self):
         path = Path(__file__).resolve().parents[2]/'tests/recovery_campaign/run.py'
         spec = importlib.util.spec_from_file_location('recovery_fixture', path)

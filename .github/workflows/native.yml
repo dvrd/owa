@@ -42,6 +42,15 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             clang-18 libclang-rt-18-dev libedit2 libxml2 libz3-4
           echo /usr/bin >> "$GITHUB_PATH"
+          echo OWA_NATIVE_CLANG=/usr/bin/clang-18 >> "$GITHUB_ENV"
+      - name: Select upstream LLVM22 sanitizer runtime on macOS
+        if: runner.os == 'macOS'
+        run: |
+          command -v clang
+          clang --version
+          clang -print-resource-dir
+          brew install llvm@22
+          echo "OWA_NATIVE_CLANG=$(brew --prefix llvm@22)/bin/clang" >> "$GITHUB_ENV"
       - name: Execute immutable native ASan and TSan gates
         run: >-
           python3 tools/native_ci/run.py
