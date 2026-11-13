@@ -2,6 +2,7 @@
 """Run account-free OWA native gates with immutable SDK/dependency provenance."""
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -170,6 +171,28 @@ def compatibility_result(path, revision):
             'current_commit': revision, 'report_sha256': assets.digest(path)}
 
 
+def coupled_recovery_result(path, copied):
+    result = json.loads(path.read_bytes())
+    socket = result.get('socket_recovery', {})
+    if result.get('passed') is not True or result.get('source_unchanged') is not True or \
+            result.get('compiler_unchanged') is not True or socket.get('transport') != 'native-tcp' or \
+            socket.get('coupled_native_tcp_verified') is not True:
+        raise GateError('COUPLED_NATIVE_TCP_RECOVERY_REQUIRED')
+    # Reuse the exact producer validator from the guarded physical source copy.
+    source = copied/'tests/encrypted_recovery/native_tcp.py'
+    spec = importlib.util.spec_from_file_location('coupled_recovery_validator', source)
+    validator = importlib.util.module_from_spec(spec); spec.loader.exec_module(validator)
+    stages = ('socket-before-send', 'socket-after-commit-before-write',
+              'socket-after-wire-before-return', 'socket-after-send-before-ack',
+              'socket-after-positive-ack', 'socket-after-ack-journal')
+    try: summary = validator.validate_peers(result.get('native_tcp_peers', []), stages)
+    except (validator.TCPError, KeyError, TypeError, ValueError) as error:
+        raise GateError('COUPLED_NATIVE_TCP_PEERS_INVALID') from error
+    if socket.get('native_tcp_summary') != summary:
+        raise GateError('COUPLED_NATIVE_TCP_SUMMARY_MISMATCH')
+    return {'passed': True, 'report_sha256': assets.digest(path), **summary}
+
+
 def run(args, report):
     pin = json.loads((HERE/'pin.json').read_bytes())
     if pin.get('schema') != 1 or pin.get('repository') != assets.REPOSITORY:
@@ -233,7 +256,11 @@ def run(args, report):
                 argv = [sys.executable, copied/'tests'/name/'run.py', '--odin', compiler,
                     '--shared-root', shared, '--sanitize', sanitizer, '--report', report_path]
                 if name == 'recovery_campaign': argv += ['--scorecard', args.evidence/('chaos-'+sanitizer+'.tsv')]
+                if name == 'encrypted_recovery': argv += ['--socket-transport', 'native-tcp']
                 execute(argv, name+'-'+sanitizer, args.evidence, env, rows, 900)
+                if name == 'encrypted_recovery':
+                    report.setdefault('coupled_native_tcp_recovery', {})[sanitizer] = \
+                        coupled_recovery_result(report_path, copied)
             compatibility_report = args.evidence/('compatibility-'+sanitizer+'.json')
             argv = compatibility_argv(copied, REPO, report['checkout_commit'], downloads,
                 report['linker_runtime']['driver']['path'], sanitizer, compatibility_report)

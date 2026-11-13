@@ -51,8 +51,8 @@ The evidence report records each command, binary/compiler hashes, compiler root,
 clang identity, source hashes before/after, crash receipts and exact failure
 classification. Source guards include the fixture, its runtime sibling libraries
 and the compiler's actual Core/base/zlib source closure. Output and execution
-budgets fail closed. The runner receives no account/provider configuration and
-makes no provider or network calls.
+budgets fail closed. The runner receives no account/provider configuration and makes no provider or
+external network calls. The optional native mode uses only owned127.0.0.1 TCP.
 
 ## Evidence limits
 
@@ -148,3 +148,51 @@ to the original local Git repository. It is read-only and must contain both exac
 commits with the pinned producer as an ancestor. Moving refs and a different
 repository lacking that history are refused. Native CI passes the captured actual
 checkout SHA explicitly; the manual consumer default above remains unchanged.
+
+
+## Coupled native TCP Socket recovery
+
+Select `--socket-transport native-tcp` to run the same six prepared Socket crash
+boundaries and fresh verifier processes through real Core TCP sockets. The
+native CI gate selects this mode explicitly under both sanitizers; memory mode
+remains the manual default and its existing fixtures are preserved.
+
+```sh
+PATH=/opt/homebrew/opt/llvm@22/bin:$PATH \
+  python3 whatsapp/tests/encrypted_recovery/run.py --odin ../odin \
+  --sanitize address --socket-transport native-tcp \
+  --report /tmp/owa-encrypted-native-tcp-address.json
+# Repeat with --sanitize thread and a distinct report.
+```
+
+A separate owned native peer binds127.0.0.1 on an ephemeral port and accepts one
+connection. The prepared Socket writes its actual masked WebSocket/Noise frame
+through Surf's native Core TCP stream. Only the independent receiver writes the
+handoff files, after reading the complete kernel-delivered frame and verifying
+its real pairwise Signal distribution and signed group payload. Witness fsync
+precedes the peer's handoff marker and positive ACK. The parent waits for actual
+peer handoff evidence before killing the sender at the callback-return boundary.
+
+For ACK stages, only that native peer builds and writes the encrypted positive
+ACK over TCP; the sender consumes it through public `socket_read`. Pending replay
+uses a fresh native peer/process and checks the exact persisted inner ciphertext,
+ratchet/key/content/membership/prekey hashes and unchanged store files. ACK without
+a caller journal remains unknown and produces no automatic resend.
+
+Every campaign observes twelve accepted native connections: six crash children
+and six verifier children. Seven frames are authenticated (four initial sends,
+three pending replays), and two peer ACKs are sent/processed. Empty connections
+prove that before-send and acknowledged-unknown verifier cases send nothing.
+Listener lifetime ends immediately after accept; connection I/O has an absolute
+ten-second budget. Readiness/handoff output, packet size and parent deadlines are
+bounded. Every native peer reports its explicit socket close, exits normally and
+is reaped, with exact child/group cleanup on failures. Negative controls reject
+premature ACK claims, bad/blocked peers, missing or duplicated stages, false
+handoff/authentication metadata and incomplete cleanup.
+
+This is coupled native-loopback recovery of the prepared Socket subset, not a
+standalone TCP smoke relabelled as recovery. Both roles use the same SDK with
+synthetic metadata and pre-established WebSocket/Noise transport keys; no full
+HTTP upgrade, Noise login, external server ACK, recipient delivery, independent
+Signal interoperability, ENOSPC or power-loss qualification is claimed. Local
+Darwin execution and future hosted execution must retain their separate receipts.

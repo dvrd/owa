@@ -84,3 +84,14 @@ included with existing source-bound evidence. Manual invocation keeps its explic
 `1d5160f384d3055eef314557c31c912bea5ce557` consumer default; CI supplies its own
 exact checkout commit. This adds same-format compatibility, not schema migration
 or full-stack upgrade certification.
+
+
+The encrypted-recovery command explicitly selects `--socket-transport native-tcp`
+under both sanitizers. Its six prepared-Socket crash stages and fresh verifier
+processes use independent owned native127.0.0.1 peers, actual authenticated
+handoffs and peer-originated encrypted ACKs. The gate reuses the guarded fixture's
+peer validator and requires twelve exact stage/role connections, seven real
+handoffs, two ACKs and complete socket/process retirement. Callback-only or
+missing/forged peer summaries cannot satisfy this gate. This remains synthetic
+prepared metadata/pre-established Noise, not external server delivery or login;
+see `tests/encrypted_recovery/README.md` for the exact scope and retained defaults.

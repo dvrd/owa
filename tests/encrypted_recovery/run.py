@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Owned offline Signal/persistence campaign; no account, provider or network input."""
+"""Owned Signal/persistence campaign; optional native loopback, no external accounts/providers."""
 import argparse
 import hashlib
 import json
@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import native_tcp
 
 HERE = Path(__file__).resolve().parent
 SHARED = HERE.parents[2]
@@ -78,8 +79,8 @@ def scope(directory):
     (directory/'owner').write_bytes(OWNER); (directory/'owner').chmod(0o600)
 
 
-def crash(binary, directory, stage, env, records):
-    child = subprocess.Popen([str(binary), 'stage', str(directory), stage], env=env,
+def crash(binary, directory, stage, env, records, extra=(), handoff=None):
+    child = subprocess.Popen([str(binary), 'stage', str(directory), stage, *map(str, extra)], env=env,
                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     deadline = time.monotonic()+15; ready = bytearray()
     try:
@@ -93,6 +94,7 @@ def crash(binary, directory, stage, env, records):
                 ready.extend(block)
         if ready != ('ENCRYPTED_BOUNDARY_READY '+stage+'\n').encode() or child.poll() is not None:
             raise CampaignError('BOUNDARY_MISMATCH')
+        if handoff is not None: handoff()
         # Only the actual unreaped child object is killed; no PID discovery.
         child.kill(); stdout, stderr = child.communicate(timeout=5)
         if child.returncode != -signal.SIGKILL or stdout or stderr:
@@ -104,20 +106,33 @@ def crash(binary, directory, stage, env, records):
         child.communicate(timeout=5)
 
 
-def campaign(binary, env, report):
+def campaign(binary, env, report, socket_transport="memory"):
+    report["native_tcp_peers"] = []
     for stage in STAGES:
         with tempfile.TemporaryDirectory(prefix='wa-encrypted-', dir='/tmp') as temporary:
             directory = Path(temporary); scope(directory)
-            crash(binary, directory, stage, env, report['crashes'])
+            if socket_transport == 'native-tcp' and stage.startswith('socket-'):
+                with native_tcp.Peer(binary, directory, stage, False, env) as peer:
+                    crash(binary, directory, stage, env, report['crashes'],
+                          ('--tcp-port', peer.port), peer.before_kill)
+                    report['native_tcp_peers'].append(peer.finish())
+            else:
+                crash(binary, directory, stage, env, report['crashes'])
             before = digest(directory/'state.bin')
             prekey_before = digest(directory/'prekeys.bin') if (directory/'prekeys.bin').exists() else None
-            result = execute([binary, 'verify', directory, stage], env, report['commands'], 20)
+            if socket_transport == 'native-tcp' and stage.startswith('socket-'):
+                with native_tcp.Peer(binary, directory, stage, True, env) as peer:
+                    result = execute([binary, 'verify', directory, stage, '--tcp-port', peer.port],
+                                     env, report['commands'], 20)
+                    report['native_tcp_peers'].append(peer.finish())
+            else:
+                result = execute([binary, 'verify', directory, stage], env, report['commands'], 20)
             marker = 'ENCRYPTED_SOCKET_REOPEN_PASS' if stage.startswith('socket-') else 'ENCRYPTED_REOPEN_PASS'
             if marker not in result['stdout'] or digest(directory/'state.bin') != before:
                 raise CampaignError('REOPEN_DURABILITY_FAILED')
             if prekey_before is not None and digest(directory/'prekeys.bin') != prekey_before:
                 raise CampaignError('SOCKET_PREKEY_FILE_CHANGED')
-    report['socket_recovery'] = {'owned_crash_boundaries': 6,
+    report['socket_recovery'] = {'owned_crash_boundaries': 6, 'transport': socket_transport,
         'production_prepared_send_and_encrypted_ack': True,
         'exact_handoff_hashes_match_ratchet_key_membership_content_prekey': True,
         'real_pairwise_distribution_and_group_payload_decrypted': True,
@@ -125,9 +140,13 @@ def campaign(binary, env, report):
         'ack_without_application_journal_remains_unknown_without_resend': True,
         'prekey_file_and_consumed_marker_remain_consistent': True,
         'synthetic_metadata_and_transport_peer': True, 'recipient_delivery': False}
+    if socket_transport == 'native-tcp':
+        report['socket_recovery']['native_tcp_summary'] = native_tcp.validate_peers(
+            report['native_tcp_peers'], STAGES)
+        report['socket_recovery']['coupled_native_tcp_verified'] = True
     with tempfile.TemporaryDirectory(prefix='wa-encrypted-', dir='/tmp') as temporary:
         directory = Path(temporary); scope(directory)
-        execute([binary, 'prepare', directory, 'control'], env, report['commands'], 20)
+        execute([binary, 'prepare' , directory, 'control'], env, report['commands'], 20)
         before = digest(directory/'state.bin'); parent_limit = resource.getrlimit(resource.RLIMIT_FSIZE)
         result = execute([binary, 'limited-write', directory, 'file-limit'], env, report['commands'], 20, True)
         if 'errno=EFBIG' not in result['stdout'] or digest(directory/'state.bin') != before or \
@@ -162,6 +181,7 @@ def main():
     parser.add_argument('--shared-root', type=Path, default=SHARED)
     parser.add_argument('--sanitize', choices=('address', 'thread'), required=True)
     parser.add_argument('--report', type=Path, required=True)
+    parser.add_argument('--socket-transport', choices=('memory', 'native-tcp'), default='memory')
     args = parser.parse_args()
     env = {key: os.environ[key] for key in ('PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL',
             'DYLD_LIBRARY_PATH', 'LD_LIBRARY_PATH') if key in os.environ}
@@ -185,9 +205,9 @@ def main():
                      '-define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true', '-out:'+str(unit)], env, report['commands'])
             execute([args.odin, 'build', HERE, *flags, '-out:'+str(binary)], env, report['commands'])
             report['binary_sha256'] = digest(binary)
-            campaign(binary, env, report)
+            campaign(binary, env, report, args.socket_transport)
         report['passed'] = True
-    except (CampaignError, OSError, ValueError, subprocess.SubprocessError) as error:
+    except (CampaignError, native_tcp.TCPError, OSError, ValueError, subprocess.SubprocessError) as error:
         report['failure'] = type(error).__name__+': '+str(error)[:300]
     finally:
         report['source_after'] = source_snapshot(args.shared_root, compiler_root)

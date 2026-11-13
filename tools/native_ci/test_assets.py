@@ -17,6 +17,30 @@ class Tests(unittest.TestCase):
         gate = importlib.util.module_from_spec(spec); spec.loader.exec_module(gate)
         return gate
 
+    def test_coupled_recovery_gate_rejects_memory_missing_peer_and_false_source_guards(self):
+        gate = self.gate()
+        owner = Path(__file__).resolve().parents[2]
+        spec = importlib.util.spec_from_file_location('tcp_controls',
+            owner/'tests/encrypted_recovery/test_native_tcp.py')
+        fixture_path = str(owner/'tests/encrypted_recovery')
+        sys.path.insert(0, fixture_path)
+        try:
+            module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+            peers = module.NativeTCPControls().matrix()
+            summary = module.native_tcp.validate_peers(peers, module.run.STAGES)
+            initial = {'passed': True, 'source_unchanged': True, 'compiler_unchanged': True,
+                'native_tcp_peers': peers, 'socket_recovery': {'transport': 'native-tcp',
+                'coupled_native_tcp_verified': True, 'native_tcp_summary': summary}}
+            with tempfile.TemporaryDirectory() as temporary:
+                path = Path(temporary)/'report.json'; path.write_text(json.dumps(initial))
+                self.assertTrue(gate.coupled_recovery_result(path, owner)['passed'])
+                for update in ({'source_unchanged': False}, {'compiler_unchanged': False},
+                               {'native_tcp_peers': peers[:-1]},
+                               {'socket_recovery': {'transport': 'memory'}}):
+                    path.write_text(json.dumps({**initial, **update}))
+                    with self.assertRaises(gate.GateError): gate.coupled_recovery_result(path, owner)
+        finally: sys.path.remove(fixture_path)
+
     def archive(self, directory, members):
         path = directory/'archive.tar.gz'
         with tarfile.open(path, 'w:gz') as stream:

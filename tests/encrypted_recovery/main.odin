@@ -5,6 +5,7 @@ import "core:bytes"
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import "core:strconv"
 import "core:time"
 
 
@@ -160,9 +161,17 @@ corrupt_load :: proc(directory, kind: string) {
 }
 
 main :: proc() {
-	assert(len(os.args) == 4)
+	assert(len(os.args) == 4 || len(os.args) == 6)
+	if len(os.args) == 6 {
+		assert(os.args[4] == "--tcp-port")
+		port, valid := strconv.parse_int(os.args[5])
+		assert(valid && port > 0 && port < 65536)
+		socket_tcp_port = port
+	}
 	command, directory, argument := os.args[1], os.args[2], os.args[3]
 	switch command {
+	case "tcp-peer":
+		assert(socket_tcp_port == 0); socket_tcp_peer(directory, argument)
 	case "compat-produce":
 		assert(argument == "same-format"); compat_produce(directory)
 	case "compat-verify":

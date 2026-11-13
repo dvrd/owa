@@ -6,6 +6,7 @@ import ws "../../../websocket"
 import "core:bytes"
 import "core:fmt"
 import "core:os"
+import "core:net"
 
 SOCKET_ID :: "encrypted-socket-recovery-1"
 SOCKET_GROUP :: "123@g.us"
@@ -25,6 +26,9 @@ Socket_Recovery :: struct {
 	input, output:                     [8192]u8,
 	input_size, input_at, output_size: int,
 	replay:                            bool,
+	tcp: net.TCP_Connection,
+	native_stream: surf.WebSocket_Stream,
+	tcp_enabled: bool,
 }
 
 socket_body :: proc() -> []u8 {
@@ -41,6 +45,11 @@ socket_recovery_close :: proc(peer: ^Socket_Recovery) {
 
 socket_recovery_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Stream_Error) {
 	peer := cast(^Socket_Recovery)data
+	if peer.tcp_enabled {
+		count, error := peer.native_stream.read(peer.native_stream.data, dst)
+		peer.input_at += count
+		return count, error
+	}
 	count := min(len(dst), peer.input_size - peer.input_at, 3)
 	if count == 0 {
 		return 0, {kind = .EOF}
@@ -93,23 +102,31 @@ socket_recovery_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_S
 	if !peer.replay && peer.output_size == 0 && peer.stage == "socket-after-commit-before-write" {
 		boundary(peer.stage)
 	}
-	assert(peer.output_size + len(src) <= len(peer.output))
-	peer.output_size += copy(peer.output[peer.output_size:], src)
+	count := len(src)
+	if peer.tcp_enabled {
+		written, error := peer.native_stream.write(peer.native_stream.data, src)
+		if error.kind != .None {return written, error}
+		count = written
+	}
+	assert(peer.output_size + count <= len(peer.output))
+	peer.output_size += copy(peer.output[peer.output_size:], src[:count])
 	header, offset, error := ws.frame_header_decode(peer.output[:peer.output_size], true)
 	if error == .None && offset + int(header.payload_length) == peer.output_size {
 		// This durable fixture file is the owned transport peer's handoff witness,
 		// not a server delivery claim. It cannot change the sender's StateStore.
-		name := "replay.bin" if peer.replay else "transport.bin"
-		socket_owned_write(peer.directory, name, peer.output[:peer.output_size])
-		if !peer.replay {
-			witness := socket_state_witness(peer)
-			socket_owned_write(peer.directory, "transport-state.bin", witness[:])
+		if !peer.tcp_enabled {
+			name := "replay.bin" if peer.replay else "transport.bin"
+			socket_owned_write(peer.directory, name, peer.output[:peer.output_size])
+			if !peer.replay {
+				witness := socket_state_witness(peer)
+				socket_owned_write(peer.directory, "transport-state.bin", witness[:])
+			}
 		}
 		if !peer.replay && peer.stage == "socket-after-wire-before-return" {
 			boundary(peer.stage)
 		}
 	}
-	return len(src), {}
+	return count, {}
 }
 
 socket_recovery_attach :: proc(
@@ -154,6 +171,7 @@ socket_recovery_attach :: proc(
 			close = socket_recovery_stream_close,
 		},
 	}
+	if socket_tcp_port != 0 {socket_tcp_connect(peer)}
 	peer.socket.client = {
 		phase = .Noise_Ready,
 		websocket = &peer.socket.websocket,
@@ -226,7 +244,7 @@ socket_recovery_send :: proc(peer: ^Socket_Recovery) {
 	assert(peer.socket.client.noise.write_counter == 1 && peer.output_size > 0)
 }
 
-socket_recovery_ack :: proc(peer: ^Socket_Recovery) {
+socket_recovery_ack_frame :: proc(destination: []u8) -> int {
 	encoded, ciphertext, envelope: [2048]u8
 	size, binary_error := wa.binary_node_encode(
 		encoded[:],
@@ -241,17 +259,23 @@ socket_recovery_ack :: proc(peer: ^Socket_Recovery) {
 	envelope_size, framed := wa.frame_encode(envelope[:], ciphertext[:encrypted_size])
 	assert(framed == .None)
 	frame_size, websocket_error := ws.frame_encode(
-		peer.input[:],
+		destination,
 		true,
 		.Binary,
 		envelope[:envelope_size],
 		{},
 		masked = false,
 	)
-	assert(websocket_error == .None); peer.input_size = frame_size
+	assert(websocket_error == .None); return frame_size
+}
+
+socket_recovery_ack :: proc(peer: ^Socket_Recovery) {
+	if !peer.tcp_enabled {peer.input_size = socket_recovery_ack_frame(peer.input[:])}
 	event, error := wa.socket_read(&peer.socket)
 	assert(error.kind == .None && event.kind == .None && peer.socket.phase == .Online)
-	assert(peer.socket.client.noise.read_counter == 1 && peer.input_at == peer.input_size)
+	assert(peer.socket.client.noise.read_counter == 1)
+	if peer.tcp_enabled {assert(peer.input_at > 0)}
+	else {assert(peer.input_at == peer.input_size)}
 	_, pending := wa.state_store_get(&peer.f.store, .Outbound_Message, SOCKET_ID); assert(!pending)
 }
 
@@ -443,6 +467,7 @@ socket_verify_run :: proc(directory, stage: string) {
 		defer delete(id)
 		assert(error.kind == .None && id == SOCKET_ID && peer.socket.sequence == 0)
 		assert(f.store.revision == revision && peer.socket.client.noise.write_counter == 1)
+		if peer.tcp_enabled {socket_tcp_wait_replay(peer)}
 		replay_path := fmt.aprintf("%s/replay.bin", directory); defer delete(replay_path)
 		packet, read_error := os.read_entire_file(replay_path, context.allocator)
 		assert(read_error == nil); defer delete(packet)
