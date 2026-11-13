@@ -21,7 +21,7 @@ PATH=/opt/homebrew/opt/llvm@22/bin:$PATH \
 # Repeat with --sanitize thread and a distinct report.
 ```
 
-The runner builds and runs five native tests with leak tracking, then builds an
+The runner builds and runs six native tests with leak tracking, then builds an
 instrumented child executable. It owns every temporary directory, process and
 kill target. A child prints an exact readiness marker after staging or committing
 real cryptographic transitions; the parent kills that unreaped child with
@@ -65,3 +65,44 @@ The second role uses the same library, so this is not an independent libsignal
 interoperability oracle. There is no linked device, WhatsApp service, recipient
 delivery, full-stack certification, disk-full/ENOSPC or power-loss claim. The older
 `tests/recovery_campaign` fixture remains separate. No runtime code is changed.
+
+## Production Socket send/ACK crash composition
+
+Six additional owned crash stages now use the public
+`socket_group_send_prepared` implementation with supplied synthetic group/device
+metadata and a real established pairwise session. The production code generates
+and signs a sender key, encrypts its distribution with Signal, encrypts the group
+message, stages both ratchets, commits the exact stanza, and writes its actual
+Noise/WebSocket framing. The fixture uses production canonical session addresses,
+numeric consumed-prekey markers and a separate real `prekey_store_save/load`
+file. The sender is the synthetic participant whose one-time key9 was consumed
+during the established-session setup; that key must stay absent throughout.
+The older standalone fixture's record conventions remain confined to its stages.
+
+The new stages are before send, after production commit/before any transport
+write, after a complete transport handoff/before its callback returns, after send
+returns/before ACK, after positive ACK/before caller journal, and after caller ACK
+journal. A durable file owned by the synthetic stream peer witnesses the actual
+outbound bytes before the handoff crash. A second owned witness binds the exact
+session, sender key, recipient membership, immutable content and prekey-file
+hashes to that handoff; they must remain identical after ACK and restart.
+It is not a server-delivery receipt.
+The positive ACK is itself encrypted and framed by the synthetic peer and travels
+through `socket_read` and the production ACK commit path.
+
+Fresh verifier processes decrypt the actual outgoing pairwise distribution and
+signed group payload using the real peer session. They check the stable message
+ID, plaintext, sender chain counter, group iteration, consumed-key marker,
+prekey snapshot/file consistency and replay rejection. If a pending stanza
+remains, ordinary `socket_send_group` must replay its exact ciphertext without
+new discovery/encryption or a state-file change. After an ACK with no durable
+caller journal, the fixture retains the caller intent as unknown and performs no
+automatic send. Pending absence alone still is not proof of delivery; this is the
+fixture caller's explicit recovery policy, not a new guarantee for every caller.
+
+These stages prove the prepared production Socket send/ACK subset. They do not
+exercise metadata discovery, live service delivery, a complete Noise login,
+concurrent writers, an upgrade/migration or all multi-file crash transitions.
+They add evidence to the earlier standalone snapshots rather than substituting a
+processed-ID marker for a server ACK. The wider OKAMI-414 acceptance criteria
+still require separate upgrade and any explicitly requested ENOSPC qualification.

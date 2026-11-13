@@ -4,6 +4,7 @@ import wa "../.."
 import "core:bytes"
 import "core:fmt"
 import "core:os"
+import "core:strings"
 import "core:time"
 
 
@@ -13,6 +14,9 @@ boundary :: proc(stage: string) {
 }
 
 stage_run :: proc(directory, stage: string) {
+	if strings.has_prefix(stage, "socket-") {
+		socket_stage_run(directory, stage); return
+	}
 	f := fixture_open(directory, true); defer fixture_close(f)
 	switch stage {
 	case "receiver-before-commit", "receiver-after-commit":
@@ -91,6 +95,9 @@ verify_sender :: proc(f: ^Fixture, committed, received: bool) {
 }
 
 verify_run :: proc(directory, stage: string) {
+	if strings.has_prefix(stage, "socket-") {
+		socket_verify_run(directory, stage); return
+	}
 	f := fixture_open(directory, false); defer fixture_close(f)
 	before, io_error := os.read_entire_file(f.path, context.allocator); assert(io_error == nil)
 	defer delete(before)

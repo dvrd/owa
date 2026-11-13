@@ -239,3 +239,12 @@ recovery_corrupt_inner_session_preserves_live_ratchet :: proc(t: ^testing.T) {
 	testing.expect(t, bytes.equal(before, after))
 	fixture_encrypt(f); fixture_decrypt(f)
 }
+
+@(test)
+recovery_socket_encrypted_send_and_inbound_positive_ack_control :: proc(_: ^testing.T) {
+	f, directory := unit_fixture()
+	fixture_close(f)
+	defer {assert(os.remove_all(directory) == nil); delete(directory)}
+	socket_stage_run(directory, "control")
+	socket_verify_run(directory, "control")
+}

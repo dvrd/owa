@@ -18,7 +18,9 @@ HERE = Path(__file__).resolve().parent
 SHARED = HERE.parents[2]
 OWNER = b'OWA-ENCRYPTED-RECOVERY-V1'
 STAGES = ('receiver-before-commit', 'receiver-after-commit', 'sender-before-commit',
-          'sender-after-commit', 'receiver-after-message-commit')
+          'sender-after-commit', 'receiver-after-message-commit',
+          'socket-before-send', 'socket-after-commit-before-write', 'socket-after-wire-before-return',
+          'socket-after-send-before-ack', 'socket-after-positive-ack', 'socket-after-ack-journal')
 MAX_OUTPUT = 1 << 20
 
 
@@ -108,9 +110,21 @@ def campaign(binary, env, report):
             directory = Path(temporary); scope(directory)
             crash(binary, directory, stage, env, report['crashes'])
             before = digest(directory/'state.bin')
+            prekey_before = digest(directory/'prekeys.bin') if (directory/'prekeys.bin').exists() else None
             result = execute([binary, 'verify', directory, stage], env, report['commands'], 20)
-            if 'ENCRYPTED_REOPEN_PASS' not in result['stdout'] or digest(directory/'state.bin') != before:
+            marker = 'ENCRYPTED_SOCKET_REOPEN_PASS' if stage.startswith('socket-') else 'ENCRYPTED_REOPEN_PASS'
+            if marker not in result['stdout'] or digest(directory/'state.bin') != before:
                 raise CampaignError('REOPEN_DURABILITY_FAILED')
+            if prekey_before is not None and digest(directory/'prekeys.bin') != prekey_before:
+                raise CampaignError('SOCKET_PREKEY_FILE_CHANGED')
+    report['socket_recovery'] = {'owned_crash_boundaries': 6,
+        'production_prepared_send_and_encrypted_ack': True,
+        'exact_handoff_hashes_match_ratchet_key_membership_content_prekey': True,
+        'real_pairwise_distribution_and_group_payload_decrypted': True,
+        'pending_replay_preserves_exact_ciphertext_and_store': True,
+        'ack_without_application_journal_remains_unknown_without_resend': True,
+        'prekey_file_and_consumed_marker_remain_consistent': True,
+        'synthetic_metadata_and_transport_peer': True, 'recipient_delivery': False}
     with tempfile.TemporaryDirectory(prefix='wa-encrypted-', dir='/tmp') as temporary:
         directory = Path(temporary); scope(directory)
         execute([binary, 'prepare', directory, 'control'], env, report['commands'], 20)
@@ -157,7 +171,7 @@ def main():
     env['ODIN_ROOT'] = str(compiler_root)
     before = source_snapshot(args.shared_root, compiler_root)
     report = {'schema': 1, 'passed': False, 'candidate_release_gate': False, 'commands': [], 'crashes': [],
-        'scope': 'Synthetic real Signal sessions/prekeys + caller StateStore snapshots; no accounts, network, device service, full socket routing, ENOSPC or power-loss proof',
+        'scope': 'Real Signal/prekeys/StateStore plus production prepared Socket group send, transport handoff and encrypted positive ACK; synthetic peer and supplied metadata, no live accounts/discovery/full handshake/upgrade/ENOSPC/power-loss proof',
         'sanitizer': args.sanitize, 'compiler_sha256': digest(args.odin),
         'compiler_root': str(compiler_root), 'compiler_version': capture([args.odin, 'version'], env)['stdout'].strip(),
         'clang_version': capture([shutil.which('clang', path=env['PATH']), '--version'], env)['stdout'].strip(),
