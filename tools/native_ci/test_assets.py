@@ -12,6 +12,36 @@ import assets
 
 
 class Tests(unittest.TestCase):
+    def test_live_artifact_rejects_search_paths_even_if_compiler_ignores_flag(self):
+        gate = self.gate()
+        for loader in ('ELF64 no custom search path\n',
+                       '0x001d (RUNPATH) Library runpath: [$ORIGIN]\n',
+                       '0x000f (RPATH) Library rpath: [/tmp/untrusted]\n'):
+            with self.subTest(loader=loader), tempfile.TemporaryDirectory() as temporary:
+                evidence = Path(temporary)
+                def execute(argv, label, output, _env, _rows, *_timeout):
+                    text = ''
+                    if label == 'live-binary-build':
+                        self.assertIn('-no-rpath', argv)
+                        self.assertIn('-o:speed', argv)
+                        header = bytearray(32)
+                        header[:6] = b'\x7fELF\x02\x01'; header[18:20] = b'\x3e\x00'
+                        target = output/'owa-live-linux-amd64'
+                        target.write_bytes(header); target.chmod(0o700)
+                    elif label == 'live-binary-preview': text = 'PHASE PREVIEW_READY\n'
+                    elif label == 'live-binary-loader': text = loader
+                    (output/(label+'.log')).write_text(text)
+                with mock.patch.object(gate, 'execute', side_effect=execute), \
+                        mock.patch.object(gate.shutil, 'which', return_value='/fixture/readelf'):
+                    if 'no custom' in loader:
+                        result = gate.build_live_binary(Path('/compiler'), Path('/owner'), [],
+                            'linux-amd64', evidence, {'PATH': '/fixture'}, [])
+                        self.assertEqual(result['runtime_search_path'], 'none')
+                    else:
+                        with self.assertRaisesRegex(gate.GateError, 'SEARCH_PATH_FORBIDDEN'):
+                            gate.build_live_binary(Path('/compiler'), Path('/owner'), [],
+                                'linux-amd64', evidence, {'PATH': '/fixture'}, [])
+
     def test_live_artifact_identity_checks_actual_platform_and_executable(self):
         gate = self.gate()
         with tempfile.TemporaryDirectory() as temporary:

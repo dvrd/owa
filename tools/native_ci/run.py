@@ -26,6 +26,8 @@ COMPAT_PRIOR = "fa2734f60b60cc9770809bb1be873cea60fe3c12"
 
 class GateError(Exception): pass
 
+LIVE_OPTIMIZATION = {'linux-amd64': 'speed', 'macos-arm64': 'minimal'}
+
 
 def host_key():
     system, machine = platform.system(), platform.machine()
@@ -207,27 +209,33 @@ def live_binary_identity(path, platform):
     if not ((platform == 'linux-amd64' and linux) or (platform == 'macos-arm64' and mac)):
         raise GateError('LIVE_BINARY_ARCHITECTURE_MISMATCH')
     return {'file': path.name, 'platform': platform, 'bytes': path.stat().st_size,
-            'sha256': assets.digest(path), 'optimization': 'speed', 'sanitizer': 'none'}
+            'sha256': assets.digest(path), 'optimization': LIVE_OPTIMIZATION[platform],
+            'sanitizer': 'none'}
 
 
 def build_live_binary(compiler, copied, flags, platform, evidence, env, rows):
     binary = evidence/('owa-live-'+platform)
     execute([compiler, 'build', copied/'tools/live_qualification', *flags,
-             '-o:speed', '-out:'+str(binary)], 'live-binary-build', evidence, env, rows, 600)
+             '-o:'+LIVE_OPTIMIZATION[platform], '-no-rpath', '-out:'+str(binary)],
+            'live-binary-build', evidence, env, rows, 600)
     identity = live_binary_identity(binary, platform)
     execute([binary, '--help'], 'live-binary-help', evidence, env, rows)
     execute([binary, 'preview'], 'live-binary-preview', evidence, env, rows)
     if (evidence/'live-binary-preview.log').read_text().strip() != 'PHASE PREVIEW_READY':
         raise GateError('LIVE_BINARY_PREVIEW_FAILED')
     tool, arguments = ('readelf', ['-h', '-l', '-d', '--version-info']) if platform == 'linux-amd64' \
-        else ('otool', ['-L'])
+        else ('otool', ['-L', '-l'])
     executable = shutil.which(tool, path=env['PATH'])
     if executable is None: raise GateError('LIVE_BINARY_INSPECTION_TOOL_REQUIRED')
     execute([executable, *arguments, binary], 'live-binary-loader', evidence, env, rows)
+    loader = (evidence/'live-binary-loader.log').read_text()
+    if '(RPATH)' in loader or '(RUNPATH)' in loader or 'cmd LC_RPATH' in loader:
+        raise GateError('LIVE_BINARY_RUNTIME_SEARCH_PATH_FORBIDDEN')
     if live_binary_identity(binary, platform) != identity:
         raise GateError('LIVE_BINARY_CHANGED_DURING_INSPECTION')
     return {**identity, 'account_opened': False, 'provider_calls': False,
-            'inspection_log': 'live-binary-loader.log', 'offline_preview_passed': True}
+            'inspection_log': 'live-binary-loader.log', 'runtime_search_path': 'none',
+            'offline_preview_passed': True}
 
 
 def run(args, report):

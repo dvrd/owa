@@ -99,12 +99,21 @@ see `tests/encrypted_recovery/README.md` for the exact scope and retained defaul
 ## Native live-tool artifact
 
 After both requested sanitizer modes pass, the gate also builds the actual
-`tools/live_qualification` entry point with explicit `-o:speed`, strict vet and
+`tools/live_qualification` entry point with explicit Linux `-o:speed` or macOS
+`-o:minimal`, strict vet and
 no sanitizer. It runs only `--help` and `preview`, which open no session or
 network connection. The uploaded evidence includes `owa-live-<platform>`, its
 SHA256/platform/size in `qualification.json`, the exact compiler/source/SDK guards,
-and `readelf` loader/version requirements on Linux or `otool -L` on macOS.
+and `readelf` loader/version requirements on Linux or `otool -L -l` on macOS.
 The evidence checksum inventory covers the artifact too. No account credentials
 enter this build. This is an executable artifact, not a paired or deployed canary;
 target OS/libc compatibility, independent pairing and its fresh24h proof remain
 separate gates. A platform header check rejects a mislabeled output.
+
+macOS uses the existing minimal optimization mode because the extra speed build
+exceeded its fixed600s compile budget on hosted runners. The compile bound is
+unchanged. Linux retains its verified speed build; reports record the exact mode.
+Earlier macOS speed-build timeouts remain failures and do not qualify an artifact.
+Live tools use `-no-rpath`; the loader inspection rejects any remaining runtime
+search path. Earlier `$ORIGIN` binaries retain their evidence but cannot satisfy
+the canary bundle's stricter loader policy.
