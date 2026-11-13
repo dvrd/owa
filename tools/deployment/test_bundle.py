@@ -14,7 +14,7 @@ class Tests(unittest.TestCase):
   rev=subprocess.check_output(['git','-C',str(repo),'rev-parse','HEAD'],text=True).strip()
   artifact=root/'artifact';artifact.mkdir();binary=b'\x7fELF\x02\x01'+bytes(12)+b'\x3e\x00'+bytes(44)
   (artifact/'owa-live-linux-amd64').write_bytes(binary)
-  inspect=b'[Requesting program interpreter: /lib64/ld-linux-x86-64.so.2]\n Shared library: [libc.so.6]\nGLIBC_2.34\n'
+  inspect=b'[Requesting program interpreter: /lib64/ld-linux-x86-64.so.2]\n Shared library: [libz.so.1]\nShared library: [libm.so.6]\nShared library: [libc.so.6]\nShared library: [ld-linux-x86-64.so.2]\nGLIBC_2.34\n'
   (artifact/'live-binary-loader.log').write_bytes(inspect);(artifact/'live-binary-preview.log').write_bytes(b'PHASE PREVIEW_READY\n')
   files={str(p.relative_to(repo)):M.sha(p.read_bytes()) for p in repo.rglob('*') if p.is_file() and '.git' not in p.parts}
   q={'passed':True,'platform':'linux-amd64','github_run_id':'123','checkout_commit':rev,'compiler_sha256':'4'*64,'compiler_source_revision':'1'*40,'core_source_revision':'2'*40,'dependency_manifest_sha256':'3'*64,'pin_sha256':M.sha((repo/'tools/native_ci/pin.json').read_bytes())}
@@ -37,6 +37,9 @@ class Tests(unittest.TestCase):
   root=Path(tmp)/'host';root.mkdir()
   for name,data in {'usr/lib/os-release':'ID=ubuntu\nVERSION_ID="24.04"\n','var/lib/cloud/data/instance-id':TEST_HOST+'\n','etc/passwd':'root:x:0:0:root:/root:/bin/sh\n','etc/group':'root:x:0:\n','lib64/ld-linux-x86-64.so.2':'generated loader fixture'}.items():
    p=root/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text(data)
+  for name in M.NEEDED:
+   p=root/('lib64/ld-linux-x86-64.so.2' if name=='ld-linux-x86-64.so.2' else 'lib/x86_64-linux-gnu/'+name);p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(b'\x7fELF\x02\x01'+bytes(12)+b'\x3e\x00'+bytes(12))
+  p=root/'proc/cpuinfo';p.parent.mkdir();p.write_text('flags : '+' '.join(sorted(M.X86_V2))+'\n')
   return root
  def plan(self,args,result,host,**kw):
   a=types.SimpleNamespace(bundle=args.output,expected_manifest_sha256=result['manifest_sha256'],host_root=host,expected_instance_id=TEST_HOST)
@@ -46,7 +49,7 @@ class Tests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as tmp:
    args,q=self.fixture(tmp);result=M.pack(args);m=M.verify(args.output,result['manifest_sha256'])
    self.assertEqual(set(m['helpers']),set(M.HELPERS));self.assertEqual(m['runtime_revision'],args.runtime_revision)
-   self.assertEqual(len(m['files']),9);self.assertEqual(m['abi']['needed'],['libc.so.6'])
+   self.assertEqual(len(m['files']),9);self.assertEqual(set(m['abi']['needed']),M.NEEDED)
    for name in M.HELPERS:self.assertEqual((args.output/name).read_bytes(),(args.repository/name).read_bytes())
    self.assertEqual(os.stat(args.output).st_mode&0o777,0o700)
    with self.assertRaises(FileExistsError):M.pack(args)
@@ -98,6 +101,23 @@ class Tests(unittest.TestCase):
      p=args.artifact_dir/'owa-live-linux-amd64';p.unlink();p.symlink_to(args.repository/M.HELPERS[0])
     with self.assertRaises(M.Refusal):M.pack(args)
     self.assertFalse(args.output.exists())
+ def test_actual_loader_shape_and_rpath_runpath_unknown_library_rejected(self):
+  for suffix in (' (RPATH) Library rpath: [/tmp/untrusted]', ' (RUNPATH) Library runpath: [$ORIGIN]', ' Shared library: [libunreviewed.so]'):
+   with self.subTest(suffix=suffix),tempfile.TemporaryDirectory() as tmp:
+    args,q=self.fixture(tmp);p=args.artifact_dir/'live-binary-loader.log';p.write_bytes(p.read_bytes()+suffix.encode());self.report(args,q)
+    with self.assertRaises(M.Refusal):M.pack(args)
+ def test_host_library_presence_and_architecture_are_required(self):
+  for name in M.NEEDED:
+   for invalid in ('missing','wrong_architecture'):
+    with self.subTest(name=name,invalid=invalid),tempfile.TemporaryDirectory() as tmp:
+     args,result=self.packaged(tmp);host=self.host(tmp);p=host/('lib64/ld-linux-x86-64.so.2' if name=='ld-linux-x86-64.so.2' else 'lib/x86_64-linux-gnu/'+name)
+     if invalid=='missing':p.unlink()
+     else:p.write_bytes(b'generated wrong architecture')
+     with self.assertRaises(M.Refusal):self.plan(args,result,host)
+ def test_host_cpu_feature_mismatch_refused(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   args,result=self.packaged(tmp);host=self.host(tmp);(host/'proc/cpuinfo').write_text('flags : sse sse2\n')
+   with self.assertRaisesRegex(M.Refusal,'HOST_X86_V2_FEATURES_MISSING'):self.plan(args,result,host)
  def test_metadata_and_source_commits_cannot_be_moving_refs(self):
   with tempfile.TemporaryDirectory() as tmp:
    args,q=self.fixture(tmp);args.helper_revision='HEAD'
@@ -106,7 +126,7 @@ class Tests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as tmp:
    args,result=self.packaged(tmp);host=self.host(tmp)
    before={str(p.relative_to(host)):p.read_bytes() for p in host.rglob('*') if p.is_file()}
-   plan=self.plan(args,result,host);self.assertFalse(plan['host_changed']);self.assertFalse(plan['apply_implemented']);self.assertFalse(plan['rollback_plan']['implemented']);self.assertEqual(plan['rollback_plan']['stop_disable_only'],list(M.UNITS))
+   plan=self.plan(args,result,host);self.assertFalse(plan['host_changed']);self.assertTrue(plan['apply_implemented']);self.assertTrue(plan['rollback_plan']['implemented']);self.assertEqual(plan['rollback_plan']['stop_disable_only'],list(M.UNITS))
    self.assertEqual(before,{str(p.relative_to(host)):p.read_bytes() for p in host.rglob('*') if p.is_file()})
  def test_root_host_identity_os_arch_libc_and_existing_resources_fail_closed(self):
   for change in ('uid','machine','libc','system','instance','os','user','group','opt','state','unit','ancestor'):

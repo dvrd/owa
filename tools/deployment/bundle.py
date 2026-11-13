@@ -23,6 +23,8 @@ STATE_DIRS=('auth-linux','primary','primary-proof','periodic','controller')
 HASH=re.compile('[a-f0-9]{64}')
 COMMIT=re.compile('[a-f0-9]{40}')
 MAX_FILE=128<<20
+NEEDED={'libz.so.1','libm.so.6','libc.so.6','ld-linux-x86-64.so.2'}
+X86_V2={'cmov','cx8','fpu','fxsr','mmx','sse','sse2','cx16','lahf_lm','popcnt','pni','sse4_1','sse4_2','ssse3'}
 class Refusal(Exception):pass
 
 def require(condition,reason):
@@ -82,7 +84,8 @@ def artifact(args):
  versions={tuple(map(int,x.split('.'))) for x in re.findall(r'\bGLIBC_([0-9]+\.[0-9]+)',inspection)}
  require(versions and max(versions)<=(2,39),'GLIBC_REQUIREMENT_UNSUPPORTED')
  needed=re.findall(r'Shared library: \[([^\]]+)\]',inspection)
- require(set(needed)<={'libc.so.6','libm.so.6','libpthread.so.0','libdl.so.2','librt.so.1','libgcc_s.so.1'},'UNREVIEWED_SHARED_LIBRARY')
+ require(set(needed)==NEEDED and len(needed)==len(NEEDED),'UNREVIEWED_SHARED_LIBRARY')
+ require(not re.search(r'\b(?:RPATH|RUNPATH)\b',inspection),'UNSAFE_RUNTIME_SEARCH_PATH')
  require(regular(root/'live-binary-preview.log').strip()==b'PHASE PREVIEW_READY','OFFLINE_PREVIEW_MISMATCH')
  return q,report_bytes,binary,inspection.encode(),{'interpreter':'/lib64/ld-linux-x86-64.so.2','maximum_glibc':'.'.join(map(str,max(versions))),'needed':needed}
 
@@ -124,13 +127,19 @@ def verify(bundle,expected_manifest):
  return m
 
 def host_file(root,path):return regular(root/path.lstrip('/'),1<<20).decode()
-def plan(args,uid=os.geteuid,machine=platform.machine,libc=platform.libc_ver,system=platform.system):
- m=verify(args.bundle,args.expected_manifest_sha256);require(uid()==0,'ROOT_REQUIRED_FOR_HOST_PREFLIGHT')
+def host_identity(args,uid=os.geteuid,machine=platform.machine,libc=platform.libc_ver,system=platform.system):
+ require(uid()==0,'ROOT_REQUIRED_FOR_HOST_PREFLIGHT')
  require(system()=='Linux' and machine()=='x86_64' and libc()==('glibc','2.39'),'HOST_RUNTIME_MISMATCH')
  root=args.host_root;require(root.is_absolute() and not root.is_symlink(),'HOST_ROOT_INVALID')
  require(re.fullmatch(r'i-[0-9a-f]{17}',args.expected_instance_id) and host_file(root,'/var/lib/cloud/data/instance-id').strip()==args.expected_instance_id,'EXACT_INSTANCE_MISMATCH')
  osinfo=dict(line.split('=',1) for line in host_file(root,'/usr/lib/os-release').splitlines() if '=' in line)
  require(osinfo.get('ID','').strip('"')=='ubuntu' and osinfo.get('VERSION_ID','').strip('"')=='24.04','HOST_OS_MISMATCH')
+ cpus=[set(line.split(':',1)[1].split()) for line in host_file(root,'/proc/cpuinfo').splitlines() if line.startswith('flags') and ':' in line]
+ require(cpus and X86_V2<=set.intersection(*cpus),'HOST_X86_V2_FEATURES_MISSING')
+ return root
+
+def plan(args,**probes):
+ m=verify(args.bundle,args.expected_manifest_sha256);root=host_identity(args,**probes)
  for name in ('passwd','group'):require(not any(line.split(':',1)[0]=='owa' for line in host_file(root,'/etc/'+name).splitlines()),'OWA_ACCOUNT_ALREADY_EXISTS')
  # First-install only. Never follow or reuse an existing resource, even empty.
  targets=['/opt/owa','/var/lib/owa']+['/etc/systemd/system/'+x for x in UNITS]+['/run/systemd/system/'+x for x in UNITS]+['/usr/lib/systemd/system/'+x for x in UNITS]
@@ -139,8 +148,12 @@ def plan(args,uid=os.geteuid,machine=platform.machine,libc=platform.libc_ver,sys
   for parent in path.parents:
    if parent==root:break
    if os.path.lexists(parent):require(not parent.is_symlink() and parent.is_dir(),'UNSAFE_HOST_ANCESTOR')
- require((root/'lib64/ld-linux-x86-64.so.2').is_file(),'HOST_LOADER_MISSING')
- return {'phase':'DRY_RUN_ONLY','host_gate':'exact independently reviewed instance; Ubuntu24.04 x86_64 glibc2.39','release':m['release'],'manifest_sha256':args.expected_manifest_sha256,'proposed_actions':['create dedicated non-login owa system user/group only if absent','create root-owned immutable /opt/owa/releases/'+m['release'],'create owa-owned0700 distinct /var/lib/owa/'+','.join(STATE_DIRS),'write installer ownership receipt before separately reviewed unit creation'],'automatic_actions_forbidden':['pair','send','start','enable','resume','overwrite','delete state','modify Mesa or ports'],'units_not_created':list(UNITS),'rollback_plan':{'precondition':'matching first-install ownership receipt and exact owned unit digests; otherwise refuse','stop_disable_only':list(UNITS),'retain':['all auth/session/keys/journals/qualification state','immutable release for investigation'],'implemented':False},'apply_implemented':False,'host_changed':False,'remaining':['review installer apply/ownership transaction and rollback in disposable container','approve installation','independent pairing and primary24h proof','alert rollout review']}
+ for name in m['abi']['needed']:
+  path=root/('lib64/ld-linux-x86-64.so.2' if name=='ld-linux-x86-64.so.2' else 'lib/x86_64-linux-gnu/'+name)
+  require(path.is_file(),'HOST_LIBRARY_MISSING')
+  with path.open('rb') as stream:header=stream.read(32)
+  require(len(header)>=20 and header[:6]==b'\x7fELF\x02\x01' and header[18:20]==b'\x3e\x00','HOST_LIBRARY_ARCHITECTURE_MISMATCH')
+ return {'phase':'DRY_RUN_ONLY','host_gate':'exact independently reviewed instance; Ubuntu24.04 x86_64 glibc2.39','release':m['release'],'manifest_sha256':args.expected_manifest_sha256,'proposed_actions':['create dedicated non-login owa system user/group only if absent','create root-owned immutable /opt/owa/releases/'+m['release'],'create owa-owned0700 distinct /var/lib/owa/'+','.join(STATE_DIRS),'write installer ownership receipt before separately reviewed unit creation'],'automatic_actions_forbidden':['pair','send','start','enable','resume','overwrite','delete state','modify Mesa or ports'],'units_not_created':list(UNITS),'rollback_plan':{'precondition':'matching first-install ownership receipt and exact owned unit digests; otherwise refuse','stop_disable_only':list(UNITS),'retain':['all auth/session/keys/journals/qualification state','immutable release for investigation'],'implemented':True},'apply_implemented':True,'host_changed':False,'remaining':['independent review of Linux adapter and installer transaction before host approval','approve installation','independent pairing and primary24h proof','alert rollout review']}
 
 def main():
  p=argparse.ArgumentParser(description=__doc__);sub=p.add_subparsers(dest='command',required=True)

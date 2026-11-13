@@ -1,10 +1,12 @@
 # Offline Linux canary bundle and first-install preflight
 
-This phase packages reviewed public inputs and produces a **read-only dry-run
-plan**. It implements no installation, rollback execution, account creation,
-unit writes, activation, uploads, pairing or sends. The next phase must implement
-and validate the privileged apply transaction and ownership receipt before host
-installation can be proposed. A successful plan is not installation approval.
+`bundle.py` packages reviewed public inputs and produces a **read-only dry-run
+plan**. `install.py` implements an explicitly invoked first-install account/files
+transaction and a state-preserving rollback. Its filesystem behavior is tested
+only in disposable synthetic roots with fake OS operations; actual Linux useradd/
+systemctl execution has not been qualified. No host installation is authorized
+by this code or a successful plan. There is no activation, upload, pairing or send
+operation, and first installation creates no units.
 
 ## Exact public inputs
 
@@ -22,7 +24,12 @@ linker flags, compiler/Core/dependency pin identities, every reported runtime
 checkout file against its exact local Git blob, and the binary's source binding.
 It inspects the existing public ELF loader report, requiring Linux-amd64,
 `/lib64/ld-linux-x86-64.so.2`, GLIBC at most2.39 and only the reviewed standard
-shared-library names. It never executes the supplied binary. The original CI
+shared-library names: exactly `libz.so.1`, `libm.so.6`, `libc.so.6` and
+`ld-linux-x86-64.so.2`. All RPATH/RUNPATH tags are rejected, including `$ORIGIN`.
+The known b498/de62 Linux artifact has that default RUNPATH and is **not bundle
+ready** despite passing its source/ABI tests. Use a new source-bound `-no-rpath`
+artifact; never strip or patch an existing binary and retain its former digest.
+The packer never executes the supplied binary. The original CI
 report remains in the bundle for inspection; this phase does not reconstruct
 all SDK source files or replace independent review of the hosted campaign.
 
@@ -73,12 +80,15 @@ workspace as a build context. No container image build is part of this tool.
 ## First-install dry-run gates
 
 `plan` is read-only and requires root, Linux x86_64, exactly glibc2.39,
-Ubuntu24.04 and a mandatory independently reviewed expected instance ID matched to the local
+Ubuntu24.04, x86-64-v2 features on every reported processor and a mandatory
+independently reviewed expected instance ID matched to the local
 cloud-init metadata file. It makes no metadata-service or AWS call. It verifies
 an independently reviewed bundle-manifest digest and refuses existing `owa`
 entries in local passwd/group, any `/opt/owa` or `/var/lib/owa` resource, any of
 the three proposed units in persistent/runtime/vendor unit directories, unsafe
-path ancestors or a missing expected loader. Ubuntu's regular
+path ancestors, or missing/wrong-architecture ELF headers for the four fixed
+loader/library paths. These are presence/header gates, not live binding or
+complete ABI certification. Ubuntu's regular
 `/usr/lib/os-release` is used instead of following its usual `/etc` symlink.
 No systemd or application process is invoked by the plan. Actual private instance
 identifiers are never embedded in public source or the runtime bundle.
@@ -100,16 +110,32 @@ Python. The proposed layout is root-owned immutable
 unit generation is created. Unit settings, scope, binary digest, independently
 paired Linux identity and recipient confirmation require their own review.
 
-The future apply transaction must recheck account existence through NSS and all
-filesystem/unit gates immediately before each exclusive creation; a saved plan
-is not a lock. It must persist an exact ownership receipt for every created
-resource and never overwrite an existing object. Future first-install rollback
-may stop/disable only receipt-owned units whose digests still match, on this
-exact host/release. It must retain auth/session/key/journal/qualification state
-and the immutable release for investigation. This phase records that rollback
-plan and explicitly labels its executor **unimplemented**. It must not stop
-Mesa services, use wildcard/PID-based cleanup, erase state, or uninstall another
-operator's resource.
+The explicit apply transaction rechecks account existence through NSS and the
+filesystem/unit gates, then uses exclusive directory/file creation. A saved plan
+is not a lock or approval. It first creates a root-only writable deployment
+receipt, persists each creation intent before acting and records completed owned
+paths. It invokes only fixed absolute `useradd` arguments with a scrubbed
+environment, creates no login/home/password and requires a new non-root identity.
+The release is copied from verified in-memory bytes, reverified, fsynced and made
+non-writable to the service user. Empty state directories are0700 and owa-owned;
+their parent is root-owned0710 with the owa group for traversal. The root-owned
+receipt remains0600. No operational configuration, unit, pairing or activation
+is created. Interrupted/uncertain application leaves a receipt and existing
+resources intact; rerunning apply refuses those resources instead of retrying.
+
+Rollback validates the exact host/release/manifest and a root-owned private
+receipt. Every receipt-listed unit must have an allowed fixed name, installer
+ownership and unchanged root-owned bytes before **any** stop is attempted. Only
+then may fixed `systemctl stop`/`disable` calls occur, with bounded timeouts and
+no vendor/API environment. The current first-install path owns no units, so its
+rollback calls neither command. Positive owned-unit rollback tests use clearly
+synthetic receipt fixtures representing a future separately reviewed unit setup;
+this installer offers no unit-adoption or unit-registration command. An uncertain
+stop is durably latched and blocks another rollback attempt pending review.
+Repeated completed rollback is a no-op. All account/key/session/journal/state
+and immutable release files are retained. No delete/uninstall, Mesa service,
+wildcard or arbitrary PID operation exists. The future unit-setup path, actual
+Linux OS adapter and host approval remain separate review gates.
 
 ## Pairing, delivery and rollout remain separate
 
@@ -146,6 +172,24 @@ fixtures and synthetic host roots. They do not call network/cloud/provider
 APIs, execute a supplied native binary or use real account data. They verify
 exact separate source revisions, independent digest anchors, manifests and file
 modes, ELF/ABI and sanitizer gate failures, malformed/unlisted/symlink inputs,
-source mutation, root/host/OS/architecture/libc mismatch, account/unit/path
+source mutation, root/host/OS/architecture/libc/CPU mismatch, account/unit/path
 collisions and no changes to the dry-run host. Generated fixture receipts must
 never be used as actual hosted source proof.
+
+
+## Privileged executor review boundary
+
+`install.py apply --execute` and `rollback --execute` require the same bundle,
+independently reviewed manifest digest and private expected host identity as the
+plan. The real OS adapter refuses any `--host-root` other than `/`; synthetic
+validation injects an in-process fake adapter and cannot accidentally invoke
+host user or service operations. Tests also inspect the real adapter's fixed
+argv/environment through mocked subprocesses. None of those tests has invoked
+actual `useradd`/`systemctl` or changed a real host account/service.
+
+The executor and adjacent `bundle.py` are deployment control tools, **not**
+additional untracked contents of the fixed runtime bundle. Before any approved
+transport/execution, independently bind both tools to their reviewed Git commit
+and SHA256 as well as the runtime bundle's digest. No installer upload or host
+command is performed by this preparation. Review the actual adapter, uncertain
+outcome journal and separately proposed unit registration before host approval.
