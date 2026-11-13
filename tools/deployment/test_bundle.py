@@ -43,7 +43,7 @@ class Tests(unittest.TestCase):
   return root
  def plan(self,args,result,host,**kw):
   a=types.SimpleNamespace(bundle=args.output,expected_manifest_sha256=result['manifest_sha256'],host_root=host,expected_instance_id=TEST_HOST)
-  defaults=dict(uid=lambda:0,machine=lambda:'x86_64',libc=lambda:('glibc','2.39'),system=lambda:'Linux');defaults.update(kw)
+  defaults=dict(uid=lambda:0,machine=lambda:'x86_64',libc=lambda:('glibc','2.39'),system=lambda:'Linux',owner_uid=os.geteuid());defaults.update(kw)
   return M.plan(a,**defaults)
  def test_exact_public_allowlist_manifest_source_provenance_and_no_execution(self):
   with tempfile.TemporaryDirectory() as tmp:

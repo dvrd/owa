@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Offline source-bound Linux canary packaging and read-only installation planning.
 
-There is deliberately no apply, pair, start, enable, upload or rollback executor.
+This module never applies, pairs, starts, enables, uploads or executes rollback.
+The separately reviewed install.py contains the explicit apply/rollback executor.
 Expected artifact digests must come from an independent reviewed CI receipt.
 """
 import argparse
@@ -127,7 +128,7 @@ def verify(bundle,expected_manifest):
  return m
 
 def host_file(root,path):return regular(root/path.lstrip('/'),1<<20).decode()
-def host_identity(args,uid=os.geteuid,machine=platform.machine,libc=platform.libc_ver,system=platform.system):
+def host_identity(args,uid=os.geteuid,machine=platform.machine,libc=platform.libc_ver,system=platform.system,owner_uid=0):
  require(uid()==0,'ROOT_REQUIRED_FOR_HOST_PREFLIGHT')
  require(system()=='Linux' and machine()=='x86_64' and libc()==('glibc','2.39'),'HOST_RUNTIME_MISMATCH')
  root=args.host_root;require(root.is_absolute() and not root.is_symlink(),'HOST_ROOT_INVALID')
@@ -147,7 +148,8 @@ def plan(args,**probes):
   path=root/target.lstrip('/');require(not os.path.lexists(path),'EXISTING_RESOURCE_REFUSED')
   for parent in path.parents:
    if parent==root:break
-   if os.path.lexists(parent):require(not parent.is_symlink() and parent.is_dir(),'UNSAFE_HOST_ANCESTOR')
+   if os.path.lexists(parent):
+    info=parent.lstat();require(stat.S_ISDIR(info.st_mode) and info.st_uid==probes.get('owner_uid',0) and not info.st_mode&0o022,'UNSAFE_HOST_ANCESTOR')
  for name in m['abi']['needed']:
   path=root/('lib64/ld-linux-x86-64.so.2' if name=='ld-linux-x86-64.so.2' else 'lib/x86_64-linux-gnu/'+name)
   require(path.is_file(),'HOST_LIBRARY_MISSING')

@@ -44,7 +44,8 @@ def target(root,name):
  path=root/name.lstrip('/')
  for parent in path.parents:
   if parent==root:break
-  if os.path.lexists(parent):B.require(not parent.is_symlink() and parent.is_dir(),'UNSAFE_TARGET_ANCESTOR')
+  if os.path.lexists(parent):
+   info=parent.lstat();B.require(stat.S_ISDIR(info.st_mode) and info.st_uid==os.geteuid() and not info.st_mode&0o022,'UNSAFE_TARGET_ANCESTOR')
  return path
 
 def save(path,value):

@@ -2,9 +2,10 @@
 
 `bundle.py` packages reviewed public inputs and produces a **read-only dry-run
 plan**. `install.py` implements an explicitly invoked first-install account/files
-transaction and a state-preserving rollback. Its filesystem behavior is tested
-only in disposable synthetic roots with fake OS operations; actual Linux useradd/
-systemctl execution has not been qualified. No host installation is authorized
+transaction and a state-preserving rollback. Its filesystem transaction is tested
+in disposable synthetic roots with fake OS operations. Actual architecture-neutral
+Linux useradd/chown/systemctl methods also passed in a separate ordinary ARM64
+container as described below; the full AMD64 installer has not been executed. No host installation is authorized
 by this code or a successful plan. There is no activation, upload, pairing or send
 operation, and first installation creates no units.
 
@@ -86,7 +87,8 @@ cloud-init metadata file. It makes no metadata-service or AWS call. It verifies
 an independently reviewed bundle-manifest digest and refuses existing `owa`
 entries in local passwd/group, any `/opt/owa` or `/var/lib/owa` resource, any of
 the three proposed units in persistent/runtime/vendor unit directories, unsafe
-path ancestors, or missing/wrong-architecture ELF headers for the four fixed
+path ancestors (every existing ancestor must be root-owned and lack group/world
+write permission), or missing/wrong-architecture ELF headers for the four fixed
 loader/library paths. These are presence/header gates, not live binding or
 complete ABI certification. Ubuntu's regular
 `/usr/lib/os-release` is used instead of following its usual `/etc` symlink.
@@ -193,3 +195,32 @@ transport/execution, independently bind both tools to their reviewed Git commit
 and SHA256 as well as the runtime bundle's digest. No installer upload or host
 command is performed by this preparation. Review the actual adapter, uncertain
 outcome journal and separately proposed unit registration before host approval.
+
+
+## Separate actual Linux OS-adapter evidence
+
+The exact adapter source was also exercised in a fresh ordinary ARM64 Ubuntu24.04
+systemd container, network-isolated with no extra privileges/capabilities or host
+mounts. The local derivative image identity was
+`4a19dbda89fdee09e9a9376e263760534029abde29273c4fdd19ae4e213bca91`;
+Python3.12.3 and systemd255.4-1ubuntu8.18. Only its generated test user was removed
+from the base derivative before testing, preserving all pre-existing images and
+containers. The test then called the real adapter to create a fresh non-root
+`owa` identity with nologin/no home, rejected a second creation, and performed
+actual chown of an empty0700 synthetic state directory.
+
+An owned disposable sleeper service was started/enabled **inside that test
+container only**. The actual fixed stop/disable adapter completed in0.073s,
+reaped the process and left the owned unit inactive/disabled. A foreign
+`mesa.service` name was rejected before any command. The full installer, host
+identity function and AMD64 ABI gates were not called or overridden in this
+integration check. It is architecture-neutral OS-adapter proof, not native AMD64
+installer execution or application-host installation. The owned container was
+stopped/removed after preserving its receipt; no real host account/service changed.
+
+The private reproducible harness and result are retained in
+`/tmp/owa-installer-real-os-adapter.py` and
+`/tmp/owa-installer-real-os-adapter-result.json`. Source SHA256 identities are
+bound in the candidate review receipt. Unit tests still use only fake OS
+operations/mocked subprocesses and explicitly inject the synthetic filesystem's
+owner UID; the real CLI exposes no owner/identity/architecture override.

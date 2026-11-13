@@ -9,7 +9,7 @@ def load(name):
 I=load('install');T=load('test_bundle')
 class Fake:
  def __init__(self,fail=False):self.created=0;self.ownership=[];self.stopped=[];self.fail=fail
- def probes(self):return dict(uid=lambda:0,machine=lambda:'x86_64',libc=lambda:('glibc','2.39'),system=lambda:'Linux')
+ def probes(self):return dict(uid=lambda:0,machine=lambda:'x86_64',libc=lambda:('glibc','2.39'),system=lambda:'Linux',owner_uid=os.geteuid())
  def user(self):return object() if self.created else None
  def group(self):return object() if self.created else None
  def create_user(self):
@@ -42,6 +42,16 @@ class Tests(unittest.TestCase):
    a,h=self.fixture(tmp);p=a.host_root/'opt/owa';p.mkdir();marker=p/'unrelated';marker.write_text('preserve')
    with self.assertRaises(I.B.Refusal):I.apply(a,h)
    self.assertEqual(marker.read_text(),'preserve');self.assertEqual(h.created,0)
+ def test_unsafe_existing_ancestor_refuses_before_any_effect(self):
+  for kind in ('owner','group_writable','world_writable'):
+   with self.subTest(kind=kind),tempfile.TemporaryDirectory() as tmp:
+    a,h=self.fixture(tmp)
+    if kind=='owner':
+     original=h.probes;h.probes=lambda:{**original(),'owner_uid':os.geteuid()+1}
+    else:(a.host_root/'opt').chmod(0o775 if kind=='group_writable' else 0o777)
+    before={str(p.relative_to(a.host_root)) for p in a.host_root.rglob('*')}
+    with self.assertRaises(I.B.Refusal):I.apply(a,h)
+    self.assertEqual(h.created,0);self.assertEqual(h.stopped,[]);self.assertEqual(before,{str(p.relative_to(a.host_root)) for p in a.host_root.rglob('*')})
  def test_unknown_user_creation_latches_without_retry_or_removal(self):
   with tempfile.TemporaryDirectory() as tmp:
    a,h=self.fixture(tmp);h.fail=True
