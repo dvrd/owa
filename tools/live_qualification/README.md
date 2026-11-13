@@ -274,3 +274,12 @@ sends no viewed receipt and emits no chat event. Offline encrypted fixture tests
 cover the protocol behavior; a fresh long live soak is required to assess the
 50-minute failure. Reference behavior: [whatsmeow status handler](https://github.com/tulir/whatsmeow/commit/a238105488)
 and the [Baileys incident report](https://github.com/WhiskeySockets/Baileys/issues/2858).
+
+Terminal `stream:error` diagnostics now distinguish fixed ACK classes as
+`Ack_Message`, `Ack_Receipt`, `Ack_Notification`, `Ack_Status`, `Ack_Call`,
+`Ack_Other` and `Ack_Unknown`. The observer examines at most 32 direct children
+and 32 attributes per ACK; missing, excessive or conflicting metadata remains
+unknown. Only the fixed enum survives document release. Raw class/type/ID and
+routing attributes are never printed. Legacy `Ack` output remains parseable.
+This metadata does not change ACK routing, retry policy or recovery behavior,
+and does not establish which ACK class caused an earlier server failure.

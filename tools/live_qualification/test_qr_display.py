@@ -26,6 +26,18 @@ class QRTests(unittest.TestCase):
                        b'Ack UNKNOWN_CHILDREN 0 class=status', b'Ack UNKNOWN_CHILDREN 0 id=private'):
             self.assertIsNone(QR.native_error(prefix+suffix+b'\n'))
 
+    def test_terminal_ack_classes_accept_only_fixed_names(self):
+        prefix = (b'ERROR Protocol STORAGE None SOCKET Session_Failed CERTIFICATE None '
+                  b'SESSION Server_Failure CODE 0 NODE Stream_Error DETAIL ')
+        for name in ('Ack_Message', 'Ack_Receipt', 'Ack_Notification', 'Ack_Status',
+                     'Ack_Call', 'Ack_Other', 'Ack_Unknown'):
+            value = QR.native_error(prefix+name.encode()+b' UNKNOWN_CHILDREN 0\n')
+            self.assertIsNotNone(value, name)
+            self.assertEqual(value['server_detail'], name)
+        for name in ('Ack_private_class', 'Ack_StatusPrivate', 'Ack_status',
+                     'Ack_Status class=private', 'Ack_Status id=private'):
+            self.assertIsNone(QR.native_error(prefix+name.encode()+b' UNKNOWN_CHILDREN 0\n'))
+
     def test_terminal_diagnostics_reject_unknown_values_or_unbounded_counts(self):
         prefix = (b'ERROR Protocol STORAGE None SOCKET Session_Failed CERTIFICATE None '
                   b'SESSION Server_Failure CODE 0 ')

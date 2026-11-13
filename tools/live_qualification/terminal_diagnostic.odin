@@ -7,6 +7,7 @@ Terminal_Node :: enum {Unknown, Failure, Stream_Error}
 Terminal_Detail :: enum {
  None, Conflict, Replaced, Device_Removed, Unauthorized, Internal_Server_Error,
  Policy_Violation, Resource_Constraint, System_Shutdown, Ack, Other, Multiple,
+ Ack_Message, Ack_Receipt, Ack_Notification, Ack_Status, Ack_Call, Ack_Other, Ack_Unknown,
 }
 Terminal_Diagnostic :: struct {node: Terminal_Node, detail: Terminal_Detail, unknown_children: u8}
 
@@ -26,6 +27,19 @@ terminal_detail :: proc(value: string) -> Terminal_Detail {
  }
 }
 
+terminal_ack_detail :: proc(class: wa.Protocol_Ack_Class) -> Terminal_Detail {
+ switch class {
+ case .Message: return .Ack_Message
+ case .Receipt: return .Ack_Receipt
+ case .Notification: return .Ack_Notification
+ case .Status: return .Ack_Status
+ case .Call: return .Ack_Call
+ case .Other: return .Ack_Other
+ case .Unknown: return .Ack_Unknown
+ }
+ return .Ack_Unknown
+}
+
 // Retain only fixed enums/counts while borrowed node strings are valid. Never
 // serialize raw attributes, stanza children, account addresses or content.
 terminal_observe :: proc(data: rawptr, info: wa.Protocol_Node_Info) {
@@ -40,12 +54,16 @@ terminal_observe :: proc(data: rawptr, info: wa.Protocol_Node_Info) {
  runner.terminal.detail = terminal_detail(info.kind)
  for child in info.children[:min(len(info.children), 32)] {
   detail := terminal_detail(child)
+  if detail == .Ack && runner.terminal.node == .Stream_Error {
+   detail = terminal_ack_detail(info.ack_class)
+  }
   if detail == .Other {
    runner.terminal.unknown_children += 1
    continue
   }
   if detail == .None {continue}
-  if runner.terminal.detail == .None || runner.terminal.detail == .Other {
+  if runner.terminal.detail == .None || runner.terminal.detail == .Other ||
+   runner.terminal.detail == .Ack && child == "ack" {
    runner.terminal.detail = detail
   } else if runner.terminal.detail != detail {runner.terminal.detail = .Multiple}
  }

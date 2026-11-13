@@ -38,7 +38,7 @@ ERROR_LINE = re.compile(rb"ERROR ([A-Za-z_][A-Za-z_0-9]{0,63}) STORAGE "
     rb"CERTIFICATE ([A-Za-z_][A-Za-z_0-9]{0,63})"
     rb"(?: SESSION ([A-Za-z_][A-Za-z_0-9]{0,63}) CODE ([0-9]{1,5})"
     rb"(?: NODE (Unknown|Failure|Stream_Error) DETAIL "
-    rb"(None|Conflict|Replaced|Device_Removed|Unauthorized|Internal_Server_Error|Policy_Violation|Resource_Constraint|System_Shutdown|Ack|Other|Multiple)"
+    rb"(None|Conflict|Replaced|Device_Removed|Unauthorized|Internal_Server_Error|Policy_Violation|Resource_Constraint|System_Shutdown|Ack|Ack_Message|Ack_Receipt|Ack_Notification|Ack_Status|Ack_Call|Ack_Other|Ack_Unknown|Other|Multiple)"
     rb" UNKNOWN_CHILDREN ([0-9]{1,2}))?)?\n")
 
 

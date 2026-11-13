@@ -46,11 +46,15 @@ Session_Event :: struct {
 	account: ^Paired_Account, // Borrows the caller-owned Auth_State.
 }
 
+// Fixed diagnostic classification only; no routing or retry policy depends on it.
+Protocol_Ack_Class :: enum u8 {Unknown, Message, Receipt, Notification, Status, Call, Other}
+
 // Diagnostic metadata only; slices borrow the current document/callback frame.
 // No stanza IDs, addresses, QR references or content bytes are exposed here.
 Protocol_Node_Info :: struct {
 	tag, kind: string,
 	children:  []string,
+	ack_class: Protocol_Ack_Class,
 }
 Protocol_Node_Observer :: #type proc(
 	data: rawptr,
@@ -333,10 +337,51 @@ session_node_observe :: proc(session: ^Session, node: Binary_Node) {
 
 		session.config.observe_node(
 			session.config.observer_data,
-			{tag = node.tag, kind = kind, children = tags[:count]},
+			{tag = node.tag, kind = kind, children = tags[:count],
+				ack_class = session_stream_ack_class(node)},
 		)
 	}
 
+}
+
+// Inspect at most the same 32 direct children exposed by the observer. Conflicting
+// ACK classes or excessive metadata are deliberately reported as Unknown.
+session_stream_ack_class :: proc(node: Binary_Node) -> Protocol_Ack_Class {
+ if node.tag != "stream:error" {return .Unknown}
+ children, found := node.content.([]Binary_Node)
+ if !found || len(children) > 32 {return .Unknown}
+ result: Protocol_Ack_Class
+ seen, conflict := false, false
+ for child in children[:min(len(children), 32)] {
+  if child.tag != "ack" {continue}
+  current := session_ack_class(child)
+  if seen && current != result {conflict = true}
+  if !seen {result = current}
+  seen = true
+ }
+ if conflict {return .Unknown}
+ return result
+}
+
+session_ack_class :: proc(node: Binary_Node) -> Protocol_Ack_Class {
+ if len(node.attrs) > 32 {return .Unknown}
+ result: Protocol_Ack_Class
+ seen := false
+ for attr in node.attrs {
+  if attr.key != "class" {continue}
+  if seen {return .Unknown}
+  seen = true
+  switch attr.value {
+  case "": result = .Unknown
+  case "message": result = .Message
+  case "receipt": result = .Receipt
+  case "notification": result = .Notification
+  case "status": result = .Status
+  case "call": result = .Call
+  case: result = .Other
+  }
+ }
+ return result
 }
 
 session_stream_error :: proc(
