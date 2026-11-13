@@ -48,12 +48,13 @@ socket_process_node :: proc(
 			return {}, e
 		}
 
-		if kind == "retry" && socket.phase == .Online {
+		if kind == "retry" {
 			return {}, socket_defer_retry(socket, node)
 		}
 
 		return {}, {}
-	case "notification":
+	case "notification", "call":
+		// A transport ACK does not answer a call. Preserve its node for waiters.
 		if e := socket_acknowledge(socket, node); e.kind != .None {
 			return {}, e
 		}
