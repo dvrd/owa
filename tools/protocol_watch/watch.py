@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -15,6 +16,8 @@ import urllib.error
 import urllib.request
 
 HERE = Path(__file__).resolve().parent
+TRIAGE_SPEC = importlib.util.spec_from_file_location('protocol_triage', HERE/'triage.py')
+triage = importlib.util.module_from_spec(TRIAGE_SPEC); TRIAGE_SPEC.loader.exec_module(triage)
 MAX_BYTES = 4 * 1024 * 1024
 MAX_REPORT = 256 * 1024
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -87,7 +90,7 @@ def version_decode(data):
         raise WatchError('VERSION_FEED_INVALID') from None
 
 
-def observe(manifest, get=fetch, now=time.monotonic, budget_seconds=180):
+def observe(manifest, get=fetch, now=time.monotonic, budget_seconds=180, local_root=None, approved_contract=None):
     deadline = now() + budget_seconds
 
     def bounded_get(url):
@@ -121,6 +124,12 @@ def observe(manifest, get=fetch, now=time.monotonic, budget_seconds=180):
                 raise WatchError('MONITORED_PATH_MISSING')
             result['files'].append({'path': path, 'reference': reference, 'current': current,
                                     'changed_from_reference': reference != current})
+            if reference != current:
+                result['files'][-1]['assessment'] = triage.assess(
+                    {'name': source['name'], 'repository': repository}, path,
+                    reference_data, current_data,
+                    local_root=Path(local_root) if local_root is not None else HERE.parents[1],
+                    approved_contract=approved_contract)
             if path.endswith('baileys-version.json'):
                 result['advertised_versions'] = {'reference': version_decode(reference_data),
                     'current': version_decode(current_data), 'fallback_used': False,
@@ -194,7 +203,7 @@ def atomic_json(path, value):
         Path(name).unlink(missing_ok=True)
 
 
-def check(manifest, state, get=fetch):
+def check(manifest, state, get=fetch, approved_contract=None):
     with locked_state(state):
         previous_path = state / 'observed.json'
         previous = None
@@ -202,7 +211,7 @@ def check(manifest, state, get=fetch):
             if previous_path.exists() or previous_path.is_symlink():
                 private_file(previous_path)
                 previous = json.loads(previous_path.read_bytes())
-            observation = observe(manifest, get)
+            observation = observe(manifest, get, approved_contract=approved_contract)
             result = compare(observation, previous)
             result['observation'] = observation
         except (WatchError, ValueError, TypeError, KeyError) as error:
@@ -221,9 +230,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--manifest', type=Path, default=HERE / 'sources.json')
     parser.add_argument('--state-dir', type=Path, required=True)
+    parser.add_argument('--approved-contract', help='Explicit reviewed repo-relative target contract; no automatic approval')
     args = parser.parse_args()
     try:
-        result = check(manifest_read(args.manifest), args.state_dir)
+        result = check(manifest_read(args.manifest), args.state_dir, approved_contract=args.approved_contract)
         print(json.dumps({key: value for key, value in result.items() if key != 'observation'}))
         return 3 if result['status'] == 'REVIEW_REQUIRED' else 0
     except (WatchError, OSError, ValueError) as error:
