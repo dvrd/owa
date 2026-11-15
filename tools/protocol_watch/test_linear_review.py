@@ -453,4 +453,51 @@ class ContractGateControls(unittest.TestCase):
             self.assertTrue(result['issues'][0]['ready_findings'])
             self.assertEqual(L.track(value,RUN,api)['status'],'EXISTING')
 
+
+
+class RoutingScopeControls(unittest.TestCase):
+    def scoped_legacy(self):
+        api=API();baileys=legacy(report(7,0));baileys['state']['type']='completed'
+        mixed=legacy(report(7,1));mixed['identifier']='OKAMI-422';mixed['url']='https://linear.app/devoured/issue/OKAMI-422/review'
+        api.add(baileys);api.add(mixed)
+        api.comments['scope']=dict(id='scope',body=L.SCOPE_PREFIX+'whatsmeow',issue={'id':mixed['id'],'project':{'id':L.PROJECT}})
+        return api,mixed
+    def test_new_baileys_delta_does_not_append_to_mixed_whatsmeow_review(self):
+        api,mixed=self.scoped_legacy();value=report(7,1)
+        value['observation']['sources'][0]['files'][0]['current']['sha256']='c'*64
+        L.track(value,RUN,api)
+        self.assertEqual(len(api.creates),1);self.assertIn('baileys',api.creates[0]['title']);self.assertFalse(api.comment_creates)
+        self.assertEqual(api.items[mixed['id']]['description'],mixed['description'])
+    def test_new_whatsmeow_delta_appends_to_scoped_mixed_review(self):
+        api,mixed=self.scoped_legacy();value=report(7,1)
+        value['observation']['sources'][1]['files'][0]['current']['sha256']='c'*64
+        self.assertEqual(L.track(value,RUN,api)['status'],'UPDATED')
+        self.assertFalse(api.creates);self.assertEqual(len(api.comment_creates),1)
+        self.assertEqual(api.comment_creates[0]['issueId'],mixed['id']);self.assertNotIn('WhiskeySockets',api.comment_creates[0]['body'])
+    def test_scope_marker_keeps_all_legacy_coverage_unchanged(self):
+        api,mixed=self.scoped_legacy();before=L.legacy_coverage(mixed)
+        issues,covered=L.scan(L.BoundedAPI(api));scoped=next(i for i in issues if i['id']==mixed['id'])
+        self.assertEqual(scoped['_review_scope'],'whatsmeow');self.assertEqual(scoped['_coverage'],before)
+        self.assertEqual(len(covered),8);self.assertEqual(L.track(report(7,1),RUN,api)['status'],'EXISTING')
+        self.assertFalse(api.creates);self.assertFalse(api.comment_creates)
+    def test_conflicting_scopes_fail_before_any_mutation(self):
+        api,mixed=self.scoped_legacy();api.comments['conflict']=dict(id='conflict',body=L.SCOPE_PREFIX+'baileys',issue={'id':mixed['id'],'project':{'id':L.PROJECT}})
+        with self.assertRaisesRegex(L.ReviewError,'SCOPE_CONFLICT'):L.track(report(7,1,revision='c'),RUN,api)
+        self.assertFalse(api.creates);self.assertFalse(api.comment_creates)
+    def test_unknown_scope_value_is_not_a_routing_authority(self):
+        api,mixed=self.scoped_legacy();api.comments['scope']['body']=L.SCOPE_PREFIX+'foreign'
+        with self.assertRaisesRegex(L.ReviewError,'SCOPE_INVALID'):L.track(report(7,1,revision='c'),RUN,api)
+        self.assertFalse(api.creates);self.assertFalse(api.comment_creates)
+    def test_fresh_append_rechecks_scope_changed_after_initial_scan(self):
+        api=API();L.track(report(),RUN,api);old=next(iter(api.items.values()))
+        def changed(api,variables):
+            if old['id'] in variables['ids']:
+                api.comments['scope']=dict(id='scope',body=L.SCOPE_PREFIX+'whatsmeow',issue={'id':old['id'],'project':{'id':L.PROJECT}})
+        api.fresh_hook=changed;L.track(report(revision='c'),RUN,api)
+        self.assertEqual(len(api.creates),2);self.assertFalse(api.comment_creates)
+    def test_scope_alone_does_not_cover_change_or_authorize_fix(self):
+        api=API();old=issue(dict(id=str(uuid.uuid4()),title='OWA: SPIKE human task',description='Unbound human task.'));api.add(old)
+        api.comments['scope']=dict(id='scope',body=L.SCOPE_PREFIX+'baileys',issue={'id':old['id'],'project':{'id':L.PROJECT}})
+        L.track(report(),RUN,api);self.assertEqual(len(api.creates),1);self.assertEqual(api.creates[0]['stateId'],L.BACKLOG);self.assertFalse(api.comment_creates)
+
 if __name__=='__main__':unittest.main()

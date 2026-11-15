@@ -40,6 +40,7 @@ MAX_CALLS = 64
 MAX_ISSUES = 200
 LOCAL_ROOT = HERE.parent.parent
 TERMINAL = ('completed','canceled','duplicate')
+SCOPE_PREFIX = 'owa-protocol-review-scope:v1:'
 
 
 
@@ -406,7 +407,8 @@ def comment_identity(issue_id, items):
 
 
 def comments(api, issue):
-    result={};seen=set()
+    result={};seen=set();scopes=set()
+    allowed_scopes={s['name'] for s in watch.manifest_read(HERE/'sources.json')['sources']}
     def fetch(after):
         value=api(COMMENTS,{'id':issue['id'],'after':after})['issue']
         if value['id']!=issue['id'] or value['project']['id']!=PROJECT:raise ReviewError('LINEAR_BINDING_MISMATCH')
@@ -415,9 +417,16 @@ def comments(api, issue):
         for comment in nodes:
             if not isinstance(comment.get('id'),str) or comment['id'] in seen or not isinstance(comment.get('body'),str):
                 raise ReviewError('LINEAR_COMMENTS_INVALID')
+            for line in comment['body'].splitlines():
+                if line.startswith(SCOPE_PREFIX):
+                    scope=line[len(SCOPE_PREFIX):]
+                    if scope not in allowed_scopes:raise ReviewError('LINEAR_REVIEW_SCOPE_INVALID')
+                    scopes.add(scope)
+            if len(scopes)>1:raise ReviewError('LINEAR_REVIEW_SCOPE_CONFLICT')
             seen.add(comment['id']);found=v2_coverage(comment['body'])
             if found and comment['id']!=comment_identity(issue['id'],list(found.values())):raise ReviewError('LINEAR_V2_BINDING_MISMATCH')
             merge_coverage(result,found)
+    issue['_review_scope']=next(iter(scopes)) if scopes else None
     return result
 
 
@@ -502,6 +511,7 @@ def append_findings(api, issue, items, run_url, promote=False):
     if current is None or current.get('archivedAt') or current['state']['type'] in TERMINAL:
         return None
     covered=issue_coverage(current);merge_coverage(covered,comments(api,current))
+    if current.get('_review_scope') not in (None,items[0]['source']):return None
     items=[x for x in items if x['id'] not in covered or (promote and covered[x['id']].get('assessment',{}).get('kind')!='FIX')]
     if not items:return {'status':'EXISTING',**public_issue(current)}
     heading='## FIX readiness: exact proof and acceptance' if promote else '## SPIKE: new evidence; investigation remains open'
@@ -565,6 +575,7 @@ def track(report,run_url,api=request):
         groups.setdefault(key,[]).append(item)
     for (kind,source),group in sorted(groups.items()):
         related=[i for i in issues if not i.get('archivedAt') and i['state']['type'] not in TERMINAL and
+                 i.get('_review_scope') in (None,group[0]['source']) and
                  any(x['source']==group[0]['source'] and x.get('assessment',{}).get('kind','SPIKE')=='SPIKE'
                      for x in i['_coverage'].values())]
         result=None
