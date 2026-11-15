@@ -66,6 +66,9 @@ not the aggregate upstream snapshot, head commit, time or workflow run. Previous
 reported Baileys changes therefore do not reappear when only whatsmeow changes.
 The tracker reads bounded paginated review metadata, including archived/closed
 issues, and recognizes the old v1 generator's immutable links/hash records.
+A routing-only `owa-protocol-review-scope:v1:SOURCE` comment can narrow a legacy
+mixed-source investigation without deleting its historical coverage. Conflicting
+or unknown scopes fail closed; a scope marker never grants FIX readiness.
 New evidence for an open investigation is appended with deterministic comment IDs;
 human descriptions/comments are preserved. Completed, canceled, duplicate or archived reviews are not reopened. If an
 open spike later gains valid FIX evidence for the same change, readiness is
