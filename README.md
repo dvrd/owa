@@ -67,6 +67,16 @@ The synthetic TCP fixture selects that compatibility callback explicitly;
 separate genuine-chain tests exercise the strict policy. None of these tests
 constitutes an independent cryptographic audit.
 
+Pairing now persists an explicit signature policy: historical auth format1 loads
+as Legacy, while new pairings use Current domains. New writes use auth format2;
+older binaries cannot read it. See the [pairing compatibility policy](docs/pairing-domains-20261115.md)
+before planning a code rollback after a state write.
+
+Select `Socket_Config.qr_format = .Linked_Device` (or the same Session_Config
+field) for the current linked-device URL and companion field. The zero/default
+Legacy format preserves existing callers. See [QR usage](docs/linked-device-qr-20261115.md)
+and the [reviewed reliability updates](docs/reliability-updates-20261115.md).
+
 ## Offline checks
 
 From the parent shared directory, use its matching compiler:
