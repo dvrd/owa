@@ -187,7 +187,7 @@ device_private_valid :: proc(private: ^[32]u8) -> bool {
 // Authentication state persistence
 
 MAX_AUTH_STATE_SIZE :: 8192
-AUTH_STATE_VERSION :: 1
+AUTH_STATE_VERSION :: 2
 AUTH_STATE_MAGIC :: "ODWAUTH\x00"
 
 Auth_State :: struct {
@@ -253,7 +253,9 @@ auth_state_validate :: proc(state: ^Auth_State) -> Auth_Store_Error {
 	return {}
 }
 
-// Versioned native state. The checksum detects corruption, not malicious
+// Version2 persists the exact pairing signature policy. Version1 loads as Legacy;
+// rewriting preserves that policy rather than silently changing signed domains.
+// The checksum detects corruption, not malicious
 // modification. Secret bytes are stored unencrypted, matching the old auth
 // directory's persistence model; the file writer restricts mode to 0600.
 auth_state_encode :: proc(
@@ -270,7 +272,7 @@ auth_state_encode :: proc(
 	required := 320
 	if state.account.valid {
 		required +=
-			173 +
+			174 +
 			state.account.jid_size +
 			state.account.name_size +
 			state.account.platform_size +
@@ -330,6 +332,8 @@ auth_account_encode :: proc(dst: []u8, state: ^Auth_State, at: ^int) {
 		auth_put_u32(dst, at, state.account.key_index)
 		dst[at^] = state.account.hosted ? 1 : 0
 		at^ += 1
+		dst[at^] = u8(state.account.signature_policy)
+		at^ += 1
 		parts := [?][]u8 {
 			state.account.jid[:state.account.jid_size],
 			state.account.name[:state.account.name_size],
@@ -386,7 +390,7 @@ auth_state_decode :: proc(
 
 	next.account.valid = src[at] == 1
 	at += 1
-	if account_error := auth_account_decode(&next, src, &at, end);
+	if account_error := auth_account_decode(&next, src, &at, end, src[9]);
 	   account_error.kind != .None do return account_error
 
 	if at != end do return {kind = .Invalid_Format}
@@ -409,7 +413,7 @@ auth_state_header_validate :: proc(src: []u8) -> (int, Auth_Store_Error) {
 		return 0, {kind = .Invalid_Format}
 	}
 
-	if src[8] != 0 || src[9] != AUTH_STATE_VERSION {
+	if src[8] != 0 || (src[9] != 1 && src[9] != AUTH_STATE_VERSION) {
 		return 0, {kind = .Unsupported_Version}
 	}
 
@@ -432,7 +436,7 @@ auth_state_header_validate :: proc(src: []u8) -> (int, Auth_Store_Error) {
 }
 
 auth_account_decode :: proc(
-	next: ^Auth_State, src: []u8, at: ^int, end: int,
+	next: ^Auth_State, src: []u8, at: ^int, end: int, version: u8,
 ) -> Auth_Store_Error {
 	if next.account.valid {
 		if end - at^ < 5 do return {kind = .Invalid_Format}
@@ -442,6 +446,15 @@ auth_account_decode :: proc(
 
 		next.account.hosted = src[at^] == 1
 		at^ += 1
+		// No domain guessing: old state always keeps its original signed contract.
+		next.account.signature_policy = .Legacy
+		if version == 2 {
+			if at^ >= end || src[at^] > u8(Pairing_Signature_Policy.Current) {
+				return {kind = .Invalid_Format}
+			}
+			next.account.signature_policy = Pairing_Signature_Policy(src[at^])
+			at^ += 1
+		}
 		slots := [?][]u8 {
 			next.account.jid[:],
 			next.account.name[:],

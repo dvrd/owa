@@ -1,0 +1,96 @@
+{
+  "schema": 1,
+  "issue": "OKAMI-426",
+  "base_commit": "ebe21892604f66d6945368493c24ba08f84efaa1",
+  "host": "macOS-27.2-arm64-arm-64bit-Mach-O",
+  "compiler_sha256": "dac83d6eb5faaf9f62cef37297f34a0e21dbe3976a8b8a52c81f3db3d90f0b9c",
+  "compiler_version": "/tmp/owa426-20261115/sdk/odin version dev-2026-11:c826157de",
+  "local_package_sources_sha256": {
+    "acknowledgement_routing_test.odin": "bba97a1294d2a87ec64e4b27f8500e060ff9dff8ab7540c5247d68c01f63bc05",
+    "addressing.odin": "8d9a688892cc36379c4122bbb5ccc65534a9d0d8ba1676ce4d65304e8da8afa3",
+    "auth.odin": "19b1927e549796974cc1de0125b3f9e8066f81487f92309a9c12cadfd17e55b2",
+    "binary_node.odin": "8644533c64efb4a2e5752b7736231c7a7da341ce0f7a9429fd83210814d29ea6",
+    "binary_tokens.odin": "215b89006ab6cad6462252dceedd45419ea34f8683506794430ea3a796ee6b15",
+    "certificate_policy_test.odin": "2721ded9f820606a9932d7ad81bd085073f33c92d502af0fe281b525f7bce368",
+    "connection.odin": "ff4a04e10124f5389567355c2693f0c85d33a4b8d7ab0abdd44e222c0622492e",
+    "media.odin": "84f533bafc9b6ee87b65cd31a5bd7f42c06412c5d36e05f00cb6ffc38ed046e0",
+    "media_deadline_test.odin": "9294fd18766194513fd0360c93619b952a7e6f96b7fbeed9f62033110c68cee4",
+    "media_retry_test.odin": "08254d034320fdefdfc1eef58da4784c90b106bb7d1306bcab45b029a9debb89",
+    "message_ack_contract_test.odin": "4cca7cd90acadfc0da5e4a23e74c710cd4086fd39e0e296ac38f9f3d00ea1515",
+    "message_ack_durable_test.odin": "5d7b2df86ceab24302cb2758ee2747ea9f0428caeb482a15b4141c1910f509d0",
+    "negative_ack_test.odin": "a05a380faca2e31041173abd105ca662ff55232856f96a98d1cdfeae8550b02d",
+    "observer.odin": "1a6724cb65fbfb2e4274e4a74dd8887bf4cce3b29ead0deca5e6a4a8e67b2ad3",
+    "pairing.odin": "1dea4dbdce075816c2720b5f6109014284fea64c4a53864f3937c2cdd4dec8a7",
+    "pairing_domains_test.odin": "8c1baf497efc34dbc9a16fa1cc7a267c059c7ae87439fd9756e02bdf84ab50ed",
+    "protobuf.odin": "ae50775f5445192edf101d745a874cf164ef386384872b19eeefe6bab58d188f",
+    "protocol_ack_test.odin": "7ab3021b16756e5813c80a86fb39183e38056100389a5afb46b2317ebdb48623",
+    "receive.odin": "2428eb7ebd8977e14d5360800ad5de344b652bf865209087c1f0fb0b16d62fc6",
+    "send.odin": "328d29a62f969372b9ff66b8734bd69e3634c259b74f82f30f99ac53592174b7",
+    "send_id_test.odin": "e57bcb27f3f0d8cb7107bceafe14b2783a607dc35780bc2699a997e3763b6b2f",
+    "signal_group.odin": "ed7c89c97c3406c0a86a99afff93bbbf33fc43dffe3832f286d30fd650144e23",
+    "signal_session.odin": "45409aa89b3db56276f8979302f700772f8492998871b7b23414131a6034220b",
+    "socket.odin": "50a6cf2a835c5385036a334c49aa99fc8c7d18b979dc522800f12a420d903dd7",
+    "socket_certificate_verifier_test.odin": "280c7f89d1d2fbc83f17173a5a34b1f1379060278a2be7b7422c0387a94ea4d2",
+    "state_store.odin": "342b943f006babc5a8dcf2bf7a0bf78395d8e0c09a8298b7f0c77745e05f404c",
+    "status_ack_test.odin": "999c33b5c220b96629c5f63f5285c7a8b5c662c15790bd11485ce0a833589abe",
+    "unsupported_encryption_test.odin": "ee282e10d07911f8ccc180347cfb1587e84744156c35ba125757a96fe1a95f87"
+  },
+  "red": {
+    "command": [
+      "/tmp/owa426-20261115/sdk/odin",
+      "test",
+      "/tmp/owa426-20261115/sdk/shared/whatsapp",
+      "-vet",
+      "-warnings-as-errors",
+      "-out:/tmp/owa426-20261115/red-tests",
+      "-define:ODIN_TEST_THREADS=1"
+    ],
+    "returncode": 1,
+    "tests": 50,
+    "failed": 1,
+    "baseline_passed": 49,
+    "runtime_commit": "ebe2189",
+    "test_sha256": "9a072f56596b163ab166a6eac57e8514bb0c059b2946cf9e826f665c4baa4481",
+    "failure": "signed-hosted account rejected; wrapper-hosted companion verifies only obsolete domain"
+  },
+  "green": {
+    "command": [
+      "/tmp/owa426-20261115/sdk/odin",
+      "test",
+      "/tmp/owa426-20261115/sdk/shared/whatsapp",
+      "-vet",
+      "-warnings-as-errors",
+      "-out:/tmp/owa426-20261115/green-tests",
+      "-define:ODIN_TEST_THREADS=1"
+    ],
+    "returncode": 0,
+    "tests": 57,
+    "failed": 0
+  },
+  "asan": {
+    "command": [
+      "/tmp/owa426-20261115/sdk/odin",
+      "test",
+      "/tmp/owa426-20261115/sdk/shared/whatsapp",
+      "-vet",
+      "-warnings-as-errors",
+      "-sanitize:address",
+      "-out:/tmp/owa426-20261115/asan-tests",
+      "-define:ODIN_TEST_THREADS=1"
+    ],
+    "returncode": 0,
+    "tests": 57,
+    "failed": 0
+  },
+  "new_test_methods": 8,
+  "retained_evidence_sha256": {
+    "asan.log.gz": "c2cd240dbe5a5c6b420af696af7542d0bee5760ee7cdbe1a071504610c347537",
+    "green.log.gz": "26c4d8f6310f77c568a53d41dc3d4e1e857cd9047c3bf52c973838d8200b4404",
+    "red-matrix-test.odin.txt": "9a072f56596b163ab166a6eac57e8514bb0c059b2946cf9e826f665c4baa4481",
+    "red.log.gz": "31499bd148f73b552f7be10b6fdb728575709da4f48210389b3df5c1e950a26f"
+  },
+  "no_real_account_state_access": true,
+  "no_messages": true,
+  "upstream_executed": false,
+  "root_owned_loopback_consumer": "pending independent qualification; not claimed here"
+}

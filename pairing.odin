@@ -786,7 +786,15 @@ Pairing_Error :: struct {
 
 // Fixed owned storage; copying a completed account does not leave borrowed
 // pointers into a decrypted stanza. This contains public identity metadata.
+// Legacy is the exact historical v1 persistence contract. Current is selected
+// only by new pair-success handling and never tries alternate signature domains.
+Pairing_Signature_Policy :: enum u8 {
+	Legacy,
+	Current,
+}
+
 Paired_Account :: struct {
+	signature_policy:                    Pairing_Signature_Policy,
 	valid, hosted:                       bool,
 	jid:                                 [160]u8,
 	jid_size:                            int,
@@ -1126,11 +1134,12 @@ pairing_success_handle :: proc(
 	if identity_error.kind != .None do return 0, identity_error
 	next := Paired_Account {
 		valid = true, hosted = wrapper.account_type == 1, key_index = details.key_index,
+		signature_policy = .Current,
 	}
 	if metadata_error := pairing_success_metadata_decode(&next, pair, device_node);
 	   metadata_error.kind != .None do return 0, metadata_error
 	if signature_error := pairing_success_signatures_prepare(
-		&next, credentials, identity, wrapper.account_type,
+		&next, credentials, identity, details,
 	); signature_error.kind != .None do return 0, signature_error
 	written, reply_error := pairing_success_reply_encode(reply, &next, id)
 	if reply_error.kind != .None do return 0, reply_error
@@ -1267,7 +1276,7 @@ pairing_success_metadata_decode :: proc(
 
 pairing_success_signatures_prepare :: proc(
 	next: ^Paired_Account, credentials: ^Device_Credentials,
-	identity: Pairing_Signed_Identity, account_type: u32,
+	identity: Pairing_Signed_Identity, details: Pairing_Device_Details,
 ) -> Pairing_Error {
 	identity_public := signal_curve_public(
 		credentials.identity_private,
@@ -1275,7 +1284,9 @@ pairing_success_signatures_prepare :: proc(
 	account_key: [32]u8
 	copy(account_key[:], identity.account_signature_key)
 	signed: [2 + MAX_PAIRING_DETAILS_SIZE + 32 + 32]u8
-	signed[0], signed[1] = 6, 0
+	account_domain, domain_error := paired_account_signature_domain(.Current, details)
+	if domain_error.kind != .None do return domain_error
+	signed[0], signed[1] = 6, account_domain
 	copy(signed[2:], identity.details)
 	copy(signed[2 + len(identity.details):], identity_public[:])
 	if err := signal_curve_verify(
@@ -1286,8 +1297,7 @@ pairing_success_signatures_prepare :: proc(
 		return {kind = .Invalid_Account_Signature, signal = err}
 	}
 
-	signed[1] = 1
-	if account_type == 1 do signed[1] = 6
+	signed[1] = 1 // New companion signatures always use the standard device domain.
 
 	copy(signed[2 + len(identity.details) + 32:], account_key[:])
 	device_signature, signature_err := signal_curve_sign(
@@ -1418,17 +1428,34 @@ paired_account_validate :: proc(
 		return {kind = .Missing_Key_Index}
 	}
 
-	return paired_account_signatures_validate(account, credentials)
+	return paired_account_signatures_validate(account, credentials, details)
+}
+
+paired_account_signature_domain :: proc(
+	policy: Pairing_Signature_Policy, details: Pairing_Device_Details,
+) -> (u8, Pairing_Error) {
+	switch policy {
+	case .Legacy:
+		return 0, {}
+	case .Current:
+		if details.device_type > 1 do return 0, {kind = .Invalid_Account_Type}
+		return details.device_type == 1 ? 5 : 0, {}
+	case:
+		return 0, {kind = .Invalid_Account_Type}
+	}
 }
 
 paired_account_signatures_validate :: proc(
 	account: ^Paired_Account, credentials: ^Device_Credentials,
+	details: Pairing_Device_Details,
 ) -> Pairing_Error {
 	identity_public := signal_curve_public(
 		credentials.identity_private,
 	)
 	message: [2 + MAX_PAIRING_DETAILS_SIZE + 64]u8
-	message[0], message[1] = 6, 0
+	account_domain, domain_error := paired_account_signature_domain(account.signature_policy, details)
+	if domain_error.kind != .None do return domain_error
+	message[0], message[1] = 6, account_domain
 	copy(message[2:], account.details[:account.details_size])
 	copy(message[2 + account.details_size:], identity_public[:])
 	if err := signal_curve_verify(
@@ -1439,7 +1466,8 @@ paired_account_signatures_validate :: proc(
 		return {kind = .Invalid_Account_Signature, signal = err}
 	}
 
-	message[1] = account.hosted ? 6 : 1
+	message[1] = 1
+	if account.signature_policy == .Legacy && account.hosted do message[1] = 6
 	copy(
 		message[2 + account.details_size + 32:],
 		account.account_signature_key[:],

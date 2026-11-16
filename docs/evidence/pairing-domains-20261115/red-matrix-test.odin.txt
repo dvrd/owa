@@ -1,0 +1,106 @@
+package whatsapp
+
+import "core:crypto"
+import "core:crypto/hmac"
+import "core:testing"
+
+// Owned synthetic identities only. The signing and HMAC domains here are
+// independent literal expectations from the immutable upstream declaration.
+Pairing_Domain_Fixture :: struct {
+ credentials: Device_Credentials,
+ account_private: [32]u8,
+ details: [64]u8,
+ details_size: int,
+ identity: [512]u8,
+ identity_size: int,
+ wrapper: [1024]u8,
+ wrapper_size: int,
+ iq_attrs, device_attrs: [1]Binary_Node_Attribute,
+ iq_children: [1]Binary_Node,
+ pair_children: [2]Binary_Node,
+}
+
+pairing_domain_field :: proc(dst: []u8, at: ^int, number: u64, value: []u8) {
+ protobuf_varint_write(dst, at, number << 3 | 2)
+ protobuf_varint_write(dst, at, u64(len(value)))
+ at^ += copy(dst[at^:], value)
+}
+
+pairing_domain_fixture :: proc(wrapper_type: u32, device_type: int,
+ account_domain: u8 = 255) -> ^Pairing_Domain_Fixture {
+ f := new(Pairing_Domain_Fixture)
+ error: Credentials_Error
+ f.credentials, error = device_credentials_generate(); assert(error == .None)
+ for &b, i in f.account_private {b = u8(i + 129)}
+ f.account_private[0] &= 248; f.account_private[31] = f.account_private[31] & 127 | 64
+ // rawId=42, timestamp=1, keyIndex=7; deviceType absent is ordinary default.
+ copy(f.details[:], []u8{8, 42, 16, 1, 24, 7})
+ f.details_size = 6
+ if device_type >= 0 {
+  f.details[6], f.details[7] = 40, u8(device_type); f.details_size = 8
+ }
+ prefix := account_domain
+ if prefix == 255 {prefix = device_type == 1 ? 5 : 0}
+ account_key := signal_curve_public(f.account_private)
+ identity_key := signal_curve_public(f.credentials.identity_private)
+ signed: [128]u8; signed[0], signed[1] = 6, prefix
+ copy(signed[2:], f.details[:f.details_size]); copy(signed[2 + f.details_size:], identity_key[:])
+ signature, sign_error := signal_curve_sign(f.account_private, signed[:2 + f.details_size + 32])
+ assert(sign_error == .None)
+ at := 0
+ pairing_domain_field(f.identity[:], &at, 1, f.details[:f.details_size])
+ pairing_domain_field(f.identity[:], &at, 2, account_key[:])
+ pairing_domain_field(f.identity[:], &at, 3, signature[:]); f.identity_size = at
+ mac: [32]u8; mac_context: hmac.Context
+ hmac.init(&mac_context, .SHA256, f.credentials.adv_secret[:])
+ if wrapper_type == 1 {hmac.update(&mac_context, []u8{6, 5})}
+ hmac.update(&mac_context, f.identity[:f.identity_size]); hmac.final(&mac_context, mac[:])
+ crypto.zero_explicit(&mac_context, size_of(mac_context))
+ at = 0
+ pairing_domain_field(f.wrapper[:], &at, 1, f.identity[:f.identity_size])
+ pairing_domain_field(f.wrapper[:], &at, 2, mac[:])
+ protobuf_varint_write(f.wrapper[:], &at, 3 << 3); protobuf_varint_write(f.wrapper[:], &at, u64(wrapper_type))
+ f.wrapper_size = at
+ f.device_attrs = {{"jid", "123:4@s.whatsapp.net"}}
+ f.iq_attrs = {{"id", "synthetic-pair"}}
+ f.pair_children = {
+  {tag = "device-identity", content = f.wrapper[:f.wrapper_size]},
+  {tag = "device", attrs = f.device_attrs[:]},
+ }
+ f.iq_children = {{tag = "pair-success", content = f.pair_children[:]}}
+ return f
+}
+
+pairing_domain_iq :: proc(f: ^Pairing_Domain_Fixture) -> Binary_Node {
+ return {tag = "iq", attrs = f.iq_attrs[:], content = f.iq_children[:]}
+}
+
+pairing_domain_free :: proc(f: ^Pairing_Domain_Fixture) {
+ crypto.zero_explicit(f, size_of(Pairing_Domain_Fixture)); free(f)
+}
+
+pairing_domain_companion_verify :: proc(account: ^Paired_Account,
+ credentials: ^Device_Credentials, domain: u8) -> Signal_Error {
+ public := signal_curve_public(credentials.identity_private)
+ message: [2 + MAX_PAIRING_DETAILS_SIZE + 64]u8; message[0], message[1] = 6, domain
+ copy(message[2:], account.details[:account.details_size])
+ copy(message[2 + account.details_size:], public[:])
+ copy(message[2 + account.details_size + 32:], account.account_signature_key[:])
+ return signal_curve_verify(public, message[:2 + account.details_size + 64], account.device_signature[:])
+}
+
+@(test)
+pairing_current_domains_follow_signed_device_type_independent_of_wrapper :: proc(t: ^testing.T) {
+ for wrapper in 0..<2 {
+  for device in ([]int{-1, 0, 1}) {
+   f := pairing_domain_fixture(u32(wrapper), device); defer pairing_domain_free(f)
+   account: Paired_Account; reply: [2048]u8
+   _, error := pairing_success_handle(&account, pairing_domain_iq(f), &f.credentials, reply[:])
+   testing.expect_value(t, error.kind, .None)
+   if error.kind != .None {continue}
+   testing.expect_value(t, pairing_domain_companion_verify(&account, &f.credentials, 1), .None)
+   testing.expect(t, pairing_domain_companion_verify(&account, &f.credentials, 6) != .None)
+   testing.expect_value(t, paired_account_validate(&account, &f.credentials).kind, .None)
+  }
+ }
+}
