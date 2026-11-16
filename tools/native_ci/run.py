@@ -296,13 +296,15 @@ def run(args, report):
                     '-define:ODIN_TEST_THREADS=1', '-define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true',
                     '-out:'+str(args.evidence/(name+'-'+sanitizer))],
                     name+'-'+sanitizer, args.evidence, env, rows, 600)
-            for name in ('loopback_noise', 'recovery_campaign', 'encrypted_recovery'):
+            for name in ('loopback_noise', 'recovery_campaign', 'encrypted_recovery',
+                         'version_http'):
                 report_path = args.evidence/(name+'-'+sanitizer+'.json')
                 argv = [sys.executable, copied/'tests'/name/'run.py', '--odin', compiler,
                     '--shared-root', shared, '--sanitize', sanitizer, '--report', report_path]
                 if name == 'recovery_campaign': argv += ['--scorecard', args.evidence/('chaos-'+sanitizer+'.tsv')]
                 if name == 'encrypted_recovery': argv += ['--socket-transport', 'native-tcp']
-                execute(argv, name+'-'+sanitizer, args.evidence, env, rows, 900)
+                execute(argv, name+'-'+sanitizer, args.evidence, env, rows,
+                        180 if name == 'version_http' else 900)
                 if name == 'encrypted_recovery':
                     report.setdefault('coupled_native_tcp_recovery', {})[sanitizer] = \
                         coupled_recovery_result(report_path, copied)
