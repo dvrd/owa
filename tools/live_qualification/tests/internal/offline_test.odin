@@ -72,10 +72,9 @@ probe_storage_is_private_complete_exclusive_and_resumable :: proc(t: ^testing.T)
  other := new(Storage); defer free(other)
  testing.expect_value(t, storage_open(other, path, .Pair_New, "offline"), .Already_Open)
  lock_path := storage_path(path, "owner.lock"); defer delete(lock_path)
- script := "import os,fcntl,sys; f=os.open(sys.argv[1],os.O_RDWR)\n" +
-  "try: fcntl.lockf(f,fcntl.LOCK_EX|fcntl.LOCK_NB)\n" +
-  "except BlockingIOError: sys.exit(0)\n" + "sys.exit(1)"
- process, started := os.process_start({command = {"/usr/bin/python3", "-c", script, lock_path}})
+ process, started := os.process_start({command = {
+  "sh", #directory + "/tests/lock_peer/run.sh", lock_path,
+ }})
  assert(started == nil)
  state, waited := os.process_wait(process)
  testing.expect(t, waited == nil && state.exit_code == 0, "second process must not own lock")

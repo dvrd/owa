@@ -34,7 +34,7 @@ def digest(path):
 def snapshot(shared):
     paths = list((shared/'whatsapp').glob('*.odin'))
     paths += list((shared/'whatsapp/tests/internal').glob('*.odin'))
-    paths += [shared/'whatsapp/tests/run.py']
+    paths += [shared/'whatsapp/tests/run.sh']
     for directory in ['ascii', 'surf', 'http', 'websocket', 'async']:
         paths += list((shared/directory).rglob('*.odin'))
     for directory in ['core', 'base', 'vendor/zlib']:
@@ -189,7 +189,7 @@ def main():
                     row['duration_seconds'] = time.monotonic()-start
             names = focused_names(args.shared_root)
             focused = Path(tmp)/'focused'
-            command = ['python3', str(args.shared_root/'whatsapp/tests/run.py'), '--odin', str(args.odin),
+            command = ['bash', str(args.shared_root/'whatsapp/tests/run.sh'), '--odin', str(args.odin),
                        '--package', '.', '--internal-only', '--', '-keep-executable', '-thread-count:1',
                        '-define:ODIN_TEST_THREADS=1', '-define:ODIN_TEST_NAMES='+','.join(names),
                        '-warnings-as-errors', '-vet', '-out:'+str(focused)]
