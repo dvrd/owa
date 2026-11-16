@@ -1,0 +1,61 @@
+{
+  "issue": "OKAMI-424",
+  "pr": "https://github.com/dvrd/owa/pull/1",
+  "user_approved_scope": "Only the two reviewed tooling commits ending0e1d22c; no unpublished native/auth/ACK changes",
+  "base": "7965d81ad9e8c4d285f0345503a33d31048058a1",
+  "feature_head": "0e1d22c3adc994baa8c5916cc89e0490bedab882",
+  "merge": "ca2152dcf866974c9e500bddbe92cbca8255ce4a",
+  "exact_approved_tree_verified": true,
+  "merge_method": "normal merge; match-head guard; no admin/force bypass",
+  "offline_runs": [
+    43852799285,
+    43852885083
+  ],
+  "tests_each_run": 127,
+  "activation": {
+    "run": 43854139619,
+    "attempt": 2,
+    "artifact_id": 14220661375,
+    "created_at": "2026-11-16T11:06:21Z",
+    "linear": {
+      "compatibility_approved": false,
+      "status": "EXISTING"
+    },
+    "scan": {
+      "compatibility_approved": false,
+      "report_ready": true,
+      "status": "REVIEW_REQUIRED"
+    },
+    "no_duplicate_created": true
+  },
+  "initial_activation_failure": "UPSTREAM_HTTP_FAILED; Linear step skipped; one retry succeeded",
+  "workflow": {
+    "id": 416678808,
+    "name": "Daily upstream compatibility triage",
+    "path": ".github/workflows/protocol-review.yml",
+    "state": "active"
+  },
+  "optional_review": "CodeRabbit not required by GitHub; cancelled after merge, no submitted findings at final capture",
+  "local_runtime_and_owner_refinements_unpublished": true,
+  "evidence_sha256": {
+    "final-pr-state.json.gz": "da4143bff5573367faac0d09be188add1788f3b8b020ca213713eca59341df09",
+    "activation-success.log.gz": "3fe01e9425cfa07c684c5eff93950521e95fccd4f06697bb2be4256f4fb76e29",
+    "feature-runs.json.gz": "746455e21ba6a913bb016cdc087668c5cf54279fc835439f75c1d05c2862f8b3",
+    "pr-ci.log.gz": "e7c0199303cd3422fc7f7f42f1eb4fdc3354d51a1be71290b5f4d6e3baecb73f",
+    "activation-failed.log.gz": "3cb8b99549c97da49fba718ff15aa821a7084033c52507144c91a7f9a4fde9e6",
+    "activation-success-jobs.json.gz": "7fe63efcebf94a9dbe2c561843d5789dad9226795d3a3184408f598bf9796d60",
+    "PLAN.md.gz": "67e26d90f43471c604c1f4f4dec55f98dddb54bd2f7a8cef4039376137e43cb3",
+    "activation-artifacts-index.json.gz": "4ea25f1053f47ecc574899777a0a72f809e495a71a240f68dfcc4c4f06f423a8",
+    "required-checks.json.gz": "ac73670af3abed54ac6fb4695131f4099be9fbe39d6076c5d0264a6bbdae9d83",
+    "CHANGE.patch.gz": "b13a0cdc861395f25f37a63091a998d468c2fe07dfa15087e351abb31add6a87",
+    "successful-attempt-artifact.zip": "25666e939b45cc10622ebf8f5ee6989664951382fed9fe3fd11c9aa2b165be64",
+    "activation-jobs.json.gz": "bee136433f9d51e1a3394ced4e563f1f9f6eef843cefc0932b8e3108d14f92bf",
+    "main-rules.json.gz": "ad2d9bce436c0552820a7cbe7adcdad183162c2c5108739882624d9813b82bf7",
+    "pr-ci-jobs.json.gz": "dd7e2d357d456db66f2d107be67f5921ca69fec9a8dee527957619b1c6336145",
+    "final-merge-preflight.json.gz": "e04558af7e5664b5a6dad5e6cfc40002e2311470de64cba9bed8dda74add77e2",
+    "PULL_REQUEST.md.gz": "9c92294e8b4030b21ff54e72f0f5276e95f64aa94abdf7057b2d4e02aa8e7f4f",
+    "pr-merged.json.gz": "f2a7078d6b7e22a3e55b6d5f3a3458057a7c87c3f6bc79b5ec6d5b10b2d949cf",
+    "workflow-active.json.gz": "431cc80752b50b42905cdd6d346e1fe5e26c88f56c849fd7c55122f1e80bb4ea",
+    "activation-verified.json.gz": "7d5d59b16b4d21d417fb8c2b8fcb74ae884d1d571291e9526af739ee5ea8de4f"
+  }
+}
