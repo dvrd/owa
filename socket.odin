@@ -46,6 +46,8 @@ Socket_Error_Kind :: enum {
 	Deadline_Failed,
 	// A tracked outgoing message was rejected; explicit caller retry/cancel only.
 	Message_Rejected,
+	// Incoming encrypted content is unsupported; no successful receive occurred.
+	Unsupported_Message_Encryption,
 }
 Socket_Error :: struct {
 	kind:       Socket_Error_Kind,

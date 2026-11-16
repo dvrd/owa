@@ -1,0 +1,82 @@
+{
+  "issue": "OKAMI-425",
+  "baseline": "45a4a24",
+  "red": "3 new behavioral regression tests fail against original runtime; durable bytes changed and negative ACK absent",
+  "green": {
+    "initial_full_tests": 48,
+    "final_full_asan_tests": 49,
+    "noise_loopbacks": 4,
+    "encrypted_crash_stages": 11,
+    "encrypted_native_campaign_passed": true
+  },
+  "compiler_sha256": "dac83d6eb5faaf9f62cef37297f34a0e21dbe3976a8b8a52c81f3db3d90f0b9c",
+  "runtime_sha256": {
+    "acknowledgement_routing_test.odin": "bba97a1294d2a87ec64e4b27f8500e060ff9dff8ab7540c5247d68c01f63bc05",
+    "addressing.odin": "8d9a688892cc36379c4122bbb5ccc65534a9d0d8ba1676ce4d65304e8da8afa3",
+    "auth.odin": "dc85a528e10261a2f4efcd6d4318a54f8badda3eb64f726198893d08fabafbcf",
+    "binary_node.odin": "8644533c64efb4a2e5752b7736231c7a7da341ce0f7a9429fd83210814d29ea6",
+    "binary_tokens.odin": "215b89006ab6cad6462252dceedd45419ea34f8683506794430ea3a796ee6b15",
+    "certificate_policy_test.odin": "2721ded9f820606a9932d7ad81bd085073f33c92d502af0fe281b525f7bce368",
+    "connection.odin": "ff4a04e10124f5389567355c2693f0c85d33a4b8d7ab0abdd44e222c0622492e",
+    "media.odin": "84f533bafc9b6ee87b65cd31a5bd7f42c06412c5d36e05f00cb6ffc38ed046e0",
+    "media_deadline_test.odin": "9294fd18766194513fd0360c93619b952a7e6f96b7fbeed9f62033110c68cee4",
+    "media_retry_test.odin": "08254d034320fdefdfc1eef58da4784c90b106bb7d1306bcab45b029a9debb89",
+    "message_ack_contract_test.odin": "4cca7cd90acadfc0da5e4a23e74c710cd4086fd39e0e296ac38f9f3d00ea1515",
+    "message_ack_durable_test.odin": "5d7b2df86ceab24302cb2758ee2747ea9f0428caeb482a15b4141c1910f509d0",
+    "negative_ack_test.odin": "a05a380faca2e31041173abd105ca662ff55232856f96a98d1cdfeae8550b02d",
+    "observer.odin": "1a6724cb65fbfb2e4274e4a74dd8887bf4cce3b29ead0deca5e6a4a8e67b2ad3",
+    "pairing.odin": "3c927f8be59659ca2dd66790ea82a83f39c85635003871e6244ccdc68f66c2cd",
+    "protobuf.odin": "ae50775f5445192edf101d745a874cf164ef386384872b19eeefe6bab58d188f",
+    "protocol_ack_test.odin": "7ab3021b16756e5813c80a86fb39183e38056100389a5afb46b2317ebdb48623",
+    "receive.odin": "2428eb7ebd8977e14d5360800ad5de344b652bf865209087c1f0fb0b16d62fc6",
+    "send.odin": "328d29a62f969372b9ff66b8734bd69e3634c259b74f82f30f99ac53592174b7",
+    "send_id_test.odin": "e57bcb27f3f0d8cb7107bceafe14b2783a607dc35780bc2699a997e3763b6b2f",
+    "signal_group.odin": "ed7c89c97c3406c0a86a99afff93bbbf33fc43dffe3832f286d30fd650144e23",
+    "signal_session.odin": "45409aa89b3db56276f8979302f700772f8492998871b7b23414131a6034220b",
+    "socket.odin": "50a6cf2a835c5385036a334c49aa99fc8c7d18b979dc522800f12a420d903dd7",
+    "socket_certificate_verifier_test.odin": "280c7f89d1d2fbc83f17173a5a34b1f1379060278a2be7b7422c0387a94ea4d2",
+    "state_store.odin": "342b943f006babc5a8dcf2bf7a0bf78395d8e0c09a8298b7f0c77745e05f404c",
+    "status_ack_test.odin": "999c33b5c220b96629c5f63f5285c7a8b5c662c15790bd11485ce0a833589abe",
+    "unsupported_encryption_test.odin": "ee282e10d07911f8ccc180347cfb1587e84744156c35ba125757a96fe1a95f87"
+  },
+  "evidence_sha256": {
+    "425-encrypted-recovery.json.gz": "91d09c628f391790c7d35f5ff926a1e8e753445104135ad334c2c2f8848fbaa0",
+    "425-final-asan.log.gz": "659dc1275d51d0357f9c16d3096360855bfb19a4b891958e6c873b3c6c2a7fa5",
+    "425-green.log.gz": "7b46161e59a7d08b10b2174eaad9dec52dfede8ac478ee24da52741880b81987",
+    "425-loopback.json.gz": "60e69321d6a51c95aee777c8e4e9b08713bdc58c57094720e2ba23ad8013a182",
+    "425-red-actual.log.gz": "4b049a59b9a66312ff54e9d1b1dd6c1467e6ff22d5f2259063403c8edcf9699d"
+  },
+  "references": [
+    {
+      "url": "https://raw.githubusercontent.com/WhiskeySockets/Baileys/81345beb67ca3fb0eb79a2c20cd4ac24da517929/src/Defaults/index.ts",
+      "sha256": "596ce97cbf0a179673c623f8cc4f01753d945a622d982a11be1c098c97708de1",
+      "path": "src/Defaults/index.ts"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WhiskeySockets/Baileys/81345beb67ca3fb0eb79a2c20cd4ac24da517929/src/Utils/decode-wa-message.ts",
+      "sha256": "f700193d37723fd69a5e7558531408817a9a88f39b1db4d6eceff3c739e616a1",
+      "path": "src/Utils/decode-wa-message.ts"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WhiskeySockets/Baileys/81345beb67ca3fb0eb79a2c20cd4ac24da517929/src/Utils/generics.ts",
+      "sha256": "6ee7eb29b2e672390ce51a0a977f4abdd2e494aa0a9aee195e8fc9ef734df2a0",
+      "path": "src/Utils/generics.ts"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WhiskeySockets/Baileys/81345beb67ca3fb0eb79a2c20cd4ac24da517929/src/Utils/index.ts",
+      "sha256": "26ded480f8b95cacfe6540bb845a16902b6e81b8b2ffe79526d9b311b6a87132",
+      "path": "src/Utils/index.ts"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WhiskeySockets/Baileys/81345beb67ca3fb0eb79a2c20cd4ac24da517929/src/Utils/browser-utils.ts",
+      "path": "src/Utils/browser-utils.ts",
+      "sha256": "4bb7f4d3a2ea0140a8cf6960ce10d48aa149233001d9e214449a5b9db08b9b0f"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/WhiskeySockets/Baileys/81345beb67ca3fb0eb79a2c20cd4ac24da517929/src/Utils/companion-reg-client-utils.ts",
+      "path": "src/Utils/companion-reg-client-utils.ts",
+      "sha256": "f2320d7295339b838330f3389dcc4c35ce2c000263f92c977594961de3353514"
+    }
+  ],
+  "scope": "Owned synthetic tests and localhost only; no current server interoperability, external account or provider qualification"
+}

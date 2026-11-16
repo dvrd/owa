@@ -117,6 +117,11 @@ socket_message_node_process :: proc(
 		&history_receipt,
 	)
 	if err.kind != .None {
+		if err.kind == .Unsupported_Message_Encryption {
+			// Negative transport ACK only: never send delivery receipts, retain a
+			// success marker or automatically retry an unsupported cipher.
+			return {}, socket_acknowledge(socket, node, socket_message_encryption_nack(node))
+		}
 		if slice.contains(
 			[]type_of(err.kind) {
 				.Signal_Failed,
@@ -194,6 +199,12 @@ socket_process_message :: proc(
 ) {
 	group, participant, id, route_error := socket_message_route_decode(node)
 	if route_error.kind != .None do return {}, route_error
+
+	// Preflight every encrypted child before deduplication, self filtering or
+	// staged ratchet work. Mixed supported/unsupported content is indivisible.
+	if socket_message_encryption_nack(node) != 0 {
+		return {}, {kind = .Unsupported_Message_Encryption}
+	}
 
 	name, name_error := socket_inbox_key(
 		socket,
@@ -468,9 +479,32 @@ socket_message_child_decrypt :: proc(
 	return {}
 }
 
+// Pinned Baileys 81345beb src/Utils/decode-wa-message.ts NACK_REASONS.
+// These are client negative ACK reasons, not server rejection codes.
+MESSAGE_NACK_UNRECOGNIZED_ENCRYPTION: u32 : 490
+MESSAGE_NACK_MISSING_SECRET: u32 : 495
+socket_message_encryption_nack :: proc(node: Binary_Node) -> u32 {
+	children, ok := node.content.([]Binary_Node)
+	if !ok do return 0 // Shape validation remains with the ordinary decoder.
+	reason: u32
+	for child in children {
+		if child.tag != "enc" do continue
+		kind, _ := pairing_node_attr(child, "type")
+		switch kind {
+		case "pkmsg", "msg", "skmsg":
+		case "msmsg": reason = MESSAGE_NACK_MISSING_SECRET
+		case: return MESSAGE_NACK_UNRECOGNIZED_ENCRYPTION
+		}
+	}
+	return reason
+}
+
 socket_message_payload_decrypt :: proc(
 	socket: ^Socket, candidate: ^State_Store, node: Binary_Node, group, participant: string,
 ) -> ([]u8, Socket_Error) {
+	if socket_message_encryption_nack(node) != 0 {
+		return nil, {kind = .Unsupported_Message_Encryption}
+	}
 	staged := new(Socket)
 	defer {
 		crypto.zero_explicit(staged, size_of(Socket)); free(staged)
