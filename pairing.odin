@@ -61,8 +61,13 @@ Protocol_Node_Observer :: #type proc(
 	info: Protocol_Node_Info,
 )
 
+// Legacy keeps the historical four-field QR. Linked_Device opts in to the
+// current URL and companion web-client field; login payloads are unchanged.
+Pairing_QR_Format :: enum {Legacy, Linked_Device}
+
 Session_Config :: struct {
 	payload:            Payload_Config,
+	qr_format:          Pairing_QR_Format,
 	// Empty leaves persistence to the caller; otherwise checkpoint before
 	// starting registration and before acknowledging successful pairing.
 	auth_path:          string,
@@ -137,6 +142,10 @@ session_init :: proc(
 	   client.phase != .Initialized ||
 	   auth == nil {
 		return {kind = .Invalid_State}
+	}
+
+	if !pairing_qr_format_valid(config.qr_format) {
+		return {kind = .Invalid_Config}
 	}
 
 	if err := auth_state_validate(auth); err.kind != .None {
@@ -470,6 +479,9 @@ session_pair_device :: proc(
 		&session.qr_state,
 		now,
 		session.qr[:],
+		session.config.qr_format,
+		session.config.payload.browser_os,
+		session.config.payload.browser_name,
 	)
 	if qr_err.kind != .None {
 		return {}, session_fail(
@@ -571,6 +583,9 @@ session_tick :: proc(
 			&session.qr_state,
 			now,
 			session.qr[:],
+			session.config.qr_format,
+			session.config.payload.browser_os,
+			session.config.payload.browser_name,
 		)
 		if qr_err.kind == .QR_Expired {
 			return {}, session_fail(
@@ -747,7 +762,8 @@ session_keepalive :: proc(session: ^Session) -> Session_Error {
 
 MAX_PAIRING_REFS :: 16
 MAX_PAIRING_REF_SIZE :: 1024
-MAX_PAIRING_QR_SIZE :: MAX_PAIRING_REF_SIZE + 3 * 44 + 3
+PAIRING_LINKED_DEVICE_QR_PREFIX :: "https://wa.me/settings/linked_devices#"
+MAX_PAIRING_QR_SIZE :: MAX_PAIRING_REF_SIZE + 3 * 44 + 3 + len(PAIRING_LINKED_DEVICE_QR_PREFIX) + 2
 MAX_PAIRING_DETAILS_SIZE :: 4096
 MAX_PAIRING_IDENTITY_SIZE :: 16384
 PAIRING_SERVER :: "@s.whatsapp.net"
@@ -775,6 +791,7 @@ Pairing_Error_Kind :: enum {
 	Protobuf_Failed,
 	Signal_Failed,
 	Binary_Node_Failed,
+	Invalid_QR_Format,
 }
 
 Pairing_Error :: struct {
@@ -927,24 +944,66 @@ pairing_jid_decode :: proc(
 	return local, device, {}
 }
 
+@(private)
+pairing_qr_format_valid :: proc(format: Pairing_QR_Format) -> bool {
+	return format == .Legacy || format == .Linked_Device
+}
+
+// Pinned 81345beb companion-reg-client-utils.ts. This enum is distinct from
+// DeviceProps.PlatformType, which describes a different protocol field.
+pairing_qr_companion_type :: proc(browser_os, browser_name: string) -> u8 {
+	if browser_name == "Desktop" {
+		return browser_os == "Windows" ? 8 : 7
+	}
+	switch browser_name {
+	case "Chrome": return 1
+	case "Edge": return 2
+	case "Firefox": return 3
+	case "IE": return 4
+	case "Opera": return 5
+	case "Safari": return 6
+	case: return 9
+	}
+}
+
 pairing_qr_encode :: proc(
 	dst: []u8,
 	ref: string,
 	noise_public, identity_public, adv_secret: [32]u8,
+	format: Pairing_QR_Format = .Legacy,
+	browser_os: string = "Ubuntu",
+	browser_name: string = "Chrome",
 ) -> (
 	n: int,
 	err: Pairing_Error,
 ) {
+	if !pairing_qr_format_valid(format) {
+		return 0, {kind = .Invalid_QR_Format}
+	}
 	if !pairing_ref_valid(ref) {
 		return 0, {kind = .Invalid_Ref}
 	}
 
 	required := len(ref) + 3 * 44 + 3
+	if format == .Linked_Device {
+		required += len(PAIRING_LINKED_DEVICE_QR_PREFIX) + 2
+	}
 	if len(dst) < required {
 		return required, {kind = .Destination_Undersized}
 	}
+	// Profile strings may also borrow dst; read them before output writes.
+	companion_type := pairing_qr_companion_type(browser_os, browser_name)
 
-	n = copy(dst, ref)
+	if format == .Linked_Device {
+		// A caller may borrow ref from dst. Save it before writing the prefix.
+		reference: [MAX_PAIRING_REF_SIZE]u8
+		copy(reference[:], ref)
+		n = copy(dst, PAIRING_LINKED_DEVICE_QR_PREFIX)
+		n += copy(dst[n:], reference[:len(ref)])
+		crypto.zero_explicit(&reference, size_of(reference))
+	} else {
+		n = copy(dst, ref)
+	}
 	keys := [?][32]u8{noise_public, identity_public, adv_secret}
 	defer crypto.zero_explicit(&keys, size_of(keys))
 	for &key in keys {
@@ -953,6 +1012,10 @@ pairing_qr_encode :: proc(
 		_, encode_err := base64.encode_into_buf(dst[n:][:44], key[:])
 		assert(encode_err == nil)
 		n += 44
+	}
+	if format == .Linked_Device {
+		dst[n], dst[n + 1] = ',', '0' + companion_type
+		n += 2
 	}
 	return n, {}
 }
@@ -1058,6 +1121,9 @@ pairing_qr_next :: proc(
 	state: ^Pairing_QR_State,
 	now: time.Time,
 	dst: []u8,
+	format: Pairing_QR_Format = .Legacy,
+	browser_os: string = "Ubuntu",
+	browser_name: string = "Chrome",
 ) -> (
 	n: int,
 	err: Pairing_Error,
@@ -1081,6 +1147,7 @@ pairing_qr_next :: proc(
 		state.noise_public,
 		state.identity_public,
 		state.adv_secret,
+		format, browser_os, browser_name,
 	)
 	if encode_err.kind != .None {
 		return written, encode_err

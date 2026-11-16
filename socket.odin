@@ -74,6 +74,7 @@ Socket_Config :: struct {
 	// Applications may reject the Noise certificate before ClientFinish is sent.
 	verify_certificate:                 Certificate_Verifier,
 	payload:                            Payload_Config,
+	qr_format:                          Pairing_QR_Format,
 	auth_path, prekey_path, state_path: string,
 	query_timeout:                      time.Duration,
 	observe_node:                       Protocol_Node_Observer,
@@ -184,6 +185,7 @@ socket_connect :: proc(
 		auth,
 		{
 			payload = settings.payload,
+			qr_format = settings.qr_format,
 			auth_path = settings.auth_path,
 			observe_node = settings.observe_node,
 			observer_data = settings.observer_data,
@@ -286,6 +288,9 @@ socket_connect_validate :: proc(
 }
 
 socket_connect_settings :: proc(config: Socket_Config) -> (Socket_Config, Socket_Error) {
+	if !pairing_qr_format_valid(config.qr_format) {
+		return {}, {kind = .Invalid_Config}
+	}
 	settings := config
 	if settings.host == "" {
 		settings.host = "web.whatsapp.com"
