@@ -156,8 +156,15 @@ def watch_capture(argv, clock=time.monotonic):
             raise ScheduleError('WATCH_RESULT_INVALID')
         return value
     finally:
-        selector.close(); stop_group(child,hard=expired)
-        child.stdout.close(); child.stderr.close()
+        try:
+            selector.close()
+        finally:
+            try:
+                # The controlled read-only watcher does not spawn descendants.
+                # wait() has released its PID on normal completion: never signal it then.
+                if child.returncode is None: stop_group(child,hard=expired)
+            finally:
+                child.stdout.close(); child.stderr.close()
 
 def watch_run(args, clock=time.monotonic, argv=None):
     path=args.state_dir/'report.json'; previous=None
@@ -166,6 +173,8 @@ def watch_run(args, clock=time.monotonic, argv=None):
         except FileNotFoundError: old_identity=None
         command=argv or [sys.executable,str(HERE/'watch.py'),'--manifest',str(args.manifest),
                          '--state-dir',str(args.state_dir)]
+        if argv is None and getattr(args,'approved_contract',None) is not None:
+            command.extend(['--approved-contract',str(args.approved_contract)])
         summary=watch_capture(command,clock)
         fd,identity=report_open(path)
         with os.fdopen(fd,'rb') as stream:

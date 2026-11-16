@@ -13,10 +13,11 @@ SPEC = importlib.util.spec_from_file_location('protocol_schedule', HERE/'schedul
 schedule = importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(schedule)
 
 
-def prepare(state, output, scan=schedule.watch_run):
+def prepare(state, output, scan=schedule.watch_run, approved_contract=None):
     with schedule.watch.locked_state(output):
         try:
-            report = scan(types.SimpleNamespace(state_dir=state, manifest=HERE/'sources.json'))
+            report = scan(types.SimpleNamespace(state_dir=state, manifest=HERE/'sources.json',
+                                                approved_contract=approved_contract))
             if report.get('status') not in ('REVIEW_REQUIRED', 'NO_MONITORED_DRIFT'):
                 raise ValueError('invalid status')
             encoded = json.dumps(report, separators=(',', ':')).encode()
@@ -36,10 +37,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--state-dir', type=Path, required=True)
     parser.add_argument('--output-dir', type=Path, required=True)
+    parser.add_argument('--approved-contract', help='Explicit reviewed repo-relative target contract')
     args = parser.parse_args()
     if not args.state_dir.is_absolute() or not args.output_dir.is_absolute():
         parser.error('absolute directories required')
-    result = prepare(args.state_dir, args.output_dir)
+    result = prepare(args.state_dir, args.output_dir, approved_contract=args.approved_contract)
     if os.environ.get('GITHUB_OUTPUT'):
         with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
             stream.write('status='+result['status']+'\n')
