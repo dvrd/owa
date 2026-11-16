@@ -16,7 +16,7 @@ class IntegrationTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        for name in ['socket.odin','connection.odin','binary_node.odin']:
+        for name in ['socket.odin','connection.odin','binary_node.odin','auth.odin','pairing.odin']:
             (self.root/name).write_text('package whatsapp\n')
 
     def observation(self, path, old, new):
@@ -42,6 +42,9 @@ class IntegrationTests(unittest.TestCase):
         item = self.observation('src/Socket/socket.ts', b'const x=1;\n', b'const x=2;\n')
         value = item['assessment']
         self.assertEqual(value['kind'],'SPIKE'); self.assertTrue(value['local_targets'])
+        self.assertEqual(value['reason'],'BEHAVIOR_CHANGE_UNRESOLVED')
+        self.assertEqual({x['path'] for x in value['local_targets']},
+                         {'socket.odin','connection.odin','auth.odin','pairing.odin'})
         self.assertTrue(value['checks']); self.assertTrue(value['acceptance'])
         self.assertTrue(value['evidence']['question'])
         self.assertFalse(value['evidence']['server_compatibility_proven'])
