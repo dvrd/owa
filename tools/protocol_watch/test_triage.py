@@ -48,7 +48,8 @@ class TriageTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.values = ['token-' + str(n) for n in range(236)]
         for name in ['socket.odin', 'connection.odin', 'receive.odin', 'send.odin',
-                     'pairing.odin', 'protobuf.odin', 'signal_session.odin', 'binary_node.odin']:
+                     'pairing.odin', 'protobuf.odin', 'signal_session.odin', 'binary_node.odin',
+                     'auth.odin', 'inbound_alias.odin', 'addressing.odin']:
             (self.root / name).write_text('package whatsapp\n')
         (self.root / 'binary_tokens.odin').write_bytes(local(self.values))
 
