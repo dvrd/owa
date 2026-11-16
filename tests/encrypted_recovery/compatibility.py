@@ -97,7 +97,7 @@ def verify_export(repository, root, expected):
 
 
 def fixture_snapshot():
-    names = list(HERE.glob('*.odin'))+list(HERE.glob('*.py'))+[HERE/'README.md', NATIVE/'assets.py', NATIVE/'pin.json']
+    names = list(HERE.glob('*.odin'))+list(HERE.glob('*.py'))+[NATIVE/'assets.py', NATIVE/'pin.json']
     return {str(path): bounded.digest(path) for path in sorted(names)}
 
 

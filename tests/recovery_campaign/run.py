@@ -33,6 +33,8 @@ def digest(path):
 
 def snapshot(shared):
     paths = list((shared/'whatsapp').glob('*.odin'))
+    paths += list((shared/'whatsapp/tests/internal').glob('*.odin'))
+    paths += [shared/'whatsapp/tests/run.py']
     for directory in ['ascii', 'surf', 'http', 'websocket', 'async']:
         paths += list((shared/directory).rglob('*.odin'))
     for directory in ['core', 'base', 'vendor/zlib']:
@@ -111,14 +113,15 @@ def report_safe_exit(code):
 def focused_names(shared):
     names = []
     for file in FOCUSED:
-        source = (shared/'whatsapp'/file).read_text()
+        source = (shared/'whatsapp/tests/internal'/file).read_text()
         names += ['whatsapp.'+name for name in re.findall(r'@\(test\)\s*(\w+)\s*::', source)]
     assert len(names) >= 20
     return names
 
 
 def tsv_log(rows, path=None):
-    path = path or HERE.parents[1]/'.cruft/chaos-results.tsv'
+    if path is None:
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
         path.write_text('timestamp\texperiment_name\thypothesis\tblast_radius\tduration\tresult\tsurprises\n')
@@ -162,7 +165,8 @@ def main():
     try:
         with tempfile.TemporaryDirectory(prefix='wa-recovery-build-', dir='/tmp') as tmp:
             binary = Path(tmp)/'campaign'
-            compile_command = [str(args.odin), 'build', str(HERE), '-thread-count:1',
+            compile_command = [str(args.odin), 'build', str(HERE),
+                               '-collection:shared='+str(args.shared_root), '-thread-count:1',
                                '-warnings-as-errors', '-vet', '-out:'+str(binary)]
             if args.sanitize != 'none': compile_command.append('-sanitize:'+args.sanitize)
             execute(compile_command, report['commands'], COMPILE_TIMEOUT)
@@ -185,13 +189,13 @@ def main():
                     row['duration_seconds'] = time.monotonic()-start
             names = focused_names(args.shared_root)
             focused = Path(tmp)/'focused'
-            command = [str(args.odin), 'build', str(args.shared_root/'whatsapp'),
-                       '-build-mode:test', '-thread-count:1',
+            command = ['python3', str(args.shared_root/'whatsapp/tests/run.py'), '--odin', str(args.odin),
+                       '--package', '.', '--internal-only', '--', '-keep-executable', '-thread-count:1',
                        '-define:ODIN_TEST_THREADS=1', '-define:ODIN_TEST_NAMES='+','.join(names),
                        '-warnings-as-errors', '-vet', '-out:'+str(focused)]
             if args.sanitize != 'none': command.append('-sanitize:'+args.sanitize)
             execute(command, report['commands'], COMPILE_TIMEOUT)
-            focused_result = execute([str(focused)], report['commands'])
+            focused_result = report['commands'][-1]
             assert re.search(r'Finished\s+' + str(len(names)) + r'\s+tests\b',
                              focused_result['stdout'] + focused_result['stderr'])
             report['focused_test_names'] = names

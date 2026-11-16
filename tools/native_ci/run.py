@@ -291,8 +291,9 @@ def run(args, report):
                 runtime = report['linker_runtime']['sanitizer_runtimes'][sanitizer]['path']
                 if runtime not in (args.evidence/('empty-run-'+sanitizer+'.log')).read_text():
                     raise GateError('LOADED_SANITIZER_RUNTIME_MISMATCH')
-            for name, package in [('unit', copied), ('qualification-tools', copied/'tools/live_qualification')]:
-                execute([compiler, 'test', package, *flags, *mode,
+            for name, package in [('unit', '.'), ('qualification-tools', 'tools/live_qualification')]:
+                execute([sys.executable, copied/'tests/run.py', '--odin', compiler,
+                    '--package', package, '--internal-only', '--', *flags, *mode,
                     '-define:ODIN_TEST_THREADS=1', '-define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true',
                     '-out:'+str(args.evidence/(name+'-'+sanitizer))],
                     name+'-'+sanitizer, args.evidence, env, rows, 600)

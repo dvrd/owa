@@ -268,6 +268,8 @@ class Tests(unittest.TestCase):
             recovery.tsv_log([{'name': 'synthetic', 'hypothesis': 'external evidence',
                 'duration_seconds': .25, 'result': 'PASS'}], scorecard)
             self.assertIn('synthetic', scorecard.read_text())
+        recovery.tsv_log([{'name': 'synthetic', 'hypothesis': 'no default source artifact',
+            'duration_seconds': .25, 'result': 'PASS'}])
         self.assertEqual(before, tracked.read_bytes() if tracked.exists() else None)
 
     def test_recovery_timeout_retains_failed_command_without_retry(self):
