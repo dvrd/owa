@@ -56,6 +56,12 @@
     "PULL_REQUEST.md.gz": "9c92294e8b4030b21ff54e72f0f5276e95f64aa94abdf7057b2d4e02aa8e7f4f",
     "pr-merged.json.gz": "f2a7078d6b7e22a3e55b6d5f3a3458057a7c87c3f6bc79b5ec6d5b10b2d949cf",
     "workflow-active.json.gz": "431cc80752b50b42905cdd6d346e1fe5e26c88f56c849fd7c55122f1e80bb4ea",
-    "activation-verified.json.gz": "7d5d59b16b4d21d417fb8c2b8fcb74ae884d1d571291e9526af739ee5ea8de4f"
+    "activation-verified.json.gz": "7d5d59b16b4d21d417fb8c2b8fcb74ae884d1d571291e9526af739ee5ea8de4f",
+    "project-closure-verification.json": "823a0a348a7034c772f63b81d9726aea7b27bf96da4171892c2460c43f2e0333"
+  },
+  "project_closure": {
+    "total_issues": 89,
+    "open_issues": [],
+    "complete_page": true
   }
 }
