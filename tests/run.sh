@@ -15,7 +15,14 @@ while (($#)); do
         *) break ;;
     esac
 done
-library=$(basename -- "$root")
+library_root=$root
+if [[ -e "$root/.git" ]]; then
+    common=$(git -C "$root" rev-parse --git-common-dir)
+    [[ "$common" == /* ]] || common=$root/$common
+    library_root=$(CDPATH='' cd -- "$(dirname -- "$common")" && pwd -P)
+fi
+library=$(basename -- "$library_root")
+source_shared=$(dirname -- "$library_root")
 [[ "$library" != async || "$selected" != async ]] || selected=.
 compiler=$(command -v "$compiler" || printf '%s' "$compiler")
 compiler=$(CDPATH='' cd -- "$(dirname -- "$compiler")" && printf '%s/%s' "$PWD" "$(basename -- "$compiler")")
@@ -51,10 +58,11 @@ while IFS= read -r directory; do
     printf '%s\t%s\n' "$relative" "$private" >> "$work/suites"
 done < <(find "$root" -type d \( -name .git -o -name __pycache__ \) -prune -o -type f -name '*_test.odin' -exec dirname {} \; | sort -u)
 [[ -s "$work/suites" ]] || { printf 'No matching test suites\n' >&2; exit 2; }
-for source in "$root"/../*; do
+for source in "$source_shared"/*; do
     [[ -d "$source" ]] || continue
     name=$(basename -- "$source")
     [[ "$name" != metalized ]] || continue
+    [[ "$name" != "$library" ]] || source=$root
     if [[ -e "$root/.git" && ! -e "$source/.git" ]]; then continue; fi
     mkdir -p "$shared/$name"
     if [[ -e "$source/.git" ]]; then
