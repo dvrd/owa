@@ -8,6 +8,7 @@ import sys
 import unittest
 from unittest import mock
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import assets
 
 
@@ -66,13 +67,13 @@ class Tests(unittest.TestCase):
                 gate.live_binary_identity(link, 'macos-arm64')
 
     def gate(self):
-        spec = importlib.util.spec_from_file_location('native_gate', Path(__file__).with_name('run.py'))
+        spec = importlib.util.spec_from_file_location('native_gate', (Path(__file__).resolve().parents[1] / ('run.py')))
         gate = importlib.util.module_from_spec(spec); spec.loader.exec_module(gate)
         return gate
 
     def test_coupled_recovery_gate_rejects_memory_missing_peer_and_false_source_guards(self):
         gate = self.gate()
-        owner = Path(__file__).resolve().parents[2]
+        owner = Path(__file__).resolve().parents[3]
         spec = importlib.util.spec_from_file_location('tcp_controls',
             owner/'tests/encrypted_recovery/test_native_tcp.py')
         fixture_path = str(owner/'tests/encrypted_recovery')
@@ -258,7 +259,7 @@ class Tests(unittest.TestCase):
             self.assertEqual([row['name'] for row in rows], ['ambient-clang-version', 'selected-clang-version'])
 
     def test_external_recovery_scorecard_preserves_checkout(self):
-        path = Path(__file__).resolve().parents[2]/'tests/recovery_campaign/run.py'
+        path = Path(__file__).resolve().parents[3]/'tests/recovery_campaign/run.py'
         spec = importlib.util.spec_from_file_location('recovery_fixture', path)
         recovery = importlib.util.module_from_spec(spec); spec.loader.exec_module(recovery)
         tracked = path.parents[2]/'.cruft/chaos-results.tsv'
@@ -273,7 +274,7 @@ class Tests(unittest.TestCase):
         self.assertEqual(before, tracked.read_bytes() if tracked.exists() else None)
 
     def test_recovery_timeout_retains_failed_command_without_retry(self):
-        path = Path(__file__).resolve().parents[2]/'tests/recovery_campaign/run.py'
+        path = Path(__file__).resolve().parents[3]/'tests/recovery_campaign/run.py'
         spec = importlib.util.spec_from_file_location('timed_recovery_fixture', path)
         recovery = importlib.util.module_from_spec(spec); spec.loader.exec_module(recovery)
         records = []

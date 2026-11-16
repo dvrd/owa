@@ -15,10 +15,10 @@ import types
 import unittest
 from unittest import mock
 
-HERE=Path(__file__).resolve().parent
+HERE=Path(__file__).resolve().parents[1]
 
 def load(name):
-    spec=importlib.util.spec_from_file_location('systemd_test_'+name,HERE/(name+'.py'))
+    spec=importlib.util.spec_from_file_location('systemd_test_'+name,(HERE/'tests' if name.startswith('test_') else HERE)/(name+'.py'))
     result=importlib.util.module_from_spec(spec);spec.loader.exec_module(result);return result
 
 M=load('systemd_canary'); B=load('test_periodic_canary'); SB=load('test_supervisor')

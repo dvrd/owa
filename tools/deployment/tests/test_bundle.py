@@ -1,7 +1,7 @@
 """Generated local Git/ELF/CI evidence fixtures, never real source proof or accounts."""
 import copy,hashlib,importlib.util,json,os,subprocess,tempfile,types,unittest
 from pathlib import Path
-SPEC=importlib.util.spec_from_file_location('bundle',Path(__file__).with_name('bundle.py'));M=importlib.util.module_from_spec(SPEC);SPEC.loader.exec_module(M)
+SPEC=importlib.util.spec_from_file_location('bundle',(Path(__file__).resolve().parents[1] / ('bundle.py')));M=importlib.util.module_from_spec(SPEC);SPEC.loader.exec_module(M)
 TEST_HOST='i-00000000000000000'
 class Tests(unittest.TestCase):
  def fixture(self,tmp):

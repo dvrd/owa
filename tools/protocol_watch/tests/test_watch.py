@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-SPEC = importlib.util.spec_from_file_location('protocol_watch', Path(__file__).with_name('watch.py'))
+SPEC = importlib.util.spec_from_file_location('protocol_watch', (Path(__file__).resolve().parents[1] / ('watch.py')))
 W = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(W)
 BASE, HEAD = 'a' * 40, 'b' * 40

@@ -33,7 +33,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Offline protocol tooling tests
-        run: python3 -m unittest discover -s tools/protocol_watch -p 'test_*.py' -v
+        run: python3 -m unittest discover -s tools/protocol_watch/tests -p 'test_*.py' -v
       - name: Scan and assess bounded public upstream changes
         if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
         id: scan

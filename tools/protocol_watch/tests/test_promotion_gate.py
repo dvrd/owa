@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 SPEC = importlib.util.spec_from_file_location('promotion_gate',
-    Path(__file__).with_name('promotion_gate.py'))
+    (Path(__file__).resolve().parents[1] / ('promotion_gate.py')))
 G = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(G)
 

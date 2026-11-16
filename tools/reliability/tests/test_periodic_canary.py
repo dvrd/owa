@@ -3,10 +3,10 @@ import hashlib, importlib.util, json, os
 from pathlib import Path
 import plistlib, tempfile, time, types, unittest
 from unittest import mock
-HERE=Path(__file__).resolve().parent
+HERE=Path(__file__).resolve().parents[1]
 
 def load(name):
-    spec=importlib.util.spec_from_file_location('test_'+name,HERE/(name+'.py'))
+    spec=importlib.util.spec_from_file_location('test_'+name,(HERE/'tests' if name.startswith('test_') else HERE)/(name+'.py'))
     module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module); return module
 
 P=load('periodic_canary'); BASE=load('test_finish_soak')

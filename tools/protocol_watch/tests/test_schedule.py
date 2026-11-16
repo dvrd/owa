@@ -3,7 +3,7 @@ import contextlib, importlib.util, io, json, os
 from pathlib import Path
 import plistlib, stat, sys, tempfile, types, unittest
 from unittest import mock
-SPEC=importlib.util.spec_from_file_location('schedule',Path(__file__).with_name('schedule.py'))
+SPEC=importlib.util.spec_from_file_location('schedule',(Path(__file__).resolve().parents[1] / ('schedule.py')))
 S=importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(S)
 GOOD={'status':'NO_ACTION','summary':'No behavioral contents inferred from hashes.','findings':[]}
 

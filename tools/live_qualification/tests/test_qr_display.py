@@ -3,7 +3,7 @@ import binascii, contextlib, importlib.util, io, json, os, stat, struct, tempfil
 from pathlib import Path
 from unittest import mock
 SPEC = importlib.util.spec_from_file_location(
-    'qr_display', Path(__file__).with_name('qr_display.py'))
+    'qr_display', (Path(__file__).resolve().parents[1] / ('qr_display.py')))
 QR = importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(QR)
 
 class QRTests(unittest.TestCase):

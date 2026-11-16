@@ -9,7 +9,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-SPEC = importlib.util.spec_from_file_location('triage_watch', Path(__file__).with_name('watch.py'))
+SPEC = importlib.util.spec_from_file_location('triage_watch', (Path(__file__).resolve().parents[1] / ('watch.py')))
 W = importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(W)
 
 class IntegrationTests(unittest.TestCase):
@@ -64,7 +64,7 @@ class IntegrationTests(unittest.TestCase):
 
 class RunnerHandoffTests(unittest.TestCase):
     def module(self, name):
-        spec=importlib.util.spec_from_file_location('handoff_'+name,Path(__file__).with_name(name+'.py'))
+        spec=importlib.util.spec_from_file_location('handoff_'+name,(Path(__file__).resolve().parents[1] / (name+'.py')))
         value=importlib.util.module_from_spec(spec);spec.loader.exec_module(value);return value
 
     def test_completed_watcher_is_never_signalled_after_reaping(self):

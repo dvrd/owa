@@ -5,10 +5,10 @@ from pathlib import Path
 import tempfile
 import unittest
 
-SPEC = importlib.util.spec_from_file_location('triage', Path(__file__).with_name('triage.py'))
+SPEC = importlib.util.spec_from_file_location('triage', (Path(__file__).resolve().parents[1] / ('triage.py')))
 T = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(T)
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 TABLE_PATH = 'src/WABinary/constants.ts'
 
 

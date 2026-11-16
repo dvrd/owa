@@ -5,7 +5,7 @@ import stat
 import tempfile
 import unittest
 
-SPEC = importlib.util.spec_from_file_location('protocol_ci', Path(__file__).with_name('ci.py'))
+SPEC = importlib.util.spec_from_file_location('protocol_ci', (Path(__file__).resolve().parents[1] / ('ci.py')))
 C = importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(C)
 
 

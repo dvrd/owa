@@ -2,7 +2,7 @@ import copy,hashlib,importlib.util,json,uuid
 from pathlib import Path
 import unittest
 from unittest import mock
-SPEC=importlib.util.spec_from_file_location('linear_review',Path(__file__).with_name('linear_review.py'))
+SPEC=importlib.util.spec_from_file_location('linear_review',(Path(__file__).resolve().parents[1] / ('linear_review.py')))
 L=importlib.util.module_from_spec(SPEC);SPEC.loader.exec_module(L)
 RUN='https://github.com/dvrd/owa/actions/runs/123'
 

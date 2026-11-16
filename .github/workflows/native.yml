@@ -48,10 +48,11 @@ jobs:
           fetch-depth: 0
       - name: Verify native bootstrap controls
         run: |
-          python3 -m unittest discover -s tools/native_ci -p 'test_*.py' -v
+          python3 -m unittest discover -s tools/native_ci/tests -p 'test_*.py' -v
+          python3 -m unittest discover -s tools/live_qualification/tests -p 'test_*.py' -v
           python3 -m unittest discover -s tests/encrypted_recovery -p 'test_*.py' -v
-          python3 -m unittest discover -s tools/reliability -p 'test_*.py' -v
-          python3 -m unittest discover -s tools/deployment -p 'test_*.py' -v
+          python3 -m unittest discover -s tools/reliability/tests -p 'test_*.py' -v
+          python3 -m unittest discover -s tools/deployment/tests -p 'test_*.py' -v
       - name: Install explicit Linux linker and sanitizer runtime
         if: runner.os == 'Linux'
         run: |
