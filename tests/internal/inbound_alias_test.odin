@@ -115,8 +115,10 @@ inbound_alias_failed_decrypt_or_save_never_commits_hints :: proc(t: ^testing.T) 
   f, encrypted := inbound_alias_fixture(false); defer negative_ack_destroy(f); defer delete(encrypted)
   before := negative_ack_disk(f); defer delete(before)
   revision, durable := f.store.revision, f.store.durable_revision
+  bad_path: string
+  defer delete(bad_path)
   if fail_save {
-   bad_path := fmt.aprintf("%s/missing/state", f.directory); defer delete(bad_path)
+   bad_path = fmt.aprintf("%s/missing/state", f.directory)
    f.socket.config.state_path = bad_path
   } else {encrypted[len(encrypted) - 1] ~= 1}
   node := inbound_alias_node(encrypted, true, false); defer inbound_alias_node_destroy(node)
