@@ -1,6 +1,7 @@
 package whatsapp
 
 import ascii "../ascii"
+import http "../http"
 import "core:crypto"
 import "core:crypto/hmac"
 import "core:encoding/base64"
@@ -12,7 +13,6 @@ import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
 import network_client "../surf"
-import "core:encoding/json"
 
 // Registration, pairing and session establishment.
 
@@ -120,8 +120,8 @@ Session :: struct {
 }
 
 default_payload_config :: proc() -> Payload_Config {
-	// Defaults from the pinned Baileys package, not a claim of current server
-	// requirements. Applications can supply a different tested app version.
+	// Tested fallback defaults, not a claim of the current service version.
+	// Applications may use official discovery or supply an explicit version.
 	return {
 		version = {2, 3000, 1023223821},
 		browser_os = "Ubuntu",
@@ -2148,17 +2148,18 @@ qr_history_patterns :: proc(h: ^[7]int) -> int {
 
 // WhatsApp Web version discovery.
 
-// Match legacy index.js startBot's precedence without depending on Node/npm.
-// These are public compatibility feeds, not WhatsApp authentication endpoints.
-WPP_VERSION_URL :: "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/versions.json"
-BAILEYS_VERSION_URL ::
-	"https://raw.githubusercontent.com/WhiskeySockets/Baileys/" +
-	"master/src/Defaults/baileys-version.json"
-MAX_VERSION_JSON_SIZE :: 1 << 20
-MAX_VERSION_JSON_DEPTH :: 16
+// The service worker at web.whatsapp.com publishes client_revision. The
+// handshake triple is 2.3000 plus that revision. The compiled pin is used
+// only when that request fails. An explicit caller version bypasses this.
+WA_WEB_VERSION_URL :: "https://web.whatsapp.com/sw.js"
+WA_WEB_VERSION_BODY_MAX :: 4 << 20
+WA_WEB_VERSION_MAJOR :: 2
+WA_WEB_VERSION_MINOR :: 3000
+CLIENT_REVISION_KEY :: "client_revision"
+WA_WEB_USER_AGENT :: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
+	"(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 Web_Version_Source :: enum {
-	WPPConnect,
-	Baileys,
+	WhatsApp,
 	Pinned,
 }
 Version_Error_Kind :: enum {
@@ -2166,23 +2167,18 @@ Version_Error_Kind :: enum {
 	HTTP_Failed,
 	HTTP_Status,
 	Body_Oversized,
-	Invalid_JSON,
-	Depth_Limit,
 	Missing_Version,
 	Invalid_Version,
-	Allocation_Failed,
 }
 Version_Error :: struct {
-	kind:       Version_Error_Kind,
-	http:       network_client.HTTP_Error,
-	status:     int,
-	json:       json.Error,
-	allocation: mem.Allocator_Error,
+	kind:   Version_Error_Kind,
+	http:   network_client.HTTP_Error,
+	status: int,
 }
 Web_Version_Result :: struct {
-	version:                       [3]u32,
-	source:                        Web_Version_Source,
-	primary_error, fallback_error: Version_Error,
+	version:     [3]u32,
+	source:      Web_Version_Source,
+	fetch_error: Version_Error,
 }
 // A callback transfers ownership of its Response to discovery, which always
 // destroys it. This seam permits deterministic/offline fixture tests.
@@ -2198,8 +2194,7 @@ Version_Fetcher :: struct {
 	),
 }
 
-// Network failures never invent a version: return pinned defaults only after
-// both compatibility feeds fail. Callers should report source/attempt errors.
+// A failed fetch keeps the compiled pin. Callers report fetch_error.
 // An explicit caller version should bypass this function entirely.
 web_version_discover :: proc(
 	config: network_client.Config,
@@ -2208,211 +2203,117 @@ web_version_discover :: proc(
 	result: Web_Version_Result,
 ) {
 	settings := config
-	settings.max_body_size = MAX_VERSION_JSON_SIZE
+	if settings.max_body_size <= 0 || settings.max_body_size > WA_WEB_VERSION_BODY_MAX {
+		settings.max_body_size = WA_WEB_VERSION_BODY_MAX
+	}
 	get := fetcher.get
 	if get == nil do get = version_fetch_http
 
-	result.version, result.source =
-		default_payload_config().version, .Pinned
-	for source in ([2]Web_Version_Source{.WPPConnect, .Baileys}) {
-		url :=
-			source == .WPPConnect \
-				? WPP_VERSION_URL \
-				: BAILEYS_VERSION_URL
-		response, he := get(fetcher.data, url, settings)
-		err: Version_Error
-		version: [3]u32
-		if he.kind != .None {
-			err = {
-				kind = .HTTP_Failed,
-				http = he,
-			}
-		} else if response.status != 200 {
-			err = {
-				kind   = .HTTP_Status,
-				status = response.status,
-			}
-		} else {
-			version, err = web_version_response_decode(
-				response.body,
-				source,
-			)
-		}
-
-		network_client.response_destroy(&response)
-		if err.kind == .None {
-			result.version, result.source = version, source
-			return result
-		}
-
-		if source == .WPPConnect {
-			result.primary_error = err
-		} else {
-			result.fallback_error = err
-		}
-
+	result.version = default_payload_config().version
+	result.source = .Pinned
+	response, he := get(fetcher.data, WA_WEB_VERSION_URL, settings)
+	defer network_client.response_destroy(&response)
+	if he.kind != .None {
+		result.fetch_error = {kind = .HTTP_Failed, http = he}
+		return result
 	}
+	if response.status != 200 {
+		result.fetch_error = {kind = .HTTP_Status, status = response.status}
+		return result
+	}
+	if len(response.body) > settings.max_body_size {
+		result.fetch_error = {kind = .Body_Oversized}
+		return result
+	}
+	revision, err := web_version_revision(response.body)
+	if err.kind != .None {
+		result.fetch_error = err
+		return result
+	}
+	result.version = {
+		WA_WEB_VERSION_MAJOR,
+		WA_WEB_VERSION_MINOR,
+		revision,
+	}
+	result.source = .WhatsApp
 	return result
 }
 
-// Strict schema boundary; result owns its three integers, never JSON slices.
-web_version_response_decode :: proc(
-	src: []u8,
-	source: Web_Version_Source,
+// Parse only an exact named unsigned literal, in normal or singly escaped
+// quotes. Conflicting repeated literals are ambiguous and retain the tested pin.
+// This bounded scanner does not execute or interpret the worker's JavaScript.
+web_version_revision :: proc(src: []u8) -> (revision: u32, err: Version_Error) {
+	if len(src) > WA_WEB_VERSION_BODY_MAX {
+		return 0, {kind = .Body_Oversized}
+	}
+	key := CLIENT_REVISION_KEY
+	if len(src) < len(key) + 4 {
+		return 0, {kind = .Missing_Version}
+	}
+	found := false
+	last := len(src) - len(key)
+	for i in 0 ..= last {
+		matches, escaped := revision_key_at(src, i)
+		if !matches do continue
+		value, ok, invalid := revision_digits(src, i + len(key), escaped)
+		if invalid do return 0, {kind = .Invalid_Version}
+		if !ok do continue
+		if found && revision != value do return 0, {kind = .Invalid_Version}
+		revision = value; found = true
+	}
+	if found do return revision, {}
+	return 0, {kind = .Missing_Version}
+}
+
+revision_key_at :: proc(src: []u8, i: int) -> (matches, escaped: bool) {
+	key := CLIENT_REVISION_KEY
+	if i < 1 || i + len(key) > len(src) do return false, false
+	if src[i - 1] != '"' do return false, false
+	for c, n in key do if src[i + n] != cast(u8)c do return false, false
+	after := i + len(key)
+	if after < len(src) && src[after] != '"' && src[after] != '\\' {
+		return false, false // A longer property name is not this key.
+	}
+	escaped = i >= 2 && src[i - 2] == '\\'
+	// More escaping layers are outside this literal format.
+	if escaped && i >= 3 && src[i - 3] == '\\' do return false, false
+	return true, escaped
+}
+
+revision_digits :: proc(
+	src: []u8, at: int, escaped: bool,
 ) -> (
-	version: [3]u32,
-	err: Version_Error,
+	value: u32, ok, invalid: bool,
 ) {
-	if len(src) > MAX_VERSION_JSON_SIZE {
-		return {}, {kind = .Body_Oversized}
+	i := at
+	if escaped {
+		if i >= len(src) || src[i] != '\\' do return 0, false, true
+		i += 1
 	}
-
-	if !slice.contains(
-		[]type_of(source){.WPPConnect, .Baileys},
-		source,
-	) {
-		return {}, {kind = .Invalid_Version}
+	if i >= len(src) || src[i] != '"' do return 0, false, true
+	i += 1
+	for i < len(src) && revision_space(src[i]) do i += 1
+	if i >= len(src) || src[i] != ':' do return 0, false, false
+	i += 1
+	for i < len(src) && revision_space(src[i]) do i += 1
+	start := i
+	for i < len(src) && i - start < 10 && ascii.is_digit(src[i]) {i += 1}
+	if i == start do return 0, false, true
+	if i < len(src) && ascii.is_digit(src[i]) do return 0, false, true
+	end := i
+	for i < len(src) && revision_space(src[i]) do i += 1
+	if i >= len(src) || (src[i] != ',' && src[i] != '}') {
+		return 0, false, true // Numeric prefixes and incomplete literals are refused.
 	}
-
-	if !utf8.valid_string(cast(string)src) {
-		return {}, {kind = .Invalid_JSON}
+	n, valid := strconv.parse_u64(cast(string)src[start:end], 10)
+	if !valid || n == 0 || n > cast(u64)max(u32) {
+		return 0, false, true
 	}
-
-	if syntax_error := web_version_json_validate(src);
-	   syntax_error.kind != .None do return {}, syntax_error
-
-	// Own one bounded arena for every parser allocation, including allocations
-	// stranded by a malformed-object error in older core:encoding/json builds.
-	// Nothing allocated by the parser escapes this procedure.
-	allocator := context.allocator
-	backing, ae := make([]u8, max(4096, len(src) * 16), allocator)
-	if ae != nil {
-		return {}, {kind = .Allocation_Failed, allocation = ae}
-	}
-
-	defer delete(backing, allocator)
-	arena: mem.Arena
-	mem.arena_init(&arena, backing)
-	context.allocator = mem.arena_allocator(&arena)
-	parser := json.make_parser(
-		src,
-		spec = .JSON,
-		parse_integers = true,
-	)
-	value, je := json.parse_value(&parser)
-	if je != .None {
-		return {}, {kind = .Invalid_JSON, json = je}
-	}
-
-	if parser.curr_token.kind != .EOF {
-		return {}, {kind = .Invalid_JSON}
-	}
-
-	object, ok := value.(json.Object)
-	if !ok do return {}, {kind = .Invalid_JSON}
-
-	return web_version_object_decode(object, source)
+	return cast(u32)n, true, false
 }
 
-web_version_json_validate :: proc(src: []u8) -> Version_Error {
-	depth := 0
-	quoted, escaped := false, false
-	for c, i in src {
-		if quoted {
-			if escaped {
-				escaped = false
-			} else if c == '\\' {
-				escaped = true
-			} else if c == '"' {
-				quoted = false
-			}
-
-			continue
-		}
-
-		if c == '"' {
-			quoted = true; continue
-		}
-
-		if c == '/' do return {kind = .Invalid_JSON}
-
-		if c == ',' {
-			next := i + 1
-			for next < len(src) &&
-			    slice.contains([]type_of(src[next]){' ', 9, 10, 13}, src[next]) {
-				next += 1
-			}
-			if next == len(src) ||
-			   slice.contains(
-				   []type_of(src[next]){']', '}'},
-				   src[next],
-			   ) {
-				return {kind = .Invalid_JSON}
-			}
-
-		}
-
-		if slice.contains([]type_of(c){'{', '['}, c) {
-			depth += 1
-			if depth > MAX_VERSION_JSON_DEPTH {
-				return {kind = .Depth_Limit}
-			}
-
-		}
-
-		if slice.contains([]type_of(c){'}', ']'}, c) {
-			depth -= 1
-			if depth < 0 {
-				return {kind = .Invalid_JSON}
-			}
-
-		}
-
-	}
-	if quoted || depth != 0 {
-		return {kind = .Invalid_JSON}
-	}
-
-	return {}
-}
-
-web_version_object_decode :: proc(
-	object: json.Object, source: Web_Version_Source,
-) -> (version: [3]u32, error: Version_Error) {
-	field := source == .WPPConnect ? "currentVersion" : "version"
-	raw, present := object[field]
-	if !present do return {}, {kind = .Missing_Version}
-
-	if source == .WPPConnect {
-		text, valid := raw.(string)
-		if !valid do return {}, {kind = .Invalid_Version}
-
-		parsed, pe := web_version_parse(text)
-		if pe != .None do return {}, {kind = pe}
-
-		return parsed, {}
-	}
-
-	array, valid := raw.(json.Array)
-	if !valid || len(array) != 3 {
-		return {}, {kind = .Invalid_Version}
-	}
-
-	for item, i in array {
-		number, integer_valid := item.(json.Integer)
-		if !integer_valid ||
-		   number < 0 ||
-		   number > cast(json.Integer)max(u32) {
-			return {}, {kind = .Invalid_Version}
-		}
-
-		version[i] = cast(u32)number
-	}
-	if version == ([3]u32{}) {
-		return {}, {kind = .Invalid_Version}
-	}
-
-	return version, {}
+revision_space :: proc(c: u8) -> bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }
 
 web_version_parse :: proc(
@@ -2461,5 +2362,9 @@ version_fetch_http :: proc(
 	network_client.Response,
 	network_client.HTTP_Error,
 ) {
-	return network_client.execute({url = url}, config)
+	headers := [2]http.Header {
+		{name = "User-Agent", value = WA_WEB_USER_AGENT},
+		{name = "Sec-Fetch-Site", value = "none"},
+	}
+	return network_client.execute({url = url, headers = headers[:]}, config)
 }

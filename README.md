@@ -77,6 +77,12 @@ field) for the current linked-device URL and companion field. The zero/default
 Legacy format preserves existing callers. See [QR usage](docs/linked-device-qr-20261115.md)
 and the [reviewed reliability updates](docs/reliability-updates-20261115.md).
 
+`web_version_discover` obtains the version from WhatsApp's own service worker at
+`https://web.whatsapp.com/sw.js`. It reads a bounded `client_revision` literal and
+returns `{2, 3000, revision}` with source `.WhatsApp`. A fetch/status/parser error
+retains the tested compiled pin with source `.Pinned` and `fetch_error`. Callers
+with an explicit version bypass discovery. See [version selection](docs/official-version-20261116.md).
+
 ## Offline checks
 
 From the parent shared directory, use its matching compiler:
