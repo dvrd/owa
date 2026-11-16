@@ -1,2 +1,3 @@
 2026-11-15	receive.odin	unsupported enc success marking	unknown children skipped before nil-payload commit	unsupported_encryption_test.odin	49 ASan PASS; RED3; Noise4; encrypted11 PASS
 2026-11-15	pairing.odin/auth.odin	hosted pairing signature domains	ignored signed device_type and obsolete companion domain	pairing_domains_test.odin	RED1;57 normal+57 ASan PASS;Noise4+consumer PASS
+2026-11-15	receive.odin/inbound_alias.odin	inbound alias misses pinned session	no staged authenticated sender alias before canonical lookup	inbound_alias_test.odin	RED;60 isolated+68 integrated ASan PASS;Noise4+consumer PASS

@@ -206,17 +206,25 @@ socket_process_message :: proc(
 		return {}, {kind = .Unsupported_Message_Encryption}
 	}
 
-	name, name_error := socket_inbox_key(
-		socket,
-		group,
-		participant,
-		id,
-	)
+	candidate: State_Store
+	if e := socket_store_clone(&candidate, socket.store);
+	   e.kind != .None {
+		return {}, e
+	}
+	defer state_store_clear(&candidate)
+	// Known own-group echoes are discarded without decrypting. They must not
+	// turn unauthenticated sender hints into independently persisted mappings.
+	if group == "" || !socket_sender_is_self(socket, participant) {
+		if e := socket_message_alias_stage(&candidate, socket.store, node, participant);
+		   e.kind != .None {return {}, e}
+	}
+
+	name, name_error := socket_inbox_key_store(&candidate, group, participant, id)
 	if name_error.kind != .None do return {}, name_error
 
 	defer delete(name)
 	if _, found := state_store_get(
-		socket.store,
+		&candidate,
 		.Processed_Message,
 		name,
 	); found {
@@ -224,7 +232,7 @@ socket_process_message :: proc(
 	}
 
 	if data, found := state_store_get(
-		socket.store,
+		&candidate,
 		.Inbox_Message,
 		name,
 	); found {
@@ -234,13 +242,6 @@ socket_process_message :: proc(
 		return {}, {}
 	}
 
-	candidate: State_Store
-	if e := socket_store_clone(&candidate, socket.store);
-	   e.kind != .None {
-		return {}, e
-	}
-
-	defer state_store_clear(&candidate)
 	if group != "" && socket_sender_is_self(socket, participant) {
 		return {}, socket_message_processed_commit(socket, &candidate, name)
 	}
@@ -255,7 +256,7 @@ socket_process_message :: proc(
 	if var_payload == nil {
 		return {}, socket_message_processed_commit(socket, &candidate, name)
 	}
-	own := socket_sender_is_self(socket, participant)
+	own := socket_sender_is_self_store(&candidate, socket.auth, participant)
 	handled, control_error := socket_message_control_commit(
 		socket, &candidate, name, group, var_payload, own, history_receipt,
 	)
@@ -1017,23 +1018,35 @@ socket_inbox_key :: proc(
 	string,
 	Socket_Error,
 ) {
-	canonical, e := socket_signal_address(socket, participant)
+	if socket == nil {return "", {kind = .Invalid_State}}
+	return socket_inbox_key_store(socket.store, group, participant, id)
+}
+socket_inbox_key_store :: proc(
+	store: ^State_Store, group, participant, id: string,
+) -> (string, Socket_Error) {
+	if store == nil || !store.initialized {return "", {kind = .Invalid_State}}
+	canonical, e := socket_signal_address_store(store, participant)
 	if e.kind != .None do return "", e
 
 	defer delete(canonical)
 	return fmt.aprintf("%s|%s|%s", group, canonical, id), {}
 }
 socket_sender_is_self :: proc(socket: ^Socket, jid: string) -> bool {
+	if socket == nil {return false}
+	return socket_sender_is_self_store(socket.store, socket.auth, jid)
+}
+socket_sender_is_self_store :: proc(store: ^State_Store, auth: ^Auth_State, jid: string) -> bool {
+	if store == nil || !store.initialized || auth == nil {return false}
 	user, _, e := pairing_jid_decode(jid)
 	if e.kind != .None do return false
 
 	domain := jid[strings.index_byte(jid, '@') + 1:]
 	if domain == "c.us" do domain = "s.whatsapp.net"
 
-	own := cast(string)socket.auth.account.jid[:socket.auth.account.jid_size]
+	own := cast(string)auth.account.jid[:auth.account.jid_size]
 	values := [2]string{own, ""}
 	if lid, found := state_store_get(
-		socket.store,
+		store,
 		.LID_Mapping,
 		"self",
 	); found {
@@ -1055,7 +1068,7 @@ socket_sender_is_self :: proc(socket: ^Socket, jid: string) -> bool {
 
 	}
 	if domain == "lid" {
-		canonical, ce := socket_signal_address(socket, jid)
+		canonical, ce := socket_signal_address_store(store, jid)
 		if ce.kind != .None do return false
 
 		defer delete(canonical)

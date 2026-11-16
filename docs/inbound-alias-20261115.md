@@ -1,0 +1,9 @@
+# Atomic inbound PN/LID discovery (OKAMI-427)
+
+The receiver now learns validated sender PN/LID aliases from the authenticated envelope in a staged store before canonical inbox/session selection. It reuses existing reciprocal mapping, identity-pin and session migration checks. Bare alternate identifiers retain the primary device suffix. Conflicting domains/modes/hints, duplicate recognized keys and inconsistent devices are refused. The alias, migrated ratchet and inbox/control outcome persist only in the same successful decrypt transaction; decryption/save failures leave original state intact. Recipient/peer-recipient and hosted shapes are intentionally outside this ordinary sender policy.
+
+Durable duplicate lookup uses the staged canonical identity without separately committing new hints. Known own-group echoes retain their original pre-decrypt filter; first-seen own aliases are classified from the staged store only after decryption succeeds. Nil socket/store and uninitialized-store guards remain intact.
+
+The original receive path fails the corrected real-Signal inbound-first regression. Review also reproduced and fixed missing nil guards and incorrect from_me classification. The isolated final package passes60 normal and60 ASan tests; the integrated pairing+receive package passes68 ASan tests with strict vet/warnings and memory tracking. Four localhost Noise modes and the executable ASan consumer pass. Tests cover direct/group, both alias directions, durable completion/reopen/replay, bare and same-device aliases, invalid/conflicting metadata/pins, corrupted ciphertext, save failures, skipped controls and unsupported-content preflight.
+
+[Source policy investigation](inbound-alias-policy-20261115.md) and [receipt/compressed logs](evidence/inbound-alias-20261115/receipt.json). These are synthetic owned checks, not live account interoperability. No account/session files, messages, protocol version or Mesa copy was touched. Local commits only.
