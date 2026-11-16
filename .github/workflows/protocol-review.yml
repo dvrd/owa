@@ -8,11 +8,17 @@ on:
     paths:
       - '.github/workflows/protocol-review.yml'
       - 'tools/protocol_watch/**'
+      - 'tools/native_ci/bootstrap.sh'
+      - 'tools/native_ci/tests/bootstrap_test.sh'
+      - 'tools/native_ci/pin.json'
 
   pull_request:
     paths:
       - '.github/workflows/protocol-review.yml'
       - 'tools/protocol_watch/**'
+      - 'tools/native_ci/bootstrap.sh'
+      - 'tools/native_ci/tests/bootstrap_test.sh'
+      - 'tools/native_ci/pin.json'
 
 permissions:
   contents: read
@@ -21,24 +27,32 @@ concurrency:
   group: public-protocol-review-${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && 'writer' || github.ref }}
   cancel-in-progress: false
 
-env:
-  PYTHONDONTWRITEBYTECODE: '1'
-
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
+      - name: Install explicit bootstrap and linker dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-18 libclang-rt-18-dev libedit2 libxml2 libz3-4 jq
+      - name: Verify offline bootstrap refusal controls
+        run: tools/native_ci/tests/bootstrap_test.sh
+      - name: Bootstrap immutable native compiler and dependencies
+        run: |
+          tools/native_ci/bootstrap.sh --work "$RUNNER_TEMP/protocol-toolchain"
+          echo "OWA_ODIN_BIN=$RUNNER_TEMP/protocol-toolchain/sdk/odin" >> "$GITHUB_ENV"
+          echo "OWA_SHARED_ROOT=$RUNNER_TEMP/protocol-toolchain/sdk/shared" >> "$GITHUB_ENV"
       - name: Offline protocol tooling tests
-        run: python3 -m unittest discover -s tools/protocol_watch/tests -p 'test_*.py' -v
+        run: tools/protocol_watch/run.sh test
       - name: Scan and assess bounded public upstream changes
         if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
         id: scan
         run: >-
-          python3 tools/protocol_watch/ci.py
+          tools/protocol_watch/run.sh ci
           --state-dir "$RUNNER_TEMP/protocol-state"
           --output-dir "$RUNNER_TEMP/protocol-report"
       - name: Track only new actionable tasks or investigation spikes
@@ -46,7 +60,7 @@ jobs:
         env:
           LINEAR_API: ${{ secrets.LINEAR_API }}
         run: >-
-          python3 tools/protocol_watch/linear_review.py
+          tools/protocol_watch/run.sh linear
           --report "$RUNNER_TEMP/protocol-report/report.json"
           --output "$RUNNER_TEMP/protocol-report/linear-result.json"
           --run-url "https://github.com/dvrd/owa/actions/runs/$GITHUB_RUN_ID"
