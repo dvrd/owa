@@ -349,6 +349,51 @@ signal_group_message_decode :: proc(src: []u8) -> (m: Signal_Group_Message, err:
 	return m, .None
 }
 
+// Low-level signed envelope encoder. Ciphertext must already be CBC padded.
+signal_group_message_encode :: proc(
+	dst: []u8,
+	id, iteration: u32,
+	ciphertext: []u8,
+	signing_private: [32]u8,
+) -> (
+	written: int,
+	err: Signal_Group_Error,
+) {
+	if len(ciphertext) == 0 || len(ciphertext) % 16 != 0 {
+		return 0, .Invalid_Ciphertext
+	}
+
+	if len(ciphertext) > MAX_SIGNAL_CIPHERTEXT_SIZE {
+		return 0, .Payload_Oversized
+	}
+
+	size := group_message_header_size(id, iteration, len(ciphertext)) + len(ciphertext) + 64
+
+	if len(dst) < size {
+		return 0, .Destination_Undersized
+	}
+
+	if bytes.alias(dst[:size], ciphertext) {
+		return 0, .Overlapping_Buffers
+	}
+
+	when !crypto.HAS_RAND_BYTES {
+		return 0, .Entropy_Unavailable
+	}
+
+	written = group_message_header(dst, id, iteration, len(ciphertext))
+	written += copy(dst[written:], ciphertext)
+	signature, e := signal_curve_sign(signing_private, dst[:written])
+
+	if e != .None {
+		return 0, .Signature_Failed
+	}
+
+	written += copy(dst[written:], signature[:])
+
+	return written, .None
+}
+
 // Caller transaction rule: operate on a candidate record, persist it durably,
 // then transmit ciphertext/expose plaintext and replace the live record. A
 // crash must not reuse a sender counter or resurrect consumed receiver keys.

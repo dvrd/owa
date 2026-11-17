@@ -787,6 +787,8 @@ Frame_Error :: enum {
 	Negative_Length,
 	Payload_Incomplete,
 	Payload_Oversized,
+	Invalid_Consume_Count,
+	Receive_Buffer_Full,
 }
 
 frame_encode_len :: proc(size: int) -> (header: [3]u8, error: Frame_Error) {
@@ -842,6 +844,42 @@ frame_decode :: proc(src: []u8) -> (payload: []u8, consumed: int, error: Frame_E
 	}
 
 	return src[FRAME_HEADER_SIZE:required], required, .None
+}
+
+// Accumulates WhatsApp frames from arbitrary-sized reads in caller storage.
+Frame_Reader :: struct {
+	storage: []u8,
+	used:    int,
+}
+
+frame_reader_feed :: proc(reader: ^Frame_Reader, data: []u8) -> Frame_Error {
+	available := len(reader.storage) - reader.used
+
+	if len(data) > available {
+		return .Receive_Buffer_Full
+	}
+
+	copy(reader.storage[reader.used:], data)
+	reader.used += len(data)
+
+	return .None
+}
+
+// Borrows the first complete frame without consuming it.
+frame_reader_peek :: proc(reader: ^Frame_Reader) -> (payload: []u8, consumed: int, error: Frame_Error) {
+	return frame_decode(reader.storage[:reader.used])
+}
+
+frame_reader_consume :: proc(reader: ^Frame_Reader, count: int) -> Frame_Error {
+	if count < 0 || count > reader.used {
+		return .Invalid_Consume_Count
+	}
+
+	remaining := reader.used - count
+	copy(reader.storage[:remaining], reader.storage[count:reader.used])
+	reader.used = remaining
+
+	return .None
 }
 
 FRAME_INTRO :: [4]u8{87, 65, 6, 3}

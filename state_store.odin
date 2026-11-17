@@ -534,25 +534,36 @@ state_store_save :: proc(store: ^State_Store, path: string) -> State_Error {
 		return encoded
 	}
 
-	step, io_err := durable_write(path, buffer)
-
-	if step != .None {
-		kinds := [Durable_Write_Step]State_Error_Kind {
-			.None      = .None,
-			.Write     = .Write_Failed,
-			.Flush     = .Flush_Failed,
-			.Close     = .Write_Failed,
-			.Rename    = .Rename_Failed,
-			.Directory = .Flush_Failed,
-		}
-
-		return {kind = kinds[step], io = io_err}
+	if write_error := state_atomic_write(path, buffer); write_error.kind != .None {
+		return write_error
 	}
 
 	store.durable_revision = store.revision
 
 	return {}
 }
+
+// Writes data to path with durable_write semantics (exclusive temporary file,
+// fsync, atomic rename, directory fsync), reporting the failing step as a State_Error.
+state_atomic_write :: proc(path: string, data: []u8) -> State_Error {
+	step, io_error := durable_write(path, data)
+
+	if step == .None {
+		return {}
+	}
+
+	kinds := [Durable_Write_Step]State_Error_Kind {
+		.None      = .None,
+		.Write     = .Write_Failed,
+		.Flush     = .Flush_Failed,
+		.Close     = .Write_Failed,
+		.Rename    = .Rename_Failed,
+		.Directory = .Flush_Failed,
+	}
+
+	return {kind = kinds[step], io = io_error}
+}
+
 state_store_load :: proc(store: ^State_Store, path: string, identity: [32]u8) -> State_Error {
 	file, err := os.open(path)
 	if err != nil {

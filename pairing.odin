@@ -62,6 +62,25 @@ Protocol_Node_Info :: struct {
 }
 Protocol_Node_Observer :: #type proc(data: rawptr, info: Protocol_Node_Info)
 
+// Application-level pairing progress. The library does not raise these events
+// itself; applications translate Session state into them and share one callback type.
+Pairing_Event_Kind :: enum {
+	Connecting,
+	QR,
+	Paired,
+	Online,
+	Disconnected,
+	Failed,
+}
+
+Pairing_Event :: struct {
+	kind:       Pairing_Event_Kind,
+	qr:         string,
+	expires_at: time.Time,
+}
+
+Pairing_Observer :: #type proc(data: rawptr, event: Pairing_Event)
+
 // Legacy keeps the historical four-field QR. Linked_Device opts in to the
 // current URL and companion web-client field; login payloads are unchanged.
 Pairing_QR_Format :: enum {
