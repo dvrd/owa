@@ -111,6 +111,27 @@ whatsapp_version_discovery_uses_official_worker_or_pinned_default :: proc(t: ^te
 }
 
 @(test)
+whatsapp_version_discovery_prefers_a_caller_fallback_to_the_pin :: proc(t: ^testing.T) {
+	testing.expect_value(t, default_payload_config().version, WA_WEB_VERSION_PINNED)
+	fallback := [3]u32{2, 3000, 1000000001}
+	peer := Version_Test_Fetch{failure = .TLS_Failed}
+	result := web_version_discover({}, {data = &peer, get = version_test_fetch}, fallback)
+	testing.expect_value(t, result.source, Web_Version_Source.Configured)
+	testing.expect_value(t, result.version, fallback)
+	testing.expect_value(t, result.fetch_error.kind, Version_Error_Kind.HTTP_Failed)
+
+	peer = {body = `{"client_revision":1234567890}`, status = 200}
+	result = web_version_discover({}, {data = &peer, get = version_test_fetch}, fallback)
+	testing.expect_value(t, result.source, Web_Version_Source.WhatsApp)
+	testing.expect_value(t, result.version, [3]u32{2, 3000, 1234567890})
+
+	peer = {status = 503}
+	result = web_version_discover({}, {data = &peer, get = version_test_fetch})
+	testing.expect_value(t, result.source, Web_Version_Source.Pinned)
+	testing.expect_value(t, result.version, WA_WEB_VERSION_PINNED)
+}
+
+@(test)
 whatsapp_version_preserves_body_and_explicit_triplet_bounds :: proc(t: ^testing.T) {
 	body := make([]u8, WA_WEB_VERSION_BODY_MAX + 1)
 	defer delete(body)

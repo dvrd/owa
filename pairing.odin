@@ -123,10 +123,22 @@ Session :: struct {
 	last_error:               Session_Error,
 }
 
+// The compiled version is the last-resort fallback of web_version_discover: the
+// client_revision published by web.whatsapp.com/sw.js on 2026-11-17, not a claim
+// of the current service version. The browser identity is the current Baileys
+// default, Browsers.macOS('Chrome'): DeviceProps.os "Mac OS", platform CHROME.
+// Applications may use official discovery or supply an explicit version.
+WA_WEB_VERSION_PINNED :: [3]u32{2, 3000, 1054981628}
+WA_WEB_BROWSER_OS :: "Mac OS"
+WA_WEB_BROWSER_NAME :: "Chrome"
+
 default_payload_config :: proc() -> Payload_Config {
-	// Tested fallback defaults, not a claim of the current service version.
-	// Applications may use official discovery or supply an explicit version.
-	return {version = {2, 3000, 1023223821}, browser_os = "Ubuntu", browser_name = "Chrome", country_code = "US"}
+	return {
+		version = WA_WEB_VERSION_PINNED,
+		browser_os = WA_WEB_BROWSER_OS,
+		browser_name = WA_WEB_BROWSER_NAME,
+		country_code = "US",
+	}
 }
 
 session_init :: proc(session: ^Session, client: ^Client, auth: ^Auth_State, config: Session_Config) -> Session_Error {
@@ -810,7 +822,6 @@ pairing_jid_decode :: proc(jid: string) -> (user: string, device: u32, err: Pair
 	return local, device, {}
 }
 
-@(private)
 pairing_qr_format_valid :: proc(format: Pairing_QR_Format) -> bool {
 	return format == .Legacy || format == .Linked_Device
 }
@@ -2030,7 +2041,8 @@ WA_WEB_USER_AGENT ::
 	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " + "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 Web_Version_Source :: enum {
 	WhatsApp,
-	Pinned,
+	Pinned, // the compiled WA_WEB_VERSION_PINNED
+	Configured, // the caller's fallback
 }
 Version_Error_Kind :: enum {
 	None,
@@ -2064,11 +2076,12 @@ Version_Fetcher :: struct {
 	),
 }
 
-// A failed fetch keeps the compiled pin. Callers report fetch_error.
-// An explicit caller version should bypass this function entirely.
+// A failed fetch keeps the fallback (a zero fallback = the compiled pin).
+// Callers report fetch_error. An explicit caller version bypasses this function.
 web_version_discover :: proc(
 	config: network_client.Config,
 	fetcher: Version_Fetcher = {},
+	fallback: [3]u32 = {},
 ) -> (
 	result: Web_Version_Result,
 ) {
@@ -2081,8 +2094,14 @@ web_version_discover :: proc(
 		get = version_fetch_http
 	}
 
-	result.version = default_payload_config().version
+	result.version = WA_WEB_VERSION_PINNED
 	result.source = .Pinned
+
+	if fallback != ([3]u32{}) {
+		result.version = fallback
+		result.source = .Configured
+	}
+
 	response, he := get(fetcher.data, WA_WEB_VERSION_URL, settings)
 	defer network_client.response_destroy(&response)
 	if he.kind != .None {
