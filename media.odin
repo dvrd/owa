@@ -442,26 +442,27 @@ media_message_encode :: proc(dst: []u8, message: Media_Message) -> (int, Media_E
 		return 0, {kind = .Invalid_Kind}
 	}
 
-	measure := Media_Writer {
+	measure := Protobuf_Writer {
 		target = dst,
+		measure = true,
 	}
 
 	media_emit_envelope(&measure, message)
-	if measure.err.kind != .None {
-		return 0, measure.err
+	if measure.err != .None {
+		return 0, media_write_error(&measure)
 	}
 
 	if len(dst) < measure.at {
 		return measure.at, {kind = .Destination_Undersized}
 	}
 
-	writer := Media_Writer {
+	writer := Protobuf_Writer {
 		dst = dst,
 	}
 
 	media_emit_envelope(&writer, message)
 
-	return writer.at, writer.err
+	return writer.at, media_write_error(&writer)
 }
 
 media_message_decode :: proc(src: []u8) -> (message: Media_Message, err: Media_Error) {
@@ -658,26 +659,27 @@ media_message_string_decode :: proc(message: ^Media_Message, field: Protobuf_Fie
 }
 
 reaction_message_encode :: proc(dst: []u8, message: Reaction_Message) -> (int, Media_Error) {
-	measure := Media_Writer {
+	measure := Protobuf_Writer {
 		target = dst,
+		measure = true,
 	}
 
 	reaction_emit_envelope(&measure, message)
-	if measure.err.kind != .None {
-		return 0, measure.err
+	if measure.err != .None {
+		return 0, media_write_error(&measure)
 	}
 
 	if len(dst) < measure.at {
 		return measure.at, {kind = .Destination_Undersized}
 	}
 
-	writer := Media_Writer {
+	writer := Protobuf_Writer {
 		dst = dst,
 	}
 
 	reaction_emit_envelope(&writer, message)
 
-	return writer.at, writer.err
+	return writer.at, media_write_error(&writer)
 }
 
 reaction_message_decode :: proc(src: []u8) -> (message: Reaction_Message, err: Media_Error) {
@@ -779,107 +781,35 @@ reaction_checkmark_encode :: proc(dst: []u8, key: Message_Key, sender_timestamp_
 	)
 }
 
-Media_Writer :: struct {
-	dst, target: []u8,
-	at:          int,
-	err:         Media_Error,
+media_write_error :: proc(writer: ^Protobuf_Writer) -> Media_Error {
+	switch writer.err {
+	case .None:
+		return {}
+	case .Oversized:
+		return {kind = .Message_Oversized}
+	case .Overlapping_Buffers:
+		return {kind = .Overlapping_Buffers}
+	case .Invalid_UTF8:
+		return {kind = .Invalid_UTF8}
+	case .Invalid_Metadata:
+		return {kind = .Invalid_Metadata}
+	case .Invalid_Protobuf:
+		return {kind = .Invalid_Protobuf, protobuf = writer.protobuf}
+	}
+
+	return {}
 }
 
-media_write_varint :: proc(writer: ^Media_Writer, value: u64) {
-	if writer.err.kind != .None {
-		return
-	}
-
-	size := protobuf_varint_size(value)
-
-	if size > MAX_PROTOBUF_MESSAGE_SIZE - writer.at {
-		writer.err = {
-			kind = .Message_Oversized,
-		}
-
-		return
-	}
-
-	if writer.dst != nil {
-		at := writer.at
-		protobuf_varint_write(writer.dst, &at, value)
-	}
-
-	writer.at += size
-}
-
-media_write_header :: proc(writer: ^Media_Writer, number: u32, size: int) {
-	media_write_varint(writer, cast(u64)number << 3 | 2)
-	media_write_varint(writer, cast(u64)size)
-}
-
-media_write_bytes :: proc(writer: ^Media_Writer, number: u32, data: []u8) {
-	if writer.err.kind != .None {
-		return
-	}
-
-	if bytes.alias(writer.target, data) {
-		writer.err = {
-			kind = .Overlapping_Buffers,
-		}
-
-		return
-	}
-
-	if len(data) > MAX_PROTOBUF_MESSAGE_SIZE {
-		writer.err = {
-			kind = .Message_Oversized,
-		}
-
-		return
-	}
-
-	media_write_header(writer, number, len(data))
-	if writer.err.kind != .None {
-		return
-	}
-
-	if len(data) > MAX_PROTOBUF_MESSAGE_SIZE - writer.at {
-		writer.err = {
-			kind = .Message_Oversized,
-		}
-
-		return
-	}
-
-	if writer.dst != nil {
-		copy(writer.dst[writer.at:], data)
-	}
-
-	writer.at += len(data)
-}
-
-media_write_string :: proc(writer: ^Media_Writer, number: u32, value: string) {
-	if !utf8.valid_string(value) {
-		writer.err = {
-			kind = .Invalid_UTF8,
-		}
-
-		return
-	}
-
-	media_write_bytes(writer, number, transmute([]u8)value)
-}
-
-media_write_integer :: proc(writer: ^Media_Writer, number: u32, value: u64) {
-	media_write_varint(writer, cast(u64)number << 3)
-	media_write_varint(writer, value)
-}
-
-media_emit_envelope :: proc(writer: ^Media_Writer, message: Media_Message) {
-	measure := Media_Writer {
+media_emit_envelope :: proc(writer: ^Protobuf_Writer, message: Media_Message) {
+	measure := Protobuf_Writer {
 		target = writer.target,
+		measure = true,
 	}
 
 	media_emit_body(&measure, message)
 
-	if measure.err.kind != .None {
-		writer.err = measure.err
+	if measure.err != .None {
+		writer.err, writer.protobuf = measure.err, measure.protobuf
 		return
 	}
 
@@ -888,11 +818,11 @@ media_emit_envelope :: proc(writer: ^Media_Writer, message: Media_Message) {
 		field = 7
 	}
 
-	media_write_header(writer, field, measure.at)
+	protobuf_write_header(writer, field, measure.at)
 	media_emit_body(writer, message)
 }
 
-media_emit_body :: proc(writer: ^Media_Writer, message: Media_Message) {
+media_emit_body :: proc(writer: ^Protobuf_Writer, message: Media_Message) {
 	m := message
 	if !media_emit_kind_validate(writer, m) {
 		return
@@ -921,7 +851,7 @@ media_emit_body :: proc(writer: ^Media_Writer, message: Media_Message) {
 	for number in 1 ..= 20 {
 		for field in strings_to_write {
 			if field.number == cast(u32)number && field.present {
-				media_write_string(writer, field.number, field.value)
+				protobuf_write_string(writer, field.number, field.value)
 			}
 		}
 
@@ -934,7 +864,7 @@ media_emit_body :: proc(writer: ^Media_Writer, message: Media_Message) {
 	}
 }
 
-media_emit_kind_validate :: proc(writer: ^Media_Writer, m: Media_Message) -> bool {
+media_emit_kind_validate :: proc(writer: ^Protobuf_Writer, m: Media_Message) -> bool {
 	if m.kind == .Image &&
 	   (m.has_file_name ||
 			   m.file_name != "" ||
@@ -942,16 +872,12 @@ media_emit_kind_validate :: proc(writer: ^Media_Writer, m: Media_Message) -> boo
 			   m.title != "" ||
 			   m.has_page_count ||
 			   m.page_count != 0) {
-		writer.err = {
-			kind = .Invalid_Metadata,
-		}
+		writer.err = .Invalid_Metadata
 		return false
 	}
 
 	if m.kind == .Document && (m.has_height || m.height != 0 || m.has_width || m.width != 0) {
-		writer.err = {
-			kind = .Invalid_Metadata,
-		}
+		writer.err = .Invalid_Metadata
 
 		return false
 	}
@@ -959,7 +885,7 @@ media_emit_kind_validate :: proc(writer: ^Media_Writer, m: Media_Message) -> boo
 	return true
 }
 
-media_emit_bytes_fields :: proc(writer: ^Media_Writer, m: Media_Message, number: int, key: u32) -> bool {
+media_emit_bytes_fields :: proc(writer: ^Protobuf_Writer, m: Media_Message, number: int, key: u32) -> bool {
 	for field in ([?]struct {
 			number:  u32,
 			data:    []u8,
@@ -975,152 +901,158 @@ media_emit_bytes_fields :: proc(writer: ^Media_Writer, m: Media_Message, number:
 		}
 
 		if field.number != 16 && len(field.data) != 32 {
-			writer.err = {
-				kind = .Invalid_Metadata,
-			}
+			writer.err = .Invalid_Metadata
 
 			return false
 		}
 
-		media_write_bytes(writer, field.number, field.data)
+		protobuf_write_bytes(writer, field.number, field.data)
 	}
 
 	return true
 }
 
 media_emit_integer_context_fields :: proc(
-	writer: ^Media_Writer,
+	writer: ^Protobuf_Writer,
 	m: Media_Message,
 	number: int,
 	timestamp: u32,
 ) -> bool {
 	if number == 5 && (m.has_file_length || m.file_length != 0) {
-		media_write_integer(writer, 5, m.file_length)
+		protobuf_write_uint(writer, 5, m.file_length)
 	}
 
 	if number == cast(int)timestamp && (m.has_media_key_timestamp || m.media_key_timestamp != 0) {
-		media_write_integer(writer, timestamp, cast(u64)m.media_key_timestamp)
+		protobuf_write_uint(writer, timestamp, cast(u64)m.media_key_timestamp)
 	}
 
 	if m.kind == .Image {
 		if number == 6 && (m.has_height || m.height != 0) {
-			media_write_integer(writer, 6, cast(u64)m.height)
+			protobuf_write_uint(writer, 6, cast(u64)m.height)
 		}
 
 		if number == 7 && (m.has_width || m.width != 0) {
-			media_write_integer(writer, 7, cast(u64)m.width)
+			protobuf_write_uint(writer, 7, cast(u64)m.width)
 		}
 	} else if number == 6 && (m.has_page_count || m.page_count != 0) {
-		media_write_integer(writer, 6, cast(u64)m.page_count)
+		protobuf_write_uint(writer, 6, cast(u64)m.page_count)
 	}
 
 	if number == 17 && m.has_context {
-		measure := Media_Writer {
+		measure := Protobuf_Writer {
 			target = writer.target,
+			measure = true,
 		}
 
 		media_emit_context(&measure, m.context_info)
 
-		if measure.err.kind != .None {
-			writer.err = measure.err
+		if measure.err != .None {
+			writer.err, writer.protobuf = measure.err, measure.protobuf
 			return false
 		}
 
-		media_write_header(writer, 17, measure.at)
+		protobuf_write_header(writer, 17, measure.at)
 		media_emit_context(writer, m.context_info)
 	}
 
 	return true
 }
 
-media_emit_context :: proc(writer: ^Media_Writer, context_info: Message_Context) {
+media_emit_context :: proc(writer: ^Protobuf_Writer, context_info: Message_Context) {
 	c := context_info
 
 	if c.has_stanza_id {
-		media_write_string(writer, 1, c.stanza_id)
+		protobuf_write_string(writer, 1, c.stanza_id)
 	}
 
 	if c.has_participant {
-		media_write_string(writer, 2, c.participant)
+		protobuf_write_string(writer, 2, c.participant)
 	}
 
 	if c.has_quoted_message {
 		if err := media_validate_protobuf(c.quoted_message); err.kind != .None {
-			writer.err = err
+			if err.kind == .Message_Oversized {
+				writer.err = .Oversized
+			} else {
+				writer.err, writer.protobuf = .Invalid_Protobuf, err.protobuf
+			}
+
 			return
 		}
 
-		media_write_bytes(writer, 3, c.quoted_message)
+		protobuf_write_bytes(writer, 3, c.quoted_message)
 	}
 
 	if c.has_remote_jid {
-		media_write_string(writer, 4, c.remote_jid)
+		protobuf_write_string(writer, 4, c.remote_jid)
 	}
 }
 
-reaction_emit_envelope :: proc(writer: ^Media_Writer, message: Reaction_Message) {
-	measure := Media_Writer {
+reaction_emit_envelope :: proc(writer: ^Protobuf_Writer, message: Reaction_Message) {
+	measure := Protobuf_Writer {
 		target = writer.target,
+		measure = true,
 	}
 
 	reaction_emit_body(&measure, message)
 
-	if measure.err.kind != .None {
-		writer.err = measure.err
+	if measure.err != .None {
+		writer.err, writer.protobuf = measure.err, measure.protobuf
 		return
 	}
 
-	media_write_header(writer, 46, measure.at)
+	protobuf_write_header(writer, 46, measure.at)
 	reaction_emit_body(writer, message)
 }
 
-reaction_emit_body :: proc(writer: ^Media_Writer, message: Reaction_Message) {
+reaction_emit_body :: proc(writer: ^Protobuf_Writer, message: Reaction_Message) {
 	m := message
 
 	if m.has_key || m.key.remote_jid != "" || m.key.id != "" {
-		measure := Media_Writer {
+		measure := Protobuf_Writer {
 			target = writer.target,
+			measure = true,
 		}
 
 		media_emit_message_key(&measure, m.key)
 
-		if measure.err.kind != .None {
-			writer.err = measure.err
+		if measure.err != .None {
+			writer.err, writer.protobuf = measure.err, measure.protobuf
 			return
 		}
 
-		media_write_header(writer, 1, measure.at)
+		protobuf_write_header(writer, 1, measure.at)
 		media_emit_message_key(writer, m.key)
 	}
 
 	if m.has_text || m.text != "" {
-		media_write_string(writer, 2, m.text)
+		protobuf_write_string(writer, 2, m.text)
 	}
 
 	if m.has_grouping_key || m.grouping_key != "" {
-		media_write_string(writer, 3, m.grouping_key)
+		protobuf_write_string(writer, 3, m.grouping_key)
 	}
 
 	if m.has_sender_timestamp_ms || m.sender_timestamp_ms != 0 {
-		media_write_integer(writer, 4, cast(u64)m.sender_timestamp_ms)
+		protobuf_write_uint(writer, 4, cast(u64)m.sender_timestamp_ms)
 	}
 }
 
-media_emit_message_key :: proc(writer: ^Media_Writer, key: Message_Key) {
+media_emit_message_key :: proc(writer: ^Protobuf_Writer, key: Message_Key) {
 	if key.has_remote_jid || key.remote_jid != "" {
-		media_write_string(writer, 1, key.remote_jid)
+		protobuf_write_string(writer, 1, key.remote_jid)
 	}
 
 	if key.has_from_me || key.from_me {
-		media_write_integer(writer, 2, key.from_me ? 1 : 0)
+		protobuf_write_uint(writer, 2, key.from_me ? 1 : 0)
 	}
 
 	if key.has_id || key.id != "" {
-		media_write_string(writer, 3, key.id)
+		protobuf_write_string(writer, 3, key.id)
 	}
 
 	if key.has_participant || key.participant != "" {
-		media_write_string(writer, 4, key.participant)
+		protobuf_write_string(writer, 4, key.participant)
 	}
 }
 
@@ -1824,7 +1756,6 @@ media_upload :: proc(
 }
 
 // Reject malformed or oversized inputs before any upload can consume its budget.
-@(private)
 media_upload_input_validate :: proc(encrypted: []u8, metadata: Media_Metadata, host_count: int) -> Media_Error {
 	if host_count == 0 || host_count > MAX_MEDIA_HOSTS {
 		return {kind = .Invalid_Connection}
@@ -2057,12 +1988,12 @@ media_retry_request_with_nonce :: proc(
 	}
 
 	receipt: [256]u8
-	writer := Media_Writer {
+	writer := Protobuf_Writer {
 		dst = receipt[:],
 	}
-	media_write_string(&writer, 1, key.id)
-	if writer.err.kind != .None {
-		return 0, writer.err
+	protobuf_write_string(&writer, 1, key.id)
+	if writer.err != .None {
+		return 0, media_write_error(&writer)
 	}
 
 	retry_key := media_retry_key(media_key)

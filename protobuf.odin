@@ -580,23 +580,23 @@ registration_payload_encode :: proc(
 	}
 	key_type := [?]u8{5}
 	pairing_buffer: [2048]u8
-	pairing := Payload_Writer {
+	pairing := Protobuf_Writer {
 		dst = pairing_buffer[:],
 	}
-	payload_bytes(&pairing, 1, registration_id[:])
-	payload_bytes(&pairing, 2, key_type[:])
-	payload_bytes(&pairing, 3, key_copy.identity_public[:])
-	payload_bytes(&pairing, 4, prekey_id[:])
-	payload_bytes(&pairing, 5, key_copy.signed_prekey_public[:])
-	payload_bytes(&pairing, 6, key_copy.signed_prekey_signature[:])
-	payload_bytes(&pairing, 7, build_hash[:])
-	payload_bytes(&pairing, 8, device_props[:props_size])
+	protobuf_write_bytes(&pairing, 1, registration_id[:])
+	protobuf_write_bytes(&pairing, 2, key_type[:])
+	protobuf_write_bytes(&pairing, 3, key_copy.identity_public[:])
+	protobuf_write_bytes(&pairing, 4, prekey_id[:])
+	protobuf_write_bytes(&pairing, 5, key_copy.signed_prekey_public[:])
+	protobuf_write_bytes(&pairing, 6, key_copy.signed_prekey_signature[:])
+	protobuf_write_bytes(&pairing, 7, build_hash[:])
+	protobuf_write_bytes(&pairing, 8, device_props[:props_size])
 	if pairing.err != .None {
-		return 0, pairing.err
+		return 0, payload_write_error(&pairing)
 	}
 
 	staging: [MAX_CLIENT_PAYLOAD_SIZE]u8
-	writer := Payload_Writer {
+	writer := Protobuf_Writer {
 		dst = staging[:],
 	}
 	payload_common(&writer, config, false, 0, 0, pairing_buffer[:pairing.at])
@@ -663,7 +663,7 @@ login_payload_encode :: proc(
 		username = username * 10 + digit
 	}
 	staging: [MAX_CLIENT_PAYLOAD_SIZE]u8
-	writer := Payload_Writer {
+	writer := Protobuf_Writer {
 		dst = staging[:],
 	}
 	payload_common(&writer, config, true, username, device, nil, include_device)
@@ -678,11 +678,11 @@ device_props_encode :: proc(dst: []u8, config: Payload_Config) -> (n: int, error
 	}
 
 	history_buffer: [64]u8
-	history := Payload_Writer {
+	history := Protobuf_Writer {
 		dst = history_buffer[:],
 	}
 
-	payload_uint(&history, 3, 10240)
+	protobuf_write_uint(&history, 3, 10240)
 	// Pinned source leaves fields1/2/5/13 undefined, not encoded as zero.
 	history_fields := [?]u32{4, 6, 7, 8, 9, 10, 11, 12, 14}
 
@@ -692,30 +692,145 @@ device_props_encode :: proc(dst: []u8, config: Payload_Config) -> (n: int, error
 			value = 0
 		}
 
-		payload_uint(&history, field, value)
+		protobuf_write_uint(&history, field, value)
 	}
 
 	staging: [1024]u8
-	writer := Payload_Writer {
+	writer := Protobuf_Writer {
 		dst = staging[:],
 	}
 
-	payload_string(&writer, 1, config.browser_os)
-	payload_uint(&writer, 3, cast(u64)payload_platform(config.browser_name))
-	payload_uint(&writer, 4, cast(u64)config.sync_full_history)
-	payload_bytes(&writer, 5, history_buffer[:history.at])
+	protobuf_write_string(&writer, 1, config.browser_os)
+	protobuf_write_uint(&writer, 3, cast(u64)payload_platform(config.browser_name))
+	protobuf_write_uint(&writer, 4, cast(u64)config.sync_full_history)
+	protobuf_write_bytes(&writer, 5, history_buffer[:history.at])
 
 	return payload_copy_result(dst, config, "", &writer)
 }
 
-Payload_Writer :: struct {
-	dst: []u8,
-	at:  int,
-	err: Payload_Error,
+Protobuf_Write_Error :: enum {
+	None,
+	Oversized,
+	Overlapping_Buffers,
+	Invalid_UTF8,
+	Invalid_Metadata,
+	Invalid_Protobuf,
+}
+
+// One protobuf writer for both passes. With measure set nothing is stored and
+// only at advances (bounded by MAX_PROTOBUF_MESSAGE_SIZE); otherwise bytes go
+// to dst, bounded by its length. Errors are sticky: the first one stays and
+// later writes become no-ops. target, when set, is a buffer that must not
+// alias written byte slices (the caller's eventual destination). protobuf
+// carries the cause when err is Invalid_Protobuf.
+Protobuf_Writer :: struct {
+	dst, target: []u8,
+	at:          int,
+	measure:     bool,
+	err:         Protobuf_Write_Error,
+	protobuf:    Protobuf_Error,
+}
+
+protobuf_write_limit :: proc(writer: ^Protobuf_Writer) -> int {
+	if writer.measure {
+		return MAX_PROTOBUF_MESSAGE_SIZE
+	}
+
+	return min(len(writer.dst), MAX_PROTOBUF_MESSAGE_SIZE)
+}
+
+protobuf_write_varint :: proc(writer: ^Protobuf_Writer, value: u64) {
+	if writer.err != .None {
+		return
+	}
+
+	size := protobuf_varint_size(value)
+
+	if size > protobuf_write_limit(writer) - writer.at {
+		writer.err = .Oversized
+		return
+	}
+
+	if !writer.measure {
+		at := writer.at
+		protobuf_varint_write(writer.dst, &at, value)
+	}
+
+	writer.at += size
+}
+
+protobuf_write_header :: proc(writer: ^Protobuf_Writer, number: u32, size: int) {
+	protobuf_write_varint(writer, cast(u64)number << 3 | 2)
+	protobuf_write_varint(writer, cast(u64)size)
+}
+
+protobuf_write_uint :: proc(writer: ^Protobuf_Writer, number: u32, value: u64) {
+	protobuf_write_varint(writer, cast(u64)number << 3)
+	protobuf_write_varint(writer, value)
+}
+
+protobuf_write_bytes :: proc(writer: ^Protobuf_Writer, number: u32, data: []u8) {
+	if writer.err != .None {
+		return
+	}
+
+	if bytes.alias(writer.target, data) {
+		writer.err = .Overlapping_Buffers
+		return
+	}
+
+	if len(data) > MAX_PROTOBUF_MESSAGE_SIZE {
+		writer.err = .Oversized
+		return
+	}
+
+	protobuf_write_header(writer, number, len(data))
+
+	if writer.err != .None {
+		return
+	}
+
+	if len(data) > protobuf_write_limit(writer) - writer.at {
+		writer.err = .Oversized
+		return
+	}
+
+	if !writer.measure {
+		copy(writer.dst[writer.at:], data)
+	}
+
+	writer.at += len(data)
+}
+
+protobuf_write_string :: proc(writer: ^Protobuf_Writer, number: u32, value: string) {
+	if writer.err != .None {
+		return
+	}
+
+	if !utf8.valid_string(value) {
+		writer.err = .Invalid_UTF8
+		return
+	}
+
+	protobuf_write_bytes(writer, number, transmute([]u8)value)
+}
+
+payload_write_error :: proc(writer: ^Protobuf_Writer) -> Payload_Error {
+	switch writer.err {
+	case .None:
+		return .None
+	case .Overlapping_Buffers:
+		return .Overlapping_Buffers
+	case .Oversized, .Invalid_UTF8, .Invalid_Metadata, .Invalid_Protobuf:
+		// Payload fields are validated beforehand; only size can fail here.
+		return .Payload_Oversized
+	}
+
+	return .None
 }
 
 payload_common :: proc(
-	writer: ^Payload_Writer,
+	writer: ^Protobuf_Writer,
 	config: Payload_Config,
 	login: bool,
 	username: u64,
@@ -724,26 +839,26 @@ payload_common :: proc(
 	include_device: bool = true,
 ) {
 	version_buffer: [32]u8
-	version := Payload_Writer {
+	version := Protobuf_Writer {
 		dst = version_buffer[:],
 	}
 	for value, i in config.version {
-		payload_uint(&version, cast(u32)(i + 1), cast(u64)value)
+		protobuf_write_uint(&version, cast(u32)(i + 1), cast(u64)value)
 	}
 	agent_buffer: [512]u8
-	agent := Payload_Writer {
+	agent := Protobuf_Writer {
 		dst = agent_buffer[:],
 	}
-	payload_uint(&agent, 1, 14) // UserAgent.Platform.WEB
-	payload_bytes(&agent, 2, version_buffer[:version.at])
-	payload_string(&agent, 3, "000") // mcc
-	payload_string(&agent, 4, "000") // mnc
-	payload_string(&agent, 5, "0.1")
-	payload_string(&agent, 7, "Desktop")
-	payload_string(&agent, 8, "0.1")
-	payload_uint(&agent, 10, 0) // ReleaseChannel.RELEASE, explicitly present.
-	payload_string(&agent, 11, "en")
-	payload_string(&agent, 12, config.country_code)
+	protobuf_write_uint(&agent, 1, 14) // UserAgent.Platform.WEB
+	protobuf_write_bytes(&agent, 2, version_buffer[:version.at])
+	protobuf_write_string(&agent, 3, "000") // mcc
+	protobuf_write_string(&agent, 4, "000") // mnc
+	protobuf_write_string(&agent, 5, "0.1")
+	protobuf_write_string(&agent, 7, "Desktop")
+	protobuf_write_string(&agent, 8, "0.1")
+	protobuf_write_uint(&agent, 10, 0) // ReleaseChannel.RELEASE, explicitly present.
+	protobuf_write_string(&agent, 11, "en")
+	protobuf_write_string(&agent, 12, config.country_code)
 	web_subplatform: u64
 	if config.sync_full_history {
 		if config.browser_os == "Mac OS" {
@@ -756,33 +871,33 @@ payload_common :: proc(
 	}
 
 	web_buffer: [2]u8
-	web := Payload_Writer {
+	web := Protobuf_Writer {
 		dst = web_buffer[:],
 	}
-	payload_uint(&web, 4, web_subplatform)
+	protobuf_write_uint(&web, 4, web_subplatform)
 	if version.err != .None || agent.err != .None || web.err != .None {
-		writer.err = .Payload_Oversized
+		writer.err = .Oversized
 		return
 	}
 
 	if login {
-		payload_uint(writer, 1, username)
+		protobuf_write_uint(writer, 1, username)
 	}
 
-	payload_uint(writer, 3, 0) // passive:false for login and registration.
-	payload_bytes(writer, 5, agent_buffer[:agent.at])
-	payload_bytes(writer, 6, web_buffer[:web.at])
-	payload_uint(writer, 12, 1) // WIFI_UNKNOWN
-	payload_uint(writer, 13, 1) // USER_ACTIVATED
+	protobuf_write_uint(writer, 3, 0) // passive:false for login and registration.
+	protobuf_write_bytes(writer, 5, agent_buffer[:agent.at])
+	protobuf_write_bytes(writer, 6, web_buffer[:web.at])
+	protobuf_write_uint(writer, 12, 1) // WIFI_UNKNOWN
+	protobuf_write_uint(writer, 13, 1) // USER_ACTIVATED
 	if login && include_device {
-		payload_uint(writer, 18, cast(u64)device)
+		protobuf_write_uint(writer, 18, cast(u64)device)
 	}
 
 	if !login {
-		payload_bytes(writer, 19, pairing)
+		protobuf_write_bytes(writer, 19, pairing)
 	}
 
-	payload_uint(writer, 33, cast(u64)login) // pull:true login, false registration.
+	protobuf_write_uint(writer, 33, cast(u64)login) // pull:true login, false registration.
 }
 
 payload_config_validate :: proc(config: Payload_Config) -> Payload_Error {
@@ -876,13 +991,13 @@ payload_copy_result :: proc(
 	dst: []u8,
 	config: Payload_Config,
 	username: string,
-	writer: ^Payload_Writer,
+	writer: ^Protobuf_Writer,
 ) -> (
 	int,
 	Payload_Error,
 ) {
 	if writer.err != .None {
-		return 0, writer.err
+		return 0, payload_write_error(writer)
 	}
 
 	if len(dst) < writer.at {
@@ -897,45 +1012,6 @@ payload_copy_result :: proc(
 	}
 	copy(dst[:writer.at], writer.dst[:writer.at])
 	return writer.at, .None
-}
-
-payload_varint :: proc(writer: ^Payload_Writer, value: u64) {
-	if writer.err != .None {
-		return
-	}
-
-	size := protobuf_varint_size(value)
-
-	if size > len(writer.dst) - writer.at {
-		writer.err = .Payload_Oversized
-		return
-	}
-
-	protobuf_varint_write(writer.dst, &writer.at, value)
-}
-
-payload_uint :: proc(writer: ^Payload_Writer, field: u32, value: u64) {
-	payload_varint(writer, cast(u64)field << 3)
-	payload_varint(writer, value)
-}
-
-payload_bytes :: proc(writer: ^Payload_Writer, field: u32, value: []u8) {
-	payload_varint(writer, cast(u64)field << 3 | 2)
-	payload_varint(writer, cast(u64)len(value))
-	if writer.err != .None {
-		return
-	}
-
-	if len(value) > len(writer.dst) - writer.at {
-		writer.err = .Payload_Oversized
-		return
-	}
-
-	writer.at += copy(writer.dst[writer.at:], value)
-}
-
-payload_string :: proc(writer: ^Payload_Writer, field: u32, value: string) {
-	payload_bytes(writer, field, transmute([]u8)value)
 }
 
 payload_decimal :: proc(dst: []u8, value: u32) -> int {
