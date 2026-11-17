@@ -918,23 +918,17 @@ payload_copy_result :: proc(
 }
 
 payload_varint :: proc(writer: ^Payload_Writer, value: u64) {
-	if writer.err != .None do return
-
-	remaining := value
-	for {
-		if writer.at == len(writer.dst) {
-			writer.err = .Payload_Oversized; return
-		}
-
-		b := cast(u8)(remaining & 0x7f)
-		remaining >>= 7
-		if remaining != 0 do b |= 0x80
-
-		writer.dst[writer.at] = b
-		writer.at += 1
-		if remaining == 0 do return
-
+	if writer.err != .None {
+		return
 	}
+
+	size := protobuf_varint_size(value)
+	if size > len(writer.dst) - writer.at {
+		writer.err = .Payload_Oversized
+		return
+	}
+
+	protobuf_varint_write(writer.dst, &writer.at, value)
 }
 
 payload_uint :: proc(
@@ -956,7 +950,8 @@ payload_bytes :: proc(
 	if writer.err != .None do return
 
 	if len(value) > len(writer.dst) - writer.at {
-		writer.err = .Payload_Oversized; return
+		writer.err = .Payload_Oversized
+		return
 	}
 
 	writer.at += copy(writer.dst[writer.at:], value)

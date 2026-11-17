@@ -1711,7 +1711,8 @@ qr_encode :: proc(text: string) -> (code: QR_Code, err: QR_Error) {
 		qr_format(&code, &functions, mask)
 		penalty := qr_penalty(&code)
 		if penalty < best_penalty {
-			best_penalty = penalty; code.mask = mask
+			best_penalty = penalty
+			code.mask = mask
 		}
 
 		qr_mask(&code, &functions, mask)
@@ -2072,7 +2073,8 @@ qr_penalty :: proc(code: ^QR_Code) -> int {
 
 			}
 			if color {
-				qr_history_add(&history, run, code.size); run = 0
+				qr_history_add(&history, run, code.size)
+				run = 0
 			}
 
 			qr_history_add(&history, run + code.size, code.size)
@@ -2228,7 +2230,8 @@ web_version_revision :: proc(src: []u8) -> (revision: u32, err: Version_Error) {
 		if invalid do return 0, {kind = .Invalid_Version}
 		if !ok do continue
 		if found && revision != value do return 0, {kind = .Invalid_Version}
-		revision = value; found = true
+		revision = value
+		found = true
 	}
 	if found do return revision, {}
 	return 0, {kind = .Missing_Version}

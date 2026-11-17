@@ -847,27 +847,22 @@ Media_Writer :: struct {
 }
 
 media_write_varint :: proc(writer: ^Media_Writer, value: u64) {
-	if writer.err.kind != .None do return
-
-	v := value
-	for {
-		if writer.at >= MAX_PROTOBUF_MESSAGE_SIZE {
-			writer.err = {
-				kind = .Message_Oversized,
-			}
-			return
-		}
-
-		b := cast(u8)(v & 127)
-		v >>= 7
-		if v != 0 do b |= 128
-
-		if writer.dst != nil do writer.dst[writer.at] = b
-
-		writer.at += 1
-		if v == 0 do break
-
+	if writer.err.kind != .None {
+		return
 	}
+
+	size := protobuf_varint_size(value)
+	if size > MAX_PROTOBUF_MESSAGE_SIZE - writer.at {
+		writer.err = {kind = .Message_Oversized}
+		return
+	}
+
+	if writer.dst != nil {
+		at := writer.at
+		protobuf_varint_write(writer.dst, &at, value)
+	}
+
+	writer.at += size
 }
 
 media_write_header :: proc(
@@ -1568,7 +1563,8 @@ media_connection_decode :: proc(
 
 		hostname, _ := node_attr(host, "hostname")
 		length, _ := media_host_limit(host)
-		storage[at] = {hostname, length}; at += 1
+		storage[at] = {hostname, length}
+		at += 1
 	}
 	return {
 		auth = auth,
@@ -1667,9 +1663,12 @@ media_upload_url :: proc(
 	}
 
 	path: string
-	#partial switch kind {case .Image:
-		path = "/mms/image/"; case .Document:
-		path = "/mms/document/"; case:
+	#partial switch kind {
+	case .Image:
+		path = "/mms/image/"
+	case .Document:
+		path = "/mms/document/"
+	case:
 		return "", {kind = .Invalid_Kind}
 	}
 	hash := encrypted_hash
@@ -2158,7 +2157,8 @@ media_retry_request_with_nonce :: proc(
 	receipt: [256]u8
 	writer := Media_Writer {
 		dst = receipt[:],
-	}; media_write_string(&writer, 1, key.id)
+	}
+	media_write_string(&writer, 1, key.id)
 	if writer.err.kind != .None do return 0, writer.err
 
 	retry_key := media_retry_key(media_key)
