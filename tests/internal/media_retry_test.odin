@@ -114,11 +114,15 @@ media_retry_preserves_caller_routing_metadata :: proc(t: ^testing.T) {
 	testing.expect(t, valid)
 	defer delete(ciphertext)
 	nonce: [12]u8
-	for &value, index in nonce do value = u8(index + 32)
+	for &value, index in nonce {
+		value = u8(index + 32)
+	}
 	document := media_retry_test_notification(t, ciphertext, nonce[:])
 	append(&socket.pending_media_retry, document)
 	key, hash: [32]u8
-	for &value, index in key do value = u8(index)
+	for &value, index in key {
+		value = u8(index)
+	}
 	media := Media_Message {
 		kind            = .Image,
 		url             = "https://mmg.whatsapp.net/original.enc",

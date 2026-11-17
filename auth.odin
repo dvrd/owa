@@ -44,7 +44,9 @@ Credentials_Error :: enum {
 }
 
 device_credentials_generate :: proc() -> (credentials: Device_Credentials, error: Credentials_Error) {
-	when !crypto.HAS_RAND_BYTES do return {}, .Entropy_Unavailable
+	when !crypto.HAS_RAND_BYTES {
+		return {}, .Entropy_Unavailable
+	}
 	device_private_generate(&credentials.noise_private)
 	device_private_generate(&credentials.pairing_ephemeral_private)
 	device_private_generate(&credentials.identity_private)
@@ -73,7 +75,9 @@ device_credentials_generate :: proc() -> (credentials: Device_Credentials, error
 }
 
 device_credentials_validate :: proc(credentials: ^Device_Credentials) -> Credentials_Error {
-	if credentials == nil do return .Nil_Credentials
+	if credentials == nil {
+		return .Nil_Credentials
+	}
 
 	if !device_private_valid(&credentials.noise_private) {
 		return .Invalid_Noise_Key
@@ -186,7 +190,9 @@ auth_state_clear :: proc(state: ^Auth_State) {
 }
 
 auth_state_validate :: proc(state: ^Auth_State) -> Auth_Store_Error {
-	if state == nil do return {kind = .Invalid_State}
+	if state == nil {
+		return {kind = .Invalid_State}
+	}
 
 	if err := device_credentials_validate(&state.credentials); err != .None {
 		return {kind = .Invalid_Credentials, credentials = err}
@@ -254,7 +260,9 @@ auth_state_encode :: proc(dst: []u8, state: ^Auth_State) -> (n: int, error: Auth
 		state.credentials.adv_secret[:],
 	}
 
-	for secret in secrets do n += copy(dst[n:], secret)
+	for secret in secrets {
+		n += copy(dst[n:], secret)
+	}
 	dst[n] = state.account.valid ? 1 : 0
 	n += 1
 	auth_account_encode(dst, state, &n)
@@ -293,10 +301,14 @@ auth_account_encode :: proc(dst: []u8, state: ^Auth_State, at: ^int) {
 }
 
 auth_state_decode :: proc(dst: ^Auth_State, src: []u8) -> Auth_Store_Error {
-	if dst == nil do return {kind = .Invalid_State}
+	if dst == nil {
+		return {kind = .Invalid_State}
+	}
 
 	at, header_error := auth_state_header_validate(src)
-	if header_error.kind != .None do return header_error
+	if header_error.kind != .None {
+		return header_error
+	}
 
 	next: Auth_State
 	defer auth_state_clear(&next)
@@ -304,7 +316,9 @@ auth_state_decode :: proc(dst: ^Auth_State, src: []u8) -> Auth_Store_Error {
 	next.credentials.signed_prekey_id = cast(u32)store_get(src, &at, 4)
 	next.credentials.next_prekey_id = cast(u32)store_get(src, &at, 4)
 	next.credentials.first_unuploaded_prekey_id = cast(u32)store_get(src, &at, 4)
-	if src[at] > 1 do return {kind = .Invalid_Format}
+	if src[at] > 1 {
+		return {kind = .Invalid_Format}
+	}
 
 	next.credentials.registered = src[at] == 1
 	at += 1
@@ -324,13 +338,19 @@ auth_state_decode :: proc(dst: ^Auth_State, src: []u8) -> Auth_Store_Error {
 	}
 
 	end := len(src) - 32
-	if src[at] > 1 do return {kind = .Invalid_Format}
+	if src[at] > 1 {
+		return {kind = .Invalid_Format}
+	}
 
 	next.account.valid = src[at] == 1
 	at += 1
-	if account_error := auth_account_decode(&next, src, &at, end, src[9]); account_error.kind != .None do return account_error
+	if account_error := auth_account_decode(&next, src, &at, end, src[9]); account_error.kind != .None {
+		return account_error
+	}
 
-	if at != end do return {kind = .Invalid_Format}
+	if at != end {
+		return {kind = .Invalid_Format}
+	}
 
 	if err := auth_state_validate(&next); err.kind != .None {
 		return err
@@ -372,10 +392,14 @@ auth_state_header_validate :: proc(src: []u8) -> (int, Auth_Store_Error) {
 
 auth_account_decode :: proc(next: ^Auth_State, src: []u8, at: ^int, end: int, version: u8) -> Auth_Store_Error {
 	if next.account.valid {
-		if end - at^ < 5 do return {kind = .Invalid_Format}
+		if end - at^ < 5 {
+			return {kind = .Invalid_Format}
+		}
 
 		next.account.key_index = cast(u32)store_get(src, at, 4)
-		if src[at^] > 1 do return {kind = .Invalid_Format}
+		if src[at^] > 1 {
+			return {kind = .Invalid_Format}
+		}
 
 		next.account.hosted = src[at^] == 1
 		at^ += 1
@@ -435,9 +459,13 @@ auth_state_save :: proc(path: string, state: ^Auth_State) -> Auth_Store_Error {
 	buffer: [MAX_AUTH_STATE_SIZE]u8
 	defer crypto.zero_explicit(&buffer, size_of(buffer))
 	size, encode_err := auth_state_encode(buffer[:], state)
-	if encode_err.kind != .None do return encode_err
+	if encode_err.kind != .None {
+		return encode_err
+	}
 
-	when !crypto.HAS_RAND_BYTES do return {kind = .Entropy_Unavailable}
+	when !crypto.HAS_RAND_BYTES {
+		return {kind = .Entropy_Unavailable}
+	}
 	// session_checkpoint permits a pairing reply only after this returns.
 	step, io_err := durable_write(path, buffer[:size])
 	kinds := [Durable_Write_Step]Auth_Store_Error_Kind {
@@ -453,7 +481,9 @@ auth_state_save :: proc(path: string, state: ^Auth_State) -> Auth_Store_Error {
 }
 
 auth_state_load :: proc(path: string, state: ^Auth_State) -> Auth_Store_Error {
-	if state == nil do return {kind = .Invalid_State}
+	if state == nil {
+		return {kind = .Invalid_State}
+	}
 
 	file, open_err := os.open(path)
 
@@ -559,7 +589,9 @@ Prekey_Error :: struct {
 }
 
 prekey_store_init :: proc(store: ^Prekey_Store, credentials: ^Device_Credentials) -> Prekey_Error {
-	if store == nil do return {kind = .Invalid_State}
+	if store == nil {
+		return {kind = .Invalid_State}
+	}
 
 	if store.initialized {
 		return {kind = .Already_Initialized}
@@ -597,7 +629,9 @@ prekey_store_get :: proc(store: ^Prekey_Store, id: u32) -> ^One_Time_Prekey {
 	}
 
 	for &key in store.keys[:store.count] {
-		if key.id == id do return &key
+		if key.id == id {
+			return &key
+		}
 	}
 
 	return nil
@@ -647,7 +681,9 @@ prekey_upload_prepare :: proc(
 
 	unpublished := 0
 	for key in store.keys[:store.count] {
-		if key.status == .Unpublished do unpublished += 1
+		if key.status == .Unpublished {
+			unpublished += 1
+		}
 	}
 	needed := max(0, count - unpublished)
 	if needed > 0 {
@@ -666,7 +702,9 @@ prekey_upload_prepare :: proc(
 
 			key.status = .Pending
 			store.pending_count += 1
-			if store.pending_count == count do break
+			if store.pending_count == count {
+				break
+			}
 		}
 	}
 	prekey_set_request_id(store, request_id)
@@ -709,7 +747,9 @@ prekey_upload_encode :: proc(
 	n: int,
 	error: Prekey_Error,
 ) {
-	if validation_error := prekey_upload_validate(store, credentials); validation_error.kind != .None do return 0, validation_error
+	if validation_error := prekey_upload_validate(store, credentials); validation_error.kind != .None {
+		return 0, validation_error
+	}
 
 	registration: [4]u8
 	for i in 0 ..< 4 {
@@ -762,7 +802,9 @@ prekey_upload_nodes_prepare :: proc(
 ) -> int {
 	at := 0
 	for &key in store.keys[:store.count] {
-		if key.status != .Pending do continue
+		if key.status != .Pending {
+			continue
+		}
 
 		ids[at] = prekey_id_bytes(key.id)
 		key_fields[at] = {
@@ -827,7 +869,9 @@ prekey_upload_handle_response :: proc(store: ^Prekey_Store, response: Binary_Nod
 	}
 
 	for &key in store.keys[:store.count] {
-		if key.status == .Pending do key.status = .Published
+		if key.status == .Pending {
+			key.status = .Published
+		}
 	}
 
 	store.pending_first_id, store.pending_count = 0, 0
@@ -879,7 +923,9 @@ prekey_count_response :: proc(response: Binary_Node, request_id: string) -> (int
 		}
 	}
 
-	if count == nil do return 0, {kind = .Invalid_Response}
+	if count == nil {
+		return 0, {kind = .Invalid_Response}
+	}
 
 	value, found := node_attr(count^, "value")
 
@@ -931,9 +977,13 @@ prekey_store_encode :: proc(dst: []u8, store: ^Prekey_Store) -> (int, Prekey_Err
 		store_put(dst, &at, cast(u64)key.id, 4)
 		dst[at] = cast(u8)key.status
 		at += 1
-		for value, i in key.private do dst[at + i] = value
+		for value, i in key.private {
+			dst[at + i] = value
+		}
 		at += 32
-		for value, i in key.public do dst[at + i] = value
+		for value, i in key.public {
+			dst[at + i] = value
+		}
 		at += 32
 	}
 
@@ -944,9 +994,13 @@ prekey_store_encode :: proc(dst: []u8, store: ^Prekey_Store) -> (int, Prekey_Err
 }
 
 prekey_store_decode :: proc(store: ^Prekey_Store, src: []u8, credentials: ^Device_Credentials) -> Prekey_Error {
-	if store == nil do return {kind = .Invalid_State}
+	if store == nil {
+		return {kind = .Invalid_State}
+	}
 
-	if header_error := prekey_store_header_validate(src); header_error.kind != .None do return header_error
+	if header_error := prekey_store_header_validate(src); header_error.kind != .None {
+		return header_error
+	}
 
 	at := 8
 
@@ -1025,9 +1079,13 @@ prekey_store_save :: proc(path: string, store: ^Prekey_Store) -> Prekey_Error {
 	buffer: [MAX_PREKEY_STORE_SIZE]u8
 	defer crypto.zero_explicit(&buffer, size_of(buffer))
 	size, encode_err := prekey_store_encode(buffer[:], store)
-	if encode_err.kind != .None do return encode_err
+	if encode_err.kind != .None {
+		return encode_err
+	}
 
-	when !crypto.HAS_RAND_BYTES do return {kind = .Entropy_Unavailable}
+	when !crypto.HAS_RAND_BYTES {
+		return {kind = .Entropy_Unavailable}
+	}
 	step, io_err := durable_write(path, buffer[:size])
 
 	if step != .None {
@@ -1049,7 +1107,9 @@ prekey_store_save :: proc(path: string, store: ^Prekey_Store) -> Prekey_Error {
 }
 
 prekey_store_load :: proc(path: string, store: ^Prekey_Store, credentials: ^Device_Credentials) -> Prekey_Error {
-	if store == nil do return {kind = .Invalid_State}
+	if store == nil {
+		return {kind = .Invalid_State}
+	}
 
 	file, open_err := os.open(path)
 
@@ -1207,7 +1267,9 @@ prekey_generation_validate :: proc(store: ^Prekey_Store, count: int) -> Prekey_E
 		return {kind = .Revision_Exhausted}
 	}
 
-	when !crypto.HAS_RAND_BYTES do return {kind = .Entropy_Unavailable}
+	when !crypto.HAS_RAND_BYTES {
+		return {kind = .Entropy_Unavailable}
+	}
 
 	return {}
 }
@@ -1232,7 +1294,9 @@ prekey_request_id_valid :: proc(id: string) -> bool {
 	}
 
 	for c in id {
-		if c < 33 || c > 126 || c == '@' do return false
+		if c < 33 || c > 126 || c == '@' {
+			return false
+		}
 	}
 
 	return true
@@ -1303,7 +1367,9 @@ prekey_store_remove_consumed :: proc(store: ^Prekey_Store, id: u32) -> Prekey_Er
 	}
 
 	for key, i in store.keys[:store.count] {
-		if key.id != id do continue
+		if key.id != id {
+			continue
+		}
 
 		if key.status == .Pending {
 			return {kind = .Pending_Upload_Exists}
@@ -1314,7 +1380,9 @@ prekey_store_remove_consumed :: proc(store: ^Prekey_Store, id: u32) -> Prekey_Er
 		}
 
 		crypto.zero_explicit(&store.keys[i], size_of(One_Time_Prekey))
-		for j in i ..< store.count - 1 do store.keys[j] = store.keys[j + 1]
+		for j in i ..< store.count - 1 {
+			store.keys[j] = store.keys[j + 1]
+		}
 		store.count -= 1
 		crypto.zero_explicit(&store.keys[store.count], size_of(One_Time_Prekey))
 		store.revision += 1

@@ -108,7 +108,9 @@ Client :: struct {
 }
 
 noise_credentials_generate :: proc() -> (credentials: Noise_Credentials, error: Client_Error) {
-	when !crypto.HAS_RAND_BYTES do return {}, {kind = .Entropy_Unavailable}
+	when !crypto.HAS_RAND_BYTES {
+		return {}, {kind = .Entropy_Unavailable}
+	}
 	crypto.rand_bytes(credentials.static_private_key[:])
 
 	return credentials, {}
@@ -145,7 +147,9 @@ client_init :: proc(
 		return {kind = .Invalid_Credentials}
 	}
 
-	when !crypto.HAS_RAND_BYTES do return {kind = .Entropy_Unavailable}
+	when !crypto.HAS_RAND_BYTES {
+		return {kind = .Entropy_Unavailable}
+	}
 	if err := frame_transport_init(&client.frames, websocket, settings.max_frame_payload); err.kind != .None {
 		return {kind = .Transport_Failed, transport = err}
 	}
@@ -168,11 +172,17 @@ client_init :: proc(
 // payload is an already encoded WAProto.ClientPayload; registration/login
 // construction belongs to the credentials/pairing layer above this package.
 client_handshake :: proc(client: ^Client, client_payload: []u8) -> Client_Error {
-	if client == nil do return {kind = .Invalid_State}
+	if client == nil {
+		return {kind = .Invalid_State}
+	}
 
-	if client.phase == .Noise_Ready do return {}
+	if client.phase == .Noise_Ready {
+		return {}
+	}
 
-	if client.phase == .Failed do return client.last_error
+	if client.phase == .Failed {
+		return client.last_error
+	}
 
 	if client.phase != .Initialized {
 		return {kind = .Invalid_State}
@@ -185,7 +195,9 @@ client_handshake :: proc(client: ^Client, client_payload: []u8) -> Client_Error 
 	}
 
 	deadlines_set, deadline_error := client_handshake_deadline_start(client)
-	if deadline_error.kind != .None do return deadline_error
+	if deadline_error.kind != .None {
+		return deadline_error
+	}
 
 	defer {
 		if deadlines_set && (client.phase != .Failed && client.phase != .Closed) && client.websocket.phase == .Open {
@@ -194,7 +206,9 @@ client_handshake :: proc(client: ^Client, client_payload: []u8) -> Client_Error 
 	}
 
 	client.phase = .Handshake
-	if exchange_error := client_handshake_exchange(client, client_payload, finish_size); exchange_error.kind != .None do return exchange_error
+	if exchange_error := client_handshake_exchange(client, client_payload, finish_size); exchange_error.kind != .None {
+		return exchange_error
+	}
 
 	if err := noise_split(&client.noise); err != .None {
 		return client_fail(client, {kind = .Noise_Failed, noise = err})
@@ -220,7 +234,9 @@ client_handshake_deadline_start :: proc(client: ^Client) -> (bool, Client_Error)
 
 	if client.websocket.stream.set_read_deadline != nil && client.websocket.stream.set_write_deadline != nil {
 		timeout := client.config.handshake_timeout
-		if timeout == 0 do timeout = 10 * time.Second
+		if timeout == 0 {
+			timeout = 10 * time.Second
+		}
 
 		if err := network_client.websocket_set_deadline(client.websocket, time.time_add(time.now(), timeout));
 		   err.kind != .None {
@@ -307,7 +323,9 @@ client_handshake_server_static_decrypt :: proc(
 		return client_fail(client, {kind = .Noise_Failed, noise = err})
 	}
 
-	if dh_error := client_noise_mix_dh(client, client.ephemeral_private[:], server.ephemeral); dh_error.kind != .None do return dh_error
+	if dh_error := client_noise_mix_dh(client, client.ephemeral_private[:], server.ephemeral); dh_error.kind != .None {
+		return dh_error
+	}
 	if _, err := noise_decrypt(&client.noise, server_static, server.static); err != .None {
 		return client_fail(client, {kind = .Noise_Failed, noise = err})
 	}
@@ -331,7 +349,9 @@ client_handshake_certificate_verify :: proc(
 	}
 
 	verify := client.config.verify_certificate
-	if verify == nil do verify = strict_certificate_policy
+	if verify == nil {
+		verify = strict_certificate_policy
+	}
 
 	if err := verify(certificate, server_static^); err != .None {
 		return client_fail(client, {kind = .Certificate_Rejected, certificate = err})
@@ -406,12 +426,20 @@ client_handshake_exchange :: proc(client: ^Client, client_payload: []u8, finish_
 
 	defer delete(server_buffer)
 	server, server_error := client_handshake_server_read(client, server_buffer)
-	if server_error.kind != .None do return server_error
+	if server_error.kind != .None {
+		return server_error
+	}
 	server_static: [32]u8
-	if static_error := client_handshake_server_static_decrypt(client, server, server_static[:]); static_error.kind != .None do return static_error
-	if certificate_error := client_handshake_certificate_verify(client, server, &server_static); certificate_error.kind != .None do return certificate_error
+	if static_error := client_handshake_server_static_decrypt(client, server, server_static[:]); static_error.kind != .None {
+		return static_error
+	}
+	if certificate_error := client_handshake_certificate_verify(client, server, &server_static); certificate_error.kind != .None {
+		return certificate_error
+	}
 	encrypted_static: [48]u8
-	if static_error := client_handshake_static_send_prepare(client, server, encrypted_static[:]); static_error.kind != .None do return static_error
+	if static_error := client_handshake_static_send_prepare(client, server, encrypted_static[:]); static_error.kind != .None {
+		return static_error
+	}
 
 	return client_handshake_payload_send(client, client_payload, encrypted_static[:], finish_size)
 }
@@ -574,7 +602,9 @@ strict_certificate_time :: proc(details: Certificate_Details, now: time.Time) ->
 // issuer serial zero. Signatures and validity times are not verified here.
 baileys_certificate_policy :: proc(payload: []u8, server_static: [32]u8) -> Certificate_Error {
 	chain, err := cert_chain_decode(payload)
-	if err != .None do return .Invalid_Certificate_Chain
+	if err != .None {
+		return .Invalid_Certificate_Chain
+	}
 
 	if !chain.has_intermediate || !chain.intermediate.has_details {
 		return .Missing_Intermediate
@@ -598,7 +628,9 @@ client_close :: proc(client: ^Client) -> Client_Error {
 		return {kind = .Invalid_State}
 	}
 
-	if client.phase == .Closed do return {}
+	if client.phase == .Closed {
+		return {}
+	}
 
 	frame_transport_clear(&client.frames)
 	noise_clear(&client.noise)
@@ -642,9 +674,13 @@ client_finish_wire_size :: proc(payload_size: int) -> int {
 // Sends an opaque encoded WhatsApp binary node under the established Noise
 // keys. The node codec and account/session state live above this layer.
 client_write :: proc(client: ^Client, payload: []u8) -> Client_Error {
-	if client == nil do return {kind = .Invalid_State}
+	if client == nil {
+		return {kind = .Invalid_State}
+	}
 
-	if client.phase == .Failed do return client.last_error
+	if client.phase == .Failed {
+		return client.last_error
+	}
 
 	if client.phase != .Noise_Ready {
 		return {kind = .Invalid_State}
@@ -679,7 +715,9 @@ client_write :: proc(client: ^Client, payload: []u8) -> Client_Error {
 // required plaintext size and the encrypted envelope remains queued for retry;
 // no nonce is consumed until decryption is attempted with enough space.
 client_read :: proc(client: ^Client, dst: []u8) -> (n: int, error: Client_Error) {
-	if client == nil do return 0, {kind = .Invalid_State}
+	if client == nil {
+		return 0, {kind = .Invalid_State}
+	}
 
 	if client.phase == .Failed {
 		return 0, client.last_error
@@ -703,7 +741,9 @@ client_read :: proc(client: ^Client, dst: []u8) -> (n: int, error: Client_Error)
 
 	defer delete(ciphertext)
 	size, frame_error := client_encrypted_frame_receive(client, ciphertext)
-	if frame_error.kind != .None do return size, frame_error
+	if frame_error.kind != .None {
+		return size, frame_error
+	}
 
 	decrypted, decrypt_err := noise_decrypt(&client.noise, dst, ciphertext[:size])
 
@@ -771,7 +811,9 @@ frame_decode_len :: proc(header: [3]u8) -> int {
 
 frame_encode :: proc(dst: []u8, payload: []u8) -> (written: int, error: Frame_Error) {
 	header, len_err := frame_encode_len(len(payload))
-	if len_err != .None do return 0, len_err
+	if len_err != .None {
+		return 0, len_err
+	}
 
 	required := FRAME_HEADER_SIZE + len(payload)
 
@@ -899,7 +941,9 @@ frame_transport_send :: proc(state: ^Frame_Transport, payload: []u8) -> Frame_Tr
 	}
 
 	intro_size := 0
-	if !state.intro_sent do intro_size = len(FRAME_INTRO)
+	if !state.intro_sent {
+		intro_size = len(FRAME_INTRO)
+	}
 
 	wire_size := intro_size + FRAME_HEADER_SIZE + len(payload)
 
@@ -916,7 +960,9 @@ frame_transport_send :: proc(state: ^Frame_Transport, payload: []u8) -> Frame_Tr
 	defer delete(wire, state.allocator)
 
 	if intro_size != 0 {
-		for value, i in FRAME_INTRO do wire[i] = value
+		for value, i in FRAME_INTRO {
+			wire[i] = value
+		}
 	}
 
 	_, frame_err := frame_encode(wire[intro_size:], payload)
@@ -967,8 +1013,12 @@ frame_transport_receive :: proc(state: ^Frame_Transport, dst: []u8) -> (n: int, 
 
 		if state.header_used < FRAME_HEADER_SIZE {
 			complete, header_error := frame_transport_header_receive(state)
-			if header_error.kind != .None do return 0, header_error
-			if !complete do continue
+			if header_error.kind != .None {
+				return 0, header_error
+			}
+			if !complete {
+				continue
+			}
 		}
 
 		count := copy(state.payload[state.payload_used:], state.ws_message[state.ws_at:state.ws_size])
@@ -1011,7 +1061,9 @@ frame_transport_header_receive :: proc(state: ^Frame_Transport) -> (bool, Frame_
 // Clears owned buffers and permits reuse with a fresh, already-open WebSocket.
 // The borrowed WebSocket is deliberately left under the caller's ownership.
 frame_transport_clear :: proc(state: ^Frame_Transport) {
-	if state == nil do return
+	if state == nil {
+		return
+	}
 
 	delete(state.ws_message)
 	delete(state.payload)
@@ -1023,7 +1075,9 @@ frame_transport_validate :: proc(state: ^Frame_Transport) -> Frame_Transport_Err
 		return {kind = .Invalid_State, frame = .None}
 	}
 
-	if state.failed do return state.failure
+	if state.failed {
+		return state.failure
+	}
 
 	if state.connection == nil {
 		return {kind = .Invalid_Connection, frame = .None}
@@ -1181,7 +1235,9 @@ noise_mix_hash :: proc(state: ^Noise_State, data: []u8) -> Noise_Error {
 		return err
 	}
 
-	if state.phase == .Transport do return .None
+	if state.phase == .Transport {
+		return .None
+	}
 
 	ctx: sha2.Context_256
 	sha2.init_256(&ctx)
@@ -1199,7 +1255,9 @@ noise_mix_key :: proc(state: ^Noise_State, shared: [32]u8) -> Noise_Error {
 		return err
 	}
 
-	if state.phase != .Handshake do return .Invalid_State
+	if state.phase != .Handshake {
+		return .Invalid_State
+	}
 
 	secret := shared
 	defer crypto.zero_explicit(&secret, size_of(secret))
@@ -1222,7 +1280,9 @@ noise_split :: proc(state: ^Noise_State) -> Noise_Error {
 		return err
 	}
 
-	if state.phase != .Handshake do return .Invalid_State
+	if state.phase != .Handshake {
+		return .Invalid_State
+	}
 
 	derived: [64]u8
 	defer crypto.zero_explicit(&derived, size_of(derived))
@@ -1267,7 +1327,9 @@ noise_encrypt :: proc(state: ^Noise_State, dst, plaintext: []u8) -> (written: in
 	defer crypto.zero_explicit(&ctx, size_of(ctx))
 	nonce := noise_nonce(state.write_counter)
 	aad: []u8
-	if state.phase == .Handshake do aad = state.hash[:]
+	if state.phase == .Handshake {
+		aad = state.hash[:]
+	}
 
 	aes.seal_gcm(&ctx, dst[:len(plaintext)], dst[len(plaintext):written], nonce[:], aad, plaintext)
 	state.write_counter += 1
@@ -1316,7 +1378,9 @@ noise_decrypt :: proc(state: ^Noise_State, dst, ciphertext: []u8) -> (written: i
 	defer crypto.zero_explicit(&ctx, size_of(ctx))
 	nonce := noise_nonce(counter)
 	aad: []u8
-	if state.phase == .Handshake do aad = state.hash[:]
+	if state.phase == .Handshake {
+		aad = state.hash[:]
+	}
 
 	valid := aes.open_gcm(&ctx, dst[:written], nonce[:], aad, ciphertext[:written], ciphertext[written:])
 
@@ -1365,7 +1429,9 @@ noise_state_validate :: proc(state: ^Noise_State) -> Noise_Error {
 		return .Invalid_State
 	}
 
-	if state.phase == .Failed do return state.failure
+	if state.phase == .Failed {
+		return state.failure
+	}
 
 	return .None
 }
@@ -1429,7 +1495,9 @@ signal_curve_public :: proc(private: [32]u8) -> [32]u8 {
 // random-suffix construction. Its verifier also accepts deterministic legacy
 // signatures. The Edwards public-key sign bit is carried in signature[63].
 signal_curve_sign :: proc(private: [32]u8, message: []u8) -> (signature: [64]u8, error: Signal_Error) {
-	when !crypto.HAS_RAND_BYTES do return {}, .Entropy_Unavailable
+	when !crypto.HAS_RAND_BYTES {
+		return {}, .Entropy_Unavailable
+	}
 	secret := private
 	defer crypto.zero_explicit(&secret, size_of(secret))
 	secret[0] &= 248
@@ -1450,7 +1518,9 @@ signal_curve_sign :: proc(private: [32]u8, message: []u8) -> (signature: [64]u8,
 	defer crypto.zero_explicit(&random, size_of(random))
 	defer crypto.zero_explicit(&digest, size_of(digest))
 	domain: [32]u8
-	for &value in domain do value = 0xff
+	for &value in domain {
+		value = 0xff
+	}
 	domain[0] = 0xfe
 	ctx: sha2.Context_512
 	defer crypto.zero_explicit(&ctx, size_of(ctx))
@@ -1475,7 +1545,9 @@ signal_curve_sign :: proc(private: [32]u8, message: []u8) -> (signature: [64]u8,
 		}
 	}
 
-	if !generated do return {}, .Nonce_Generation_Failed
+	if !generated {
+		return {}, .Nonce_Generation_Failed
+	}
 
 	grp.ge_scalarmult_basepoint(&R, &nonce)
 	grp.ge_bytes(&R, signature[:32])
@@ -1502,7 +1574,9 @@ signal_curve_verify :: proc(public: [32]u8, message, signature: []u8) -> Signal_
 	}
 
 	ed_public, public_error := signal_curve_edwards_public(public, signature)
-	if public_error != .None do return public_error
+	if public_error != .None {
+		return public_error
+	}
 	A, R, neg_A, calculated: grp.Group_Element
 	if !grp.ge_set_bytes(&A, ed_public[:]) ||
 	   grp.ge_is_small_order(&A) ||

@@ -106,7 +106,9 @@ Socket_Message :: struct {
 	allocator:              mem.Allocator,
 }
 socket_message_destroy :: proc(message: ^Socket_Message) {
-	if message == nil do return
+	if message == nil {
+		return
+	}
 
 	a := message.allocator
 	delete(message.group, a)
@@ -155,13 +157,19 @@ socket_connect :: proc(
 	store: ^State_Store,
 	config: Socket_Config,
 ) -> Socket_Error {
-	if validation_error := socket_connect_validate(socket, auth, prekeys, store, config); validation_error.kind != .None do return validation_error
+	if validation_error := socket_connect_validate(socket, auth, prekeys, store, config); validation_error.kind != .None {
+		return validation_error
+	}
 	settings, settings_error := socket_connect_settings(config)
-	if settings_error.kind != .None do return settings_error
+	if settings_error.kind != .None {
+		return settings_error
+	}
 
 	socket.config, socket.auth, socket.prekeys, socket.store = settings, auth, prekeys, store
 	socket.phase = .Connecting
-	if websocket_error := socket_websocket_dial(socket, settings); websocket_error.kind != .None do return websocket_error
+	if websocket_error := socket_websocket_dial(socket, settings); websocket_error.kind != .None {
+		return websocket_error
+	}
 
 	if e := socket_client_init(socket, settings); e.kind != .None {
 		return socket_fail(socket, {kind = .Session_Failed, session = {kind = .Client_Failed, client = e}})
@@ -264,9 +272,13 @@ socket_connect_settings :: proc(config: Socket_Config) -> (Socket_Config, Socket
 		settings.host = "web.whatsapp.com"
 	}
 
-	if settings.port == 0 do settings.port = 443
+	if settings.port == 0 {
+		settings.port = 443
+	}
 
-	if settings.target == "" do settings.target = "/ws/chat"
+	if settings.target == "" {
+		settings.target = "/ws/chat"
+	}
 
 	if settings.origin == "" {
 		settings.origin = "https://web.whatsapp.com"
@@ -292,7 +304,9 @@ socket_connect_settings :: proc(config: Socket_Config) -> (Socket_Config, Socket
 }
 
 socket_close :: proc(socket: ^Socket) {
-	if socket == nil do return
+	if socket == nil {
+		return
+	}
 
 	if socket.websocket.phase == .Open && socket.websocket.stream.set_write_deadline != nil {
 		if e := network_client.websocket_set_write_deadline(&socket.websocket, time.time_add(time.now(), time.Second));
@@ -307,12 +321,18 @@ socket_close :: proc(socket: ^Socket) {
 		network_client.websocket_close(&socket.websocket)
 	}
 
-	for message in socket.queue do socket_message_destroy(message)
+	for message in socket.queue {
+		socket_message_destroy(message)
+	}
 	delete(socket.queue)
-	for &doc in socket.deferred_retries do binary_document_destroy(&doc)
+	for &doc in socket.deferred_retries {
+		binary_document_destroy(&doc)
+	}
 	delete(socket.deferred_retries)
 	socket.deferred_retries = nil
-	for &doc in socket.pending_media_retry do binary_document_destroy(&doc)
+	for &doc in socket.pending_media_retry {
+		binary_document_destroy(&doc)
+	}
 	delete(socket.pending_media_retry)
 	socket.pending_media_retry = nil
 	socket.queue = nil
@@ -429,7 +449,9 @@ socket_receive_inner :: proc(socket: ^Socket) -> (Socket_Event, Socket_Error) {
 		}
 		if process {
 			output, e := socket_process_node(socket, event.node)
-			if e.kind != .None do return output, e
+			if e.kind != .None {
+				return output, e
+			}
 
 			if control_err := socket_control_node(socket, event.node); control_err.kind != .None {
 				return {}, control_err
@@ -646,7 +668,9 @@ socket_write :: proc(socket: ^Socket, encoded: []u8) -> Socket_Error {
 
 	if socket.websocket.stream.set_write_deadline != nil {
 		timeout := socket.config.query_timeout
-		if timeout == 0 do timeout = 30 * time.Second
+		if timeout == 0 {
+			timeout = 30 * time.Second
+		}
 
 		if e := socket_write_deadline(socket, time.time_add(time.now(), timeout)); e.kind != .None {
 			return e
@@ -725,11 +749,15 @@ socket_control_node :: proc(socket: ^Socket, node: Binary_Node) -> Socket_Error 
 	}
 
 	count, found := pairing_node_child(node, "count")
-	if !found do return {}
+	if !found {
+		return {}
+	}
 
 	value, _ := node_attr(count^, "value")
 	n, valid := strconv.parse_uint(value, 10)
-	if !valid || n >= PREKEY_SERVER_MIN_COUNT do return {}
+	if !valid || n >= PREKEY_SERVER_MIN_COUNT {
+		return {}
+	}
 
 	id := socket_next_id(socket, socket.provision_id[:])
 	socket.provision_id_size = len(id)
@@ -749,7 +777,9 @@ socket_control_node :: proc(socket: ^Socket, node: Binary_Node) -> Socket_Error 
 // This keeps timers on the same thread as I/O. Once a peer starts a frame, the
 // bounded read deadline prevents a partial frame from stalling indefinitely.
 socket_poll :: proc(socket: ^Socket, timeout: time.Duration = 250 * time.Millisecond) -> (bool, Socket_Error) {
-	if socket == nil do return false, {kind = .Invalid_State}
+	if socket == nil {
+		return false, {kind = .Invalid_State}
+	}
 
 	#partial switch socket.phase {
 	case .Uninitialized, .Failed, .Closed, .Restart_Required:
@@ -760,7 +790,9 @@ socket_poll :: proc(socket: ^Socket, timeout: time.Duration = 250 * time.Millise
 		return false, {kind = .Invalid_Config}
 	}
 
-	if len(socket.queue) > 0 do return true, {}
+	if len(socket.queue) > 0 {
+		return true, {}
+	}
 
 	return socket_network_poll(socket, timeout)
 }
@@ -833,7 +865,9 @@ socket_query :: proc(socket: ^Socket, query: Binary_Node) -> (Binary_Document, S
 
 	request := query
 	request.attrs = attrs[:count]
-	if send_error := socket_query_send(socket, request); send_error.kind != .None do return {}, send_error
+	if send_error := socket_query_send(socket, request); send_error.kind != .None {
+		return {}, send_error
+	}
 
 	return socket_query_response_receive(socket, id)
 }
@@ -921,16 +955,22 @@ socket_query_response_receive :: proc(socket: ^Socket, id: string) -> (Binary_Do
 		}
 
 		ready, poll_err := socket_network_poll(socket, 100 * time.Millisecond)
-		if poll_err.kind != .None do return {}, poll_err
+		if poll_err.kind != .None {
+			return {}, poll_err
+		}
 
-		if !ready do continue
+		if !ready {
+			continue
+		}
 
 		if e := socket_read_deadline(socket, deadline); e.kind != .None {
 			return {}, e
 		}
 
 		event, err := socket_receive(socket)
-		if err.kind != .None do return {}, err
+		if err.kind != .None {
+			return {}, err
+		}
 
 		if e := socket_read_deadline(socket, {}); e.kind != .None {
 			if event.message != nil {
@@ -941,7 +981,9 @@ socket_query_response_receive :: proc(socket: ^Socket, id: string) -> (Binary_Do
 		}
 
 		if event.kind == .Message {
-			if enqueue_error := socket_query_message_enqueue(socket, event); enqueue_error.kind != .None do return {}, enqueue_error
+			if enqueue_error := socket_query_message_enqueue(socket, event); enqueue_error.kind != .None {
+				return {}, enqueue_error
+			}
 		}
 
 		if event.kind == .Restart_Required {
@@ -953,7 +995,9 @@ socket_query_response_receive :: proc(socket: ^Socket, id: string) -> (Binary_Do
 		}
 
 		response_id, _ := node_attr(event.node, "id")
-		if response_id != id do continue
+		if response_id != id {
+			continue
+		}
 
 		return socket_query_response_copy(event.node)
 	}

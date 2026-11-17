@@ -15,19 +15,33 @@ inflate :: proc(value, blobs: w.Value) -> w.Value {
 		if len(v) == 1 {
 			if ref, ok := v["$text"]; ok {
 				return w.text(string(fixture_blob(blobs, ref)))
-			}; if _, ok := v["$float"]; ok {
+			}
+
+			if _, ok := v["$float"]; ok {
 				return j.Float(transmute(f64)u64(0x7ff8000000000000))
 			}
 		}
+
 		out := make(j.Object, max(64, len(v) + 16))
-		for key, item in v {out[key] = inflate(item, blobs)}; return out
+		for key, item in v {
+			out[key] = inflate(item, blobs)
+		}
+
+		return out
 	case j.Array:
-		out := make(j.Array); for item in v {append(&out, inflate(item, blobs))}; return out
+		out := make(j.Array)
+		for item in v {
+			append(&out, inflate(item, blobs))
+		}
+
+		return out
 	case j.Null, j.String, j.Integer, j.Float, j.Boolean:
 		return value
 	}
+
 	return value
 }
+
 Replay :: struct {
 	trace:                j.Array,
 	index:                int,
@@ -35,29 +49,45 @@ Replay :: struct {
 	api:                  ^w.API,
 	t:                    ^testing.T,
 }
+
 operation_name :: proc(query: string) -> string {
 	if query == w.SCAN {
 		return "SCAN"
-	}; if query == w.LOOKUP {
+	}
+
+	if query == w.LOOKUP {
 		return "LOOKUP"
-	}; if query == w.COMMENTS {
+	}
+
+	if query == w.COMMENTS {
 		return "COMMENTS"
 	}
+
 	if query == w.COMMENT_LOOKUP {
 		return "COMMENT_LOOKUP"
-	}; if query == w.CREATE {
+	}
+
+	if query == w.CREATE {
 		return "CREATE"
-	}; if query == w.COMMENT_CREATE {
+	}
+
+	if query == w.COMMENT_CREATE {
 		return "COMMENT_CREATE"
-	}; return query
+	}
+
+	return query
 }
+
 replay_call :: proc(data: rawptr, query: string, variables: w.Value) -> (w.Value, w.Failure) {
 	replay := cast(^Replay)data
 	if replay.index >= len(replay.trace) {
 		fmt.eprintf("EXTRA CALL %s %s\n", replay.name, operation_name(query))
 		return w.null(), "UNEXPECTED_API_CALL"
 	}
-	expected := replay.trace[replay.index]; replay.index += 1
+
+	expected := replay.trace[replay.index]
+	replay.index += 1
+
 	name := operation_name(query)
 	if name != w.str(w.get(expected, "query")) ||
 	   !w.equal(variables, w.get(expected, "variables")) {
@@ -70,20 +100,27 @@ replay_call :: proc(data: rawptr, query: string, variables: w.Value) -> (w.Value
 			name,
 			w.encode(variables),
 		)
-		testing.expect(replay.t, false); return w.null(), "TRACE_MISMATCH"
+
+		testing.expect(replay.t, false)
+		return w.null(), "TRACE_MISMATCH"
 	}
+
 	if replay.index == len(replay.trace) && replay.expected_error == "LINEAR_SCAN_BUDGET" {
 		replay.api.started = time.tick_add(time.tick_now(), -121 * time.Second)
 	}
+
 	if error, ok := w.get(expected, "error").(j.String); ok {
 		return w.null(), string(error)
 	}
+
 	result := w.get(expected, "result")
 	if w.truth(w.get(result, "$invalid")) {
 		return w.null(), "LINEAR_RESPONSE_INVALID"
 	}
+
 	return w.clone(result), nil
 }
+
 tracker_dispatch :: proc(
 	test_case: w.Value,
 	root: string,
@@ -92,23 +129,36 @@ tracker_dispatch :: proc(
 	value: w.Value,
 	failure: w.Failure,
 ) {
-	args := w.items(w.get(test_case, "args")); operation := w.str(w.get(test_case, "operation"))
+	args := w.items(w.get(test_case, "args"))
+	operation := w.str(w.get(test_case, "operation"))
+
 	switch operation {
 	case "track":
 		api := w.API {
 			call = replay_call,
 			data = replay,
-		}; if strings.contains(replay.name, "test_scan_call_budget_fails_before_mutation") {
+		}
+
+		if strings.contains(replay.name, "test_scan_call_budget_fails_before_mutation") {
 			api.max_calls = 1
-		}; replay.api = &api; defer replay.api = nil
+		}
+
+		replay.api = &api
+		defer replay.api = nil
+
 		if len(replay.trace) == 0 && replay.expected_error == "LINEAR_SCAN_BUDGET" {
 			api.started = time.tick_add(time.tick_now(), -121 * time.Second)
 		}
+
 		return w.track(args[0], w.str(args[1]), root, &api)
 	case "snapshot":
 		fingerprint, changed := w.snapshot(args[0]) or_return
+
 		pairs := make(j.Array)
-		for item in changed {append(&pairs, w.array(item.source, item.file))}
+		for item in changed {
+			append(&pairs, w.array(item.source, item.file))
+		}
+
 		return w.array(w.text(fingerprint), pairs), nil
 	case "findings":
 		return w.findings(args[0], root)
@@ -126,75 +176,105 @@ tracker_dispatch :: proc(
 	case "comment_identity":
 		return w.text(w.comment_identity(w.str(args[0]), w.items(args[1]))), nil
 	case "validate_issue":
-		w.validate_issue(args[0]) or_return; return args[0], nil
+		w.validate_issue(args[0]) or_return
+		return args[0], nil
 	case "assessment":
 		verify := true
 		if len(args) > 2 {
 			verify = w.truth(args[2])
 		}
+
 		if kw, ok := w.get(test_case, "kwargs").(j.Object); ok {
 			if flag, present := kw["verify_contract"]; present {
 				verify = w.truth(flag)
 			}
 		}
+
 		return w.validate_assessment(args[0], args[1], root, verify)
 	case:
 		return w.null(), "TEST_OPERATION_INVALID"
 	}
 }
+
 tracker_cases :: proc(t: ^testing.T, suffix: string) {
-	arena: mem.Dynamic_Arena; mem.dynamic_arena_init(&arena)
+	arena: mem.Dynamic_Arena
+	mem.dynamic_arena_init(&arena)
 	defer mem.dynamic_arena_destroy(&arena)
 	context.allocator = mem.dynamic_arena_allocator(&arena)
+
 	corpus, parse_error := j.parse(#load("fixtures/tracker.json"), .JSON, true)
 	if !testing.expect_value(t, parse_error, j.Error.None) {
 		return
 	}
-	blobs := w.get(corpus, "blobs"); executed := 0
+
+	blobs := w.get(corpus, "blobs")
+	executed := 0
 	for raw in w.items(w.get(corpus, "cases")) {
 		if !strings.has_suffix(w.str(w.get(raw, "test")), suffix) {
 			continue
 		}
+
 		test_case := inflate(raw, blobs)
+
 		root, create_error := os.make_directory_temp("", "owa-tracker-*", context.allocator)
 		if !testing.expect_value(t, create_error, nil) {
 			return
-		}; defer {cleanup := os.remove_all(root); _ = cleanup}
+		}
+
+		defer {
+			cleanup := os.remove_all(root)
+			_ = cleanup
+		}
+
 		for path, entry in w.get(test_case, "files").(j.Object) {
-			target := w.join(root, path); slash := strings.last_index(target, "/")
+			target := w.join(root, path)
+			slash := strings.last_index(target, "/")
+
 			mkdir := os.make_directory_all(target[:slash])
 			assert(mkdir == nil || mkdir == os.Error(os.General_Error.Exist))
+
 			if symlink, ok := w.get(entry, "symlink").(j.String); ok {
-				linked := os.symlink(string(symlink), target); assert(linked == nil)
+				linked := os.symlink(string(symlink), target)
+				assert(linked == nil)
 			} else {
 				bytes := fixture_blob(blobs, w.get(entry, "blob"))
 				if canonical, canonical_ok := w.get(entry, "canonical").(j.String); canonical_ok {
 					loaded, error := os.read_entire_file(
 						w.join(ROOT, string(canonical)),
 						context.allocator,
-					); assert(error == nil); bytes = loaded
+					)
+					assert(error == nil)
+					bytes = loaded
 				}
-				written := os.write_entire_file(target, bytes); assert(written == nil)
+
+				written := os.write_entire_file(target, bytes)
+				assert(written == nil)
 			}
 		}
+
 		replay := Replay {
 			trace          = w.items(w.get(test_case, "trace")),
 			name           = cat_case(suffix, w.str(w.get(test_case, "operation"))),
 			expected_error = w.str(w.get(test_case, "error")),
 			t              = t,
 		}
+
 		actual, failure := tracker_dispatch(test_case, root, &replay)
 		if replay.expected_error != "" {
-			error := ""; if message, ok := failure.(string); ok {
+			error := ""
+			if message, ok := failure.(string); ok {
 				error = message
 			}
+
 			if error != replay.expected_error {
 				fmt.eprintf(
 					"ERROR PARITY %s EXPECTED %s ACTUAL %s\n",
 					replay.name,
 					replay.expected_error,
 					error,
-				); testing.expect(t, false)
+				)
+
+				testing.expect(t, false)
 			}
 		} else if failure != nil || !w.equal(actual, w.get(test_case, "expected")) {
 			fmt.eprintf(
@@ -203,21 +283,33 @@ tracker_cases :: proc(t: ^testing.T, suffix: string) {
 				failure,
 				w.encode(w.get(test_case, "expected")),
 				w.encode(actual),
-			); testing.expect(t, false)
+			)
+
+			testing.expect(t, false)
 		}
+
 		if replay.index != len(replay.trace) {
 			fmt.eprintf(
 				"INCOMPLETE TRACE %s %d/%d\n",
 				replay.name,
 				replay.index,
 				len(replay.trace),
-			); testing.expect(t, false)
+			)
+
+			testing.expect(t, false)
 		}
-		removed := os.remove_all(root); assert(removed == nil); executed += 1
+
+		removed := os.remove_all(root)
+		assert(removed == nil)
+		executed += 1
 	}
+
 	testing.expect(t, executed > 0)
 }
-cat_case :: proc(a, b: string) -> string {return fmt.aprintf("%s/%s", a, b)}
+
+cat_case :: proc(a, b: string) -> string {
+	return fmt.aprintf("%s/%s", a, b)
+}
 
 @(test)
 tracker_all_covered_makes_no_comment :: proc(t: ^testing.T) {

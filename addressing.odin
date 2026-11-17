@@ -54,24 +54,34 @@ device_keys_response_decode :: proc(
 	int,
 	Device_Error,
 ) {
-	if validation_error := device_query_response_validate(node, jids, request_id, true); validation_error.kind != .None do return 0, validation_error
+	if validation_error := device_query_response_validate(node, jids, request_id, true); validation_error.kind != .None {
+		return 0, validation_error
+	}
 
 	list, err := device_unique_child(node, "list")
-	if err.kind != .None do return 0, err
+	if err.kind != .None {
+		return 0, err
+	}
 
 	children, ok := list.content.([]Binary_Node)
-	if !ok do return 0, {kind = .Invalid_Response}
+	if !ok {
+		return 0, {kind = .Invalid_Response}
+	}
 
 	seen: [MAX_DEVICE_QUERY_USERS]bool
 	count := 0
 	for child in children {
-		if child.tag != "user" do continue
+		if child.tag != "user" {
+			continue
+		}
 
 		jid, _ := node_attr(child, "jid")
 		index := -1
 
-		for requested, i in jids do if requested == jid {
-			index = i
+		for requested, i in jids {
+			if requested == jid {
+				index = i
+			}
 		}
 
 		if index < 0 || seen[index] {
@@ -80,12 +90,16 @@ device_keys_response_decode :: proc(
 
 		seen[index] = true
 		_, parse_err := device_bundle_decode(child)
-		if parse_err.kind != .None do return 0, parse_err
+		if parse_err.kind != .None {
+			return 0, parse_err
+		}
 
 		count += 1
 	}
-	for found in seen[:len(jids)] do if !found {
-		return 0, {kind = .Invalid_Response}
+	for found in seen[:len(jids)] {
+		if !found {
+			return 0, {kind = .Invalid_Response}
+		}
 	}
 
 	if len(storage) < count {
@@ -94,7 +108,9 @@ device_keys_response_decode :: proc(
 
 	at := 0
 	for child in children {
-		if child.tag != "user" do continue
+		if child.tag != "user" {
+			continue
+		}
 
 		jid, _ := node_attr(child, "jid")
 		bundle, _ := device_bundle_decode(child)
@@ -118,8 +134,10 @@ device_query_response_validate :: proc(
 		return {kind = .Invalid_Request}
 	}
 
-	for jid in users do if !device_user_valid(jid, allow_device) {
-		return {kind = .Invalid_JID}
+	for jid in users {
+		if !device_user_valid(jid, allow_device) {
+			return {kind = .Invalid_JID}
+		}
 	}
 
 	if err := device_response_validate(node, request_id); err.kind != .None {
@@ -135,26 +153,42 @@ device_bundle_decode :: proc(node: Binary_Node) -> (Signal_Prekey_Bundle, Device
 	}
 
 	registration, reg_err := device_child_bytes(node, "registration", 4)
-	if reg_err.kind != .None do return {}, reg_err
+	if reg_err.kind != .None {
+		return {}, reg_err
+	}
 
 	identity, identity_err := device_child_bytes(node, "identity", 32)
-	if identity_err.kind != .None do return {}, identity_err
+	if identity_err.kind != .None {
+		return {}, identity_err
+	}
 
 	signed, signed_err := device_unique_child(node, "skey")
-	if signed_err.kind != .None do return {}, signed_err
+	if signed_err.kind != .None {
+		return {}, signed_err
+	}
 
 	id, id_err := device_child_bytes(signed, "id", 3)
-	if id_err.kind != .None do return {}, id_err
+	if id_err.kind != .None {
+		return {}, id_err
+	}
 
 	value, key_err := device_child_bytes(signed, "value", 32)
-	if key_err.kind != .None do return {}, key_err
+	if key_err.kind != .None {
+		return {}, key_err
+	}
 
 	signature, sig_err := device_child_bytes(signed, "signature", 64)
-	if sig_err.kind != .None do return {}, sig_err
+	if sig_err.kind != .None {
+		return {}, sig_err
+	}
 
 	result: Signal_Prekey_Bundle
-	for c in registration do result.registration_id = result.registration_id << 8 | cast(u32)c
-	for c in id do result.signed_prekey_id = result.signed_prekey_id << 8 | cast(u32)c
+	for c in registration {
+		result.registration_id = result.registration_id << 8 | cast(u32)c
+	}
+	for c in id {
+		result.signed_prekey_id = result.signed_prekey_id << 8 | cast(u32)c
+	}
 	copy(result.identity_public[:], identity)
 	copy(result.signed_prekey_public[:], value)
 	copy(result.signed_prekey_signature[:], signature)
@@ -166,7 +200,9 @@ device_bundle_decode :: proc(node: Binary_Node) -> (Signal_Prekey_Bundle, Device
 		return {}, {kind = .Invalid_Signature}
 	}
 
-	if prekey_error := device_bundle_prekey_decode(node, &result); prekey_error.kind != .None do return {}, prekey_error
+	if prekey_error := device_bundle_prekey_decode(node, &result); prekey_error.kind != .None {
+		return {}, prekey_error
+	}
 
 	return result, {}
 }
@@ -174,16 +210,24 @@ device_bundle_decode :: proc(node: Binary_Node) -> (Signal_Prekey_Bundle, Device
 device_bundle_prekey_decode :: proc(node: Binary_Node, result: ^Signal_Prekey_Bundle) -> Device_Error {
 	if _, has_key := pairing_node_child(node, "key"); has_key {
 		key, e := device_unique_child(node, "key")
-		if e.kind != .None do return e
+		if e.kind != .None {
+			return e
+		}
 
 		prekey_id, ie := device_child_bytes(key, "id", 3)
-		if ie.kind != .None do return ie
+		if ie.kind != .None {
+			return ie
+		}
 
 		prekey, pe := device_child_bytes(key, "value", 32)
-		if pe.kind != .None do return pe
+		if pe.kind != .None {
+			return pe
+		}
 
 		result.has_prekey = true
-		for c in prekey_id do result.prekey_id = result.prekey_id << 8 | cast(u32)c
+		for c in prekey_id {
+			result.prekey_id = result.prekey_id << 8 | cast(u32)c
+		}
 		copy(result.prekey_public[:], prekey)
 	}
 
@@ -192,7 +236,9 @@ device_bundle_prekey_decode :: proc(node: Binary_Node, result: ^Signal_Prekey_Bu
 
 device_child_bytes :: proc(node: Binary_Node, tag: string, length: int) -> ([]u8, Device_Error) {
 	child, err := device_unique_child(node, tag)
-	if err.kind != .None do return nil, err
+	if err.kind != .None {
+		return nil, err
+	}
 
 	data, ok := child.content.([]u8)
 
@@ -216,7 +262,9 @@ devices_query_encode :: proc(dst: []u8, users: []string, request_id: string) -> 
 
 	attrs: [MAX_DEVICE_QUERY_USERS][1]Binary_Node_Attribute
 	nodes: [MAX_DEVICE_QUERY_USERS]Binary_Node
-	if node_error := devices_query_nodes_prepare(users, attrs[:], nodes[:]); node_error.kind != .None do return 0, node_error
+	if node_error := devices_query_nodes_prepare(users, attrs[:], nodes[:]); node_error.kind != .None {
+		return 0, node_error
+	}
 	children := [?]Binary_Node {
 		{tag = "query", content = []Binary_Node{{tag = "devices", attrs = []Binary_Node_Attribute{{"version", "2"}}}}},
 		{tag = "list", content = nodes[:len(users)]},
@@ -264,8 +312,10 @@ devices_query_nodes_prepare :: proc(
 			return {kind = .Invalid_JID}
 		}
 
-		for previous in users[:i] do if user == previous {
-			return {kind = .Invalid_Request}
+		for previous in users[:i] {
+			if user == previous {
+				return {kind = .Invalid_Request}
+			}
 		}
 
 		attrs[i] = {{"jid", user}}
@@ -289,19 +339,29 @@ devices_response_decode :: proc(
 	int,
 	Device_Error,
 ) {
-	if validation_error := device_query_response_validate(node, users, request_id, false); validation_error.kind != .None do return 0, validation_error
+	if validation_error := device_query_response_validate(node, users, request_id, false); validation_error.kind != .None {
+		return 0, validation_error
+	}
 
 	usync, err := device_unique_child(node, "usync")
-	if err.kind != .None do return 0, err
+	if err.kind != .None {
+		return 0, err
+	}
 
 	list, list_err := device_unique_child(usync, "list")
-	if list_err.kind != .None do return 0, list_err
+	if list_err.kind != .None {
+		return 0, list_err
+	}
 
 	children, ok := list.content.([]Binary_Node)
-	if !ok do return 0, {kind = .Invalid_Response}
+	if !ok {
+		return 0, {kind = .Invalid_Response}
+	}
 
 	count, children_error := devices_response_children_validate(children, users)
-	if children_error.kind != .None do return 0, children_error
+	if children_error.kind != .None {
+		return 0, children_error
+	}
 
 	if len(storage) < count {
 		return 0, {kind = .Destination_Undersized, required = count}
@@ -309,7 +369,9 @@ devices_response_decode :: proc(
 
 	at := 0
 	for child in children {
-		if child.tag != "user" do continue
+		if child.tag != "user" {
+			continue
+		}
 
 		jid, _ := node_attr(child, "jid")
 		devices, _ := device_unique_child(child, "devices")
@@ -317,10 +379,14 @@ devices_response_decode :: proc(
 		entries, _ := device_list.content.([]Binary_Node)
 
 		for entry in entries {
-			if entry.tag != "device" do continue
+			if entry.tag != "device" {
+				continue
+			}
 
 			d, _ := device_entry_decode(jid, entry)
-			if d.id != 0 && d.key_index == 0 do continue
+			if d.id != 0 && d.key_index == 0 {
+				continue
+			}
 
 			storage[at] = d
 			at += 1
@@ -337,18 +403,26 @@ devices_response_user_validate :: proc(child: Binary_Node, jid: string) -> (int,
 	}
 
 	devices, dev_err := device_unique_child(child, "devices")
-	if dev_err.kind != .None do return 0, dev_err
+	if dev_err.kind != .None {
+		return 0, dev_err
+	}
 
 	device_list, dl_err := device_unique_child(devices, "device-list")
-	if dl_err.kind != .None do return 0, dl_err
+	if dl_err.kind != .None {
+		return 0, dl_err
+	}
 
 	entries, valid := device_list.content.([]Binary_Node)
-	if !valid do return 0, {kind = .Invalid_Response}
+	if !valid {
+		return 0, {kind = .Invalid_Response}
+	}
 
 	local_seen: [MAX_USER_DEVICES]bool
 
 	for entry in entries {
-		if entry.tag != "device" do continue
+		if entry.tag != "device" {
+			continue
+		}
 
 		d, parse_err := device_entry_decode(jid, entry)
 
@@ -363,7 +437,9 @@ devices_response_user_validate :: proc(child: Binary_Node, jid: string) -> (int,
 		local_seen[d.id] = true
 		// Pinned extractDeviceJids excludes non-primary devices without a
 		// key-index. They cannot receive a Signal distribution safely.
-		if d.id != 0 && d.key_index == 0 do continue
+		if d.id != 0 && d.key_index == 0 {
+			continue
+		}
 
 		count += 1
 	}
@@ -376,11 +452,17 @@ devices_response_children_validate :: proc(children: []Binary_Node, users: []str
 	count := 0
 
 	for child in children {
-		if child.tag != "user" do continue
+		if child.tag != "user" {
+			continue
+		}
 
 		jid, _ := node_attr(child, "jid")
 		index := -1
-		for user, i in users do if user == jid do index = i
+		for user, i in users {
+			if user == jid {
+				index = i
+			}
+		}
 
 		if index < 0 || seen[index] {
 			return 0, {kind = .Unexpected_Response}
@@ -388,12 +470,16 @@ devices_response_children_validate :: proc(children: []Binary_Node, users: []str
 
 		seen[index] = true
 		device_count, child_error := devices_response_user_validate(child, jid)
-		if child_error.kind != .None do return 0, child_error
+		if child_error.kind != .None {
+			return 0, child_error
+		}
 		count += device_count
 	}
 
-	for found in seen[:len(users)] do if !found {
-		return 0, {kind = .Invalid_Response}
+	for found in seen[:len(users)] {
+		if !found {
+			return 0, {kind = .Invalid_Response}
+		}
 	}
 
 	return count, {}
@@ -427,9 +513,15 @@ remote_device_jid :: proc(dst: []u8, device: Remote_Device) -> (string, Device_E
 }
 
 device_request_valid :: proc(id: string) -> bool {
-	if len(id) == 0 || len(id) > 128 do return false
+	if len(id) == 0 || len(id) > 128 {
+		return false
+	}
 
-	for c in id do if c < 33 || c > 126 do return false
+	for c in id {
+		if c < 33 || c > 126 {
+			return false
+		}
+	}
 
 	return true
 }
@@ -459,7 +551,9 @@ device_response_validate :: proc(node: Binary_Node, request_id: string) -> Devic
 	}
 
 	kind, _ := node_attr(node, "type")
-	if kind == "error" do return {kind = .Server_Error}
+	if kind == "error" {
+		return {kind = .Server_Error}
+	}
 
 	if kind != "result" {
 		return {kind = .Unexpected_Response}
@@ -473,14 +567,20 @@ device_unique_child :: proc(node: Binary_Node, tag: string) -> (Binary_Node, Dev
 	result: Binary_Node
 
 	for child in children {
-		if child.tag != tag do continue
+		if child.tag != tag {
+			continue
+		}
 
-		if found do return {}, {kind = .Invalid_Response}
+		if found {
+			return {}, {kind = .Invalid_Response}
+		}
 
 		result, found = child, true
 	}
 
-	if !found do return {}, {kind = .Invalid_Response}
+	if !found {
+		return {}, {kind = .Invalid_Response}
+	}
 
 	return result, {}
 }
@@ -556,7 +656,9 @@ group_metadata_decode :: proc(
 	Group_Error,
 ) {
 	group, group_error := group_metadata_response_group(node, expected_jid, request_id)
-	if group_error.kind != .None do return {}, group_error
+	if group_error.kind != .None {
+		return {}, group_error
+	}
 
 	result := Group_Metadata {
 		jid = expected_jid,
@@ -577,16 +679,24 @@ group_metadata_decode :: proc(
 				return {}, {kind = .Invalid_Metadata}
 			}
 
-			if description_error := group_metadata_description_decode(&result, child); description_error.kind != .None do return {}, description_error
+			if description_error := group_metadata_description_decode(&result, child); description_error.kind != .None {
+				return {}, description_error
+			}
 		}
 
-		if child.tag != "participant" do continue
+		if child.tag != "participant" {
+			continue
+		}
 
 		participant, err := group_participant_decode(child)
-		if err.kind != .None do return {}, err
+		if err.kind != .None {
+			return {}, err
+		}
 
 		for previous in children[:i] {
-			if previous.tag != "participant" do continue
+			if previous.tag != "participant" {
+				continue
+			}
 
 			previous_jid, _ := node_attr(previous, "jid")
 
@@ -614,7 +724,9 @@ group_metadata_participants_copy :: proc(children: []Binary_Node, storage: []Gro
 	index := 0
 
 	for child in children {
-		if child.tag != "participant" do continue
+		if child.tag != "participant" {
+			continue
+		}
 
 		storage[index], _ = group_participant_decode(child)
 		index += 1
@@ -663,15 +775,21 @@ group_metadata_response_group :: proc(
 	}
 
 	group, found := pairing_node_child(node, "group")
-	if !found do return nil, {kind = .Invalid_Metadata}
+	if !found {
+		return nil, {kind = .Invalid_Metadata}
+	}
 
 	root_children, _ := node.content.([]Binary_Node)
 	groups := 0
-	for child in root_children do if child.tag == "group" {
-		groups += 1
+	for child in root_children {
+		if child.tag == "group" {
+			groups += 1
+		}
 	}
 
-	if groups != 1 do return nil, {kind = .Invalid_Metadata}
+	if groups != 1 {
+		return nil, {kind = .Invalid_Metadata}
+	}
 
 	group_id, _ := node_attr(group^, "id")
 	bare := expected_jid[:len(expected_jid) - len("@g.us")]
@@ -688,7 +806,9 @@ group_metadata_description_decode :: proc(result: ^Group_Metadata, child: Binary
 	parts, _ := child.content.([]Binary_Node)
 
 	for part in parts {
-		if part.tag != "body" do continue
+		if part.tag != "body" {
+			continue
+		}
 
 		bodies += 1
 
@@ -724,7 +844,9 @@ group_jid_valid :: proc(jid: string) -> bool {
 	}
 
 	for c in local {
-		if !is_digit(c) && c != '-' do return false
+		if !is_digit(c) && c != '-' {
+			return false
+		}
 	}
 
 	return true
@@ -844,7 +966,9 @@ socket_record_group_lid_mappings :: proc(socket: ^Socket, metadata: Group_Metada
 			lid = participant.jid
 		}
 
-		if pn == "" || lid == "" do continue
+		if pn == "" || lid == "" {
+			continue
+		}
 
 		if e := socket_lid_mapping_stage(&candidate, pn, lid); e.kind != .None {
 			return e
@@ -870,7 +994,9 @@ socket_signal_address_store :: proc(store: ^State_Store, jid: string) -> (string
 	}
 
 	domain := jid[strings.index_byte(jid, '@') + 1:]
-	if domain == "c.us" do domain = "s.whatsapp.net"
+	if domain == "c.us" {
+		domain = "s.whatsapp.net"
+	}
 
 	bare := fmt.aprintf("%s@%s", user, domain)
 	defer delete(bare)
@@ -901,7 +1027,9 @@ socket_signal_address_store :: proc(store: ^State_Store, jid: string) -> (string
 	}
 
 	at := strings.index_byte(resolved, '@')
-	if device == 0 do return strings.clone(resolved), {}
+	if device == 0 {
+		return strings.clone(resolved), {}
+	}
 
 	return fmt.aprintf("%s:%d%s", resolved[:at], device, resolved[at:]), {}
 }
@@ -963,19 +1091,29 @@ socket_lid_migrate :: proc(next, original: ^State_Store) -> Socket_Error {
 
 	for kind in kinds {
 		for record in original.records {
-			if record.kind != kind do continue
-
-			name, e := socket_lid_record_name(next, record.kind, record.name)
-			if e.kind != .None do return e
-
-			defer delete(name)
-			if name == record.name do continue
-
-			if kind == .Session {
-				if pin_error := socket_lid_session_pin_validate(next, record, name); pin_error.kind != .None do return pin_error
+			if record.kind != kind {
+				continue
 			}
 
-			if merge_error := socket_lid_record_merge(next, record, name); merge_error.kind != .None do return merge_error
+			name, e := socket_lid_record_name(next, record.kind, record.name)
+			if e.kind != .None {
+				return e
+			}
+
+			defer delete(name)
+			if name == record.name {
+				continue
+			}
+
+			if kind == .Session {
+				if pin_error := socket_lid_session_pin_validate(next, record, name); pin_error.kind != .None {
+					return pin_error
+				}
+			}
+
+			if merge_error := socket_lid_record_merge(next, record, name); merge_error.kind != .None {
+				return merge_error
+			}
 
 			if e := state_store_delete(next, kind, record.name); e.kind != .None {
 				return {kind = .State_Failed, state = e}
@@ -1070,8 +1208,12 @@ socket_lid_record_merge :: proc(next: ^State_Store, record: State_Record, name: 
 					}
 				}
 			} else if kind == .Session {
-				if archive_error := socket_lid_session_archive(next, record, name, existing); archive_error.kind != .None do return archive_error
-			} else do return {kind = .Invalid_State}
+				if archive_error := socket_lid_session_archive(next, record, name, existing); archive_error.kind != .None {
+					return archive_error
+				}
+			} else {
+				return {kind = .Invalid_State}
+			}
 		}
 	} else {
 		if e := state_store_set(next, kind, name, record.data); e.kind != .None {
@@ -1092,16 +1234,22 @@ socket_lid_record_name :: proc(store: ^State_Store, kind: State_Record_Kind, nam
 		}
 	} else if kind == .Sender_Key || kind == .Sender_Key_Membership {
 		at := strings.index_byte(name, '|')
-		if at < 0 do return "", {kind = .Protocol_Error}
+		if at < 0 {
+			return "", {kind = .Protocol_Error}
+		}
 
 		prefix = name[:at + 1]
 		jid = name[at + 1:]
 	} else if kind == .Processed_Message || kind == .Inbox_Message {
 		first := strings.index_byte(name, '|')
-		if first < 0 do return strings.clone(name), {}
+		if first < 0 {
+			return strings.clone(name), {}
+		}
 
 		second := strings.index_byte(name[first + 1:], '|')
-		if second < 0 do return "", {kind = .Protocol_Error}
+		if second < 0 {
+			return "", {kind = .Protocol_Error}
+		}
 
 		second += first + 1
 		prefix = name[:first + 1]
@@ -1110,7 +1258,9 @@ socket_lid_record_name :: proc(store: ^State_Store, kind: State_Record_Kind, nam
 	}
 
 	resolved, e := socket_signal_address_store(store, jid)
-	if e.kind != .None do return "", e
+	if e.kind != .None {
+		return "", e
+	}
 
 	defer delete(resolved)
 

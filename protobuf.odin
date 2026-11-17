@@ -61,7 +61,9 @@ Certificate_Details :: struct {
 }
 
 handshake_client_hello_encode :: proc(dst: []u8, ephemeral: [32]u8) -> (written: int, error: Protobuf_Error) {
-	if len(dst) < 36 do return 0, .Destination_Undersized
+	if len(dst) < 36 {
+		return 0, .Destination_Undersized
+	}
 
 	key_copy := ephemeral
 	dst[0], dst[1], dst[2], dst[3] = 0x12, 34, 0x0a, 32
@@ -129,9 +131,13 @@ handshake_message_decode :: proc(src: []u8) -> (message: Handshake_Message, erro
 
 	for at < len(src) {
 		field, field_err := protobuf_field_read(src, &at)
-		if field_err != .None do return {}, field_err
+		if field_err != .None {
+			return {}, field_err
+		}
 
-		if field.number < 2 || field.number > 4 do continue
+		if field.number < 2 || field.number > 4 {
+			continue
+		}
 
 		if field.wire_type != 2 {
 			return {}, .Wrong_Wire_Type
@@ -149,12 +155,16 @@ handshake_message_decode :: proc(src: []u8) -> (message: Handshake_Message, erro
 
 		seen = true
 		parsed, parse_err := protobuf_handshake_inner_decode(field.data, kind)
-		if parse_err != .None do return {}, parse_err
+		if parse_err != .None {
+			return {}, parse_err
+		}
 
 		message = parsed
 	}
 
-	if !seen do return {}, .Missing_Handshake_Message
+	if !seen {
+		return {}, .Missing_Handshake_Message
+	}
 
 	return message, .None
 }
@@ -168,7 +178,9 @@ cert_chain_decode :: proc(src: []u8) -> (chain: Cert_Chain, error: Protobuf_Erro
 
 	for at < len(src) {
 		field, field_err := protobuf_field_read(src, &at)
-		if field_err != .None do return {}, field_err
+		if field_err != .None {
+			return {}, field_err
+		}
 
 		if field.number != 1 && field.number != 2 {
 			continue
@@ -183,7 +195,9 @@ cert_chain_decode :: proc(src: []u8) -> (chain: Cert_Chain, error: Protobuf_Erro
 		}
 
 		cert, cert_err := protobuf_certificate_decode(field.data)
-		if cert_err != .None do return {}, cert_err
+		if cert_err != .None {
+			return {}, cert_err
+		}
 
 		if field.number == 1 {
 			chain.leaf, chain.has_leaf = cert, true
@@ -204,9 +218,13 @@ certificate_details_decode :: proc(src: []u8) -> (details: Certificate_Details, 
 
 	for at < len(src) {
 		field, field_err := protobuf_field_read(src, &at)
-		if field_err != .None do return {}, field_err
+		if field_err != .None {
+			return {}, field_err
+		}
 
-		if field_error := certificate_details_field_decode(&details, field); field_error != .None do return {}, field_error
+		if field_error := certificate_details_field_decode(&details, field); field_error != .None {
+			return {}, field_error
+		}
 	}
 
 	return details, .None
@@ -288,9 +306,13 @@ protobuf_handshake_inner_decode :: proc(
 	at := 0
 	for at < len(src) {
 		field, field_err := protobuf_field_read(src, &at)
-		if field_err != .None do return {}, field_err
+		if field_err != .None {
+			return {}, field_err
+		}
 
-		if field_error := protobuf_handshake_field_decode(&message, field); field_error != .None do return {}, field_error
+		if field_error := protobuf_handshake_field_decode(&message, field); field_error != .None {
+			return {}, field_error
+		}
 	}
 	return message, .None
 }
@@ -357,7 +379,9 @@ protobuf_certificate_decode :: proc(src: []u8) -> (cert: Noise_Certificate, erro
 
 	for at < len(src) {
 		field, field_err := protobuf_field_read(src, &at)
-		if field_err != .None do return {}, field_err
+		if field_err != .None {
+			return {}, field_err
+		}
 
 		if field.number != 1 && field.number != 2 {
 			continue
@@ -389,7 +413,9 @@ protobuf_certificate_decode :: proc(src: []u8) -> (cert: Noise_Certificate, erro
 // u64 before converting to int, so an attacker cannot wrap a slice index.
 protobuf_field_read :: proc(src: []u8, at: ^int) -> (field: Protobuf_Field, error: Protobuf_Error) {
 	tag, tag_err := protobuf_varint_read(src, at)
-	if tag_err != .None do return {}, tag_err
+	if tag_err != .None {
+		return {}, tag_err
+	}
 
 	if tag >> 3 == 0 || tag >> 3 > 0x1fff_ffff {
 		return {}, .Invalid_Field_Number
@@ -400,15 +426,21 @@ protobuf_field_read :: proc(src: []u8, at: ^int) -> (field: Protobuf_Field, erro
 	switch field.wire_type {
 	case 0:
 		field.value, error = protobuf_varint_read(src, at)
-		if error != .None do return {}, error
+		if error != .None {
+			return {}, error
+		}
 
 	case 1:
-		if len(src) - at^ < 8 do return {}, .Truncated_Field
+		if len(src) - at^ < 8 {
+			return {}, .Truncated_Field
+		}
 
 		at^ += 8
 	case 2:
 		size, size_err := protobuf_varint_read(src, at)
-		if size_err != .None do return {}, size_err
+		if size_err != .None {
+			return {}, size_err
+		}
 
 		if size > cast(u64)(len(src) - at^) {
 			return {}, .Truncated_Field
@@ -417,7 +449,9 @@ protobuf_field_read :: proc(src: []u8, at: ^int) -> (field: Protobuf_Field, erro
 		field.data = src[at^:at^ + cast(int)size]
 		at^ += cast(int)size
 	case 5:
-		if len(src) - at^ < 4 do return {}, .Truncated_Field
+		if len(src) - at^ < 4 {
+			return {}, .Truncated_Field
+		}
 
 		at^ += 4
 	case:
@@ -429,14 +463,20 @@ protobuf_field_read :: proc(src: []u8, at: ^int) -> (field: Protobuf_Field, erro
 
 protobuf_varint_read :: proc(src: []u8, at: ^int) -> (value: u64, error: Protobuf_Error) {
 	for i in 0 ..< 10 {
-		if at^ == len(src) do return 0, .Truncated_Varint
+		if at^ == len(src) {
+			return 0, .Truncated_Varint
+		}
 
 		b := src[at^]
 		at^ += 1
-		if i == 9 && b > 1 do return 0, .Varint_Overflow
+		if i == 9 && b > 1 {
+			return 0, .Varint_Overflow
+		}
 
 		value |= cast(u64)(b & 0x7f) << cast(uint)(i * 7)
-		if b & 0x80 == 0 do return value, .None
+		if b & 0x80 == 0 {
+			return value, .None
+		}
 	}
 
 	return 0, .Varint_Overflow
@@ -522,7 +562,9 @@ registration_payload_encode :: proc(
 	key_copy := keys
 	device_props: [1024]u8
 	props_size, props_err := device_props_encode(device_props[:], config)
-	if props_err != .None do return 0, props_err
+	if props_err != .None {
+		return 0, props_err
+	}
 
 	build_hash := registration_build_hash(config.version)
 	registration_id := [4]u8 {
@@ -549,7 +591,9 @@ registration_payload_encode :: proc(
 	payload_bytes(&pairing, 6, key_copy.signed_prekey_signature[:])
 	payload_bytes(&pairing, 7, build_hash[:])
 	payload_bytes(&pairing, 8, device_props[:props_size])
-	if pairing.err != .None do return 0, pairing.err
+	if pairing.err != .None {
+		return 0, pairing.err
+	}
 
 	staging: [MAX_CLIENT_PAYLOAD_SIZE]u8
 	writer := Payload_Writer {
@@ -606,7 +650,9 @@ login_payload_encode :: proc(
 
 	username: u64
 	for c in user {
-		if !is_digit(c) do return 0, .Invalid_Username
+		if !is_digit(c) {
+			return 0, .Invalid_Username
+		}
 
 		digit := cast(u64)(c - '0')
 
@@ -642,7 +688,9 @@ device_props_encode :: proc(dst: []u8, config: Payload_Config) -> (n: int, error
 
 	for field in history_fields {
 		value: u64 = 1
-		if field == 6 do value = 0
+		if field == 6 {
+			value = 0
+		}
 
 		payload_uint(&history, field, value)
 	}
@@ -679,7 +727,9 @@ payload_common :: proc(
 	version := Payload_Writer {
 		dst = version_buffer[:],
 	}
-	for value, i in config.version do payload_uint(&version, cast(u32)(i + 1), cast(u64)value)
+	for value, i in config.version {
+		payload_uint(&version, cast(u32)(i + 1), cast(u64)value)
+	}
 	agent_buffer: [512]u8
 	agent := Payload_Writer {
 		dst = agent_buffer[:],
@@ -715,7 +765,9 @@ payload_common :: proc(
 		return
 	}
 
-	if login do payload_uint(writer, 1, username)
+	if login {
+		payload_uint(writer, 1, username)
+	}
 
 	payload_uint(writer, 3, 0) // passive:false for login and registration.
 	payload_bytes(writer, 5, agent_buffer[:agent.at])
@@ -726,7 +778,9 @@ payload_common :: proc(
 		payload_uint(writer, 18, cast(u64)device)
 	}
 
-	if !login do payload_bytes(writer, 19, pairing)
+	if !login {
+		payload_bytes(writer, 19, pairing)
+	}
 
 	payload_uint(writer, 33, cast(u64)login) // pull:true login, false registration.
 }
@@ -743,7 +797,9 @@ payload_config_validate :: proc(config: Payload_Config) -> Payload_Error {
 	}
 
 	for c in config.browser_name {
-		if c < 32 || c > 126 do return .Invalid_Browser_Name
+		if c < 32 || c > 126 {
+			return .Invalid_Browser_Name
+		}
 	}
 
 	if len(config.country_code) != 2 {
@@ -751,7 +807,9 @@ payload_config_validate :: proc(config: Payload_Config) -> Payload_Error {
 	}
 
 	for c in config.country_code {
-		if !is_alpha(c) do return .Invalid_Country_Code
+		if !is_alpha(c) {
+			return .Invalid_Country_Code
+		}
 	}
 
 	return .None
@@ -786,7 +844,9 @@ payload_platform :: proc(browser: string) -> u32 {
 	}
 
 	for name, i in names {
-		if len(name) != len(browser) do continue
+		if len(name) != len(browser) {
+			continue
+		}
 
 		match := true
 
@@ -803,7 +863,9 @@ payload_platform :: proc(browser: string) -> u32 {
 			}
 		}
 
-		if match do return cast(u32)(i + 1)
+		if match {
+			return cast(u32)(i + 1)
+		}
 	}
 
 	// JS's `PlatformType[name] || DESKTOP` maps UNKNOWN(0) here too.
@@ -819,7 +881,9 @@ payload_copy_result :: proc(
 	int,
 	Payload_Error,
 ) {
-	if writer.err != .None do return 0, writer.err
+	if writer.err != .None {
+		return 0, writer.err
+	}
 
 	if len(dst) < writer.at {
 		return 0, .Destination_Undersized
@@ -858,7 +922,9 @@ payload_uint :: proc(writer: ^Payload_Writer, field: u32, value: u64) {
 payload_bytes :: proc(writer: ^Payload_Writer, field: u32, value: []u8) {
 	payload_varint(writer, cast(u64)field << 3 | 2)
 	payload_varint(writer, cast(u64)len(value))
-	if writer.err != .None do return
+	if writer.err != .None {
+		return
+	}
 
 	if len(value) > len(writer.dst) - writer.at {
 		writer.err = .Payload_Oversized
@@ -881,10 +947,14 @@ payload_decimal :: proc(dst: []u8, value: u32) -> int {
 		reversed[size] = '0' + cast(u8)(remaining % 10)
 		size += 1
 		remaining /= 10
-		if remaining == 0 do break
+		if remaining == 0 {
+			break
+		}
 	}
 
-	for i in 0 ..< size do dst[i] = reversed[size - 1 - i]
+	for i in 0 ..< size {
+		dst[i] = reversed[size - 1 - i]
+	}
 
 	return size
 }
@@ -920,7 +990,9 @@ pairing_identity_hmac_decode :: proc(src: []u8) -> (identity: Pairing_Device_Ide
 
 	for at < len(src) {
 		field, field_err := protobuf_field_read(src, &at)
-		if field_err != .None do return {}, field_err
+		if field_err != .None {
+			return {}, field_err
+		}
 
 		switch field.number {
 		case 1, 2:
@@ -972,9 +1044,13 @@ pairing_signed_identity_decode :: proc(src: []u8) -> (identity: Pairing_Signed_I
 
 	for at < len(src) {
 		field, field_err := protobuf_field_read(src, &at)
-		if field_err != .None do return {}, field_err
+		if field_err != .None {
+			return {}, field_err
+		}
 
-		if field.number < 1 || field.number > 4 do continue
+		if field.number < 1 || field.number > 4 {
+			continue
+		}
 
 		if field.wire_type != 2 {
 			return {}, .Wrong_Wire_Type
@@ -1011,9 +1087,13 @@ pairing_device_details_decode :: proc(src: []u8) -> (details: Pairing_Device_Det
 
 	for at < len(src) {
 		field, field_err := protobuf_field_read(src, &at)
-		if field_err != .None do return {}, field_err
+		if field_err != .None {
+			return {}, field_err
+		}
 
-		if field.number < 1 || field.number > 5 do continue
+		if field.number < 1 || field.number > 5 {
+			continue
+		}
 
 		if field.wire_type != 0 {
 			return {}, .Wrong_Wire_Type
@@ -1077,7 +1157,9 @@ pairing_signed_identity_encode :: proc(
 			present[i] = include_signature_key && len(value) > 0
 		}
 
-		if !present[i] do continue
+		if !present[i] {
+			continue
+		}
 
 		if len(value) > MAX_PROTOBUF_MESSAGE_SIZE {
 			return 0, .Message_Oversized
@@ -1101,7 +1183,9 @@ pairing_signed_identity_encode :: proc(
 		}
 	}
 	for value, i in fields {
-		if !present[i] do continue
+		if !present[i] {
+			continue
+		}
 
 		dst[written] = cast(u8)((i + 1) << 3 | 2)
 		written += 1
@@ -1173,7 +1257,9 @@ message_decode_inner :: proc(src: []u8, depth: int) -> (message: Text_Message, e
 
 	for at < len(src) {
 		field, e := protobuf_field_read(src, &at)
-		if e != .None do return {}, .Invalid_Protobuf
+		if e != .None {
+			return {}, .Invalid_Protobuf
+		}
 
 		switch field.number {
 		case 1, 6, 37, 40, 53, 55, 59:
@@ -1199,13 +1285,19 @@ message_decode_inner :: proc(src: []u8, depth: int) -> (message: Text_Message, e
 
 				message.kind, message.text = .Conversation, cast(string)field.data
 			} else if field.number == 6 {
-				if extended_error := message_extended_text_decode(&message, field, depth); extended_error != .None do return {}, extended_error
+				if extended_error := message_extended_text_decode(&message, field, depth); extended_error != .None {
+					return {}, extended_error
+				}
 			} else {
-				if wrapper_error := message_wrapper_decode(&message, field, depth); wrapper_error != .None do return {}, wrapper_error
+				if wrapper_error := message_wrapper_decode(&message, field, depth); wrapper_error != .None {
+					return {}, wrapper_error
+				}
 			}
 
 		case 2:
-			if distribution_error := message_sender_key_distribution_decode(&message, field); distribution_error != .None do return {}, distribution_error
+			if distribution_error := message_sender_key_distribution_decode(&message, field); distribution_error != .None {
+				return {}, distribution_error
+			}
 		}
 	}
 
@@ -1252,7 +1344,9 @@ message_extended_text_decode :: proc(message: ^Text_Message, field: Protobuf_Fie
 
 			message.has_context = true
 			message.context_info, error = message_context_decode(f.data, depth)
-			if error != .None do return error
+			if error != .None {
+				return error
+			}
 		}
 	}
 
@@ -1272,20 +1366,28 @@ message_wrapper_decode :: proc(message: ^Text_Message, field: Protobuf_Field, de
 			return .Invalid_Protobuf
 		}
 
-		if f.number != 1 do continue
+		if f.number != 1 {
+			continue
+		}
 
 		if f.wire_type != 2 {
 			return .Invalid_Protobuf
 		}
 
-		if seen do return .Duplicate_Field
+		if seen {
+			return .Duplicate_Field
+		}
 
 		seen = true
 		wrapped, error = message_decode_inner(f.data, depth + 1)
-		if error != .None do return error
+		if error != .None {
+			return error
+		}
 	}
 
-	if !seen do return .Invalid_Protobuf
+	if !seen {
+		return .Invalid_Protobuf
+	}
 
 	if message.has_sender_key_distribution {
 		if wrapped.has_sender_key_distribution {
@@ -1358,11 +1460,17 @@ message_context_decode :: proc(src: []u8, depth: int) -> (c: Message_Context, er
 
 	for at < len(src) {
 		f, e := protobuf_field_read(src, &at)
-		if e != .None do return {}, .Invalid_Protobuf
+		if e != .None {
+			return {}, .Invalid_Protobuf
+		}
 
-		if f.number < 1 || f.number > 4 do continue
+		if f.number < 1 || f.number > 4 {
+			continue
+		}
 
-		if f.wire_type != 2 do return {}, .Invalid_Protobuf
+		if f.wire_type != 2 {
+			return {}, .Invalid_Protobuf
+		}
 
 		if f.number != 3 && !utf8.valid_string(cast(string)f.data) {
 			return {}, .Invalid_UTF8
@@ -1387,7 +1495,9 @@ message_context_decode :: proc(src: []u8, depth: int) -> (c: Message_Context, er
 			}
 
 			_, error = message_decode_inner(f.data, depth + 1)
-			if error != .None do return {}, error
+			if error != .None {
+				return {}, error
+			}
 
 			c.quoted_message, c.has_quoted_message = f.data, true
 		case 4:
@@ -1407,10 +1517,14 @@ message_context_decode :: proc(src: []u8, depth: int) -> (c: Message_Context, er
 // including quoted protobufs and source aliasing, before touching dst.
 text_message_encode :: proc(dst: []u8, message: Text_Message) -> (written: int, error: Message_Error) {
 	m := message
-	if validation_error := text_message_encode_validate(m); validation_error != .None do return 0, validation_error
+	if validation_error := text_message_encode_validate(m); validation_error != .None {
+		return 0, validation_error
+	}
 	c, s := m.context_info, m.sender_key_distribution
 	context_size, sender_size, required, size_error := text_message_encoded_sizes(m)
-	if size_error != .None do return 0, size_error
+	if size_error != .None {
+		return 0, size_error
+	}
 
 	if len(dst) < required {
 		return 0, .Destination_Undersized
@@ -1438,7 +1552,9 @@ text_message_encode_validate :: proc(m: Text_Message) -> Message_Error {
 		return .Conflicting_Content
 	}
 
-	if !utf8.valid_string(m.text) do return .Invalid_UTF8
+	if !utf8.valid_string(m.text) {
+		return .Invalid_UTF8
+	}
 
 	c, s := m.context_info, m.sender_key_distribution
 
@@ -1464,7 +1580,9 @@ text_message_context_size :: proc(m: Text_Message) -> (int, Message_Error) {
 		present := [?]bool{c.has_stanza_id, c.has_participant, c.has_remote_jid}
 
 		for v, i in values {
-			if !present[i] do continue
+			if !present[i] {
+				continue
+			}
 
 			if !utf8.valid_string(v) {
 				return 0, .Invalid_UTF8
@@ -1479,7 +1597,9 @@ text_message_context_size :: proc(m: Text_Message) -> (int, Message_Error) {
 
 		if c.has_quoted_message {
 			_, e := message_decode_inner(c.quoted_message, 1)
-			if e != .None do return 0, e
+			if e != .None {
+				return 0, e
+			}
 
 			context_size += message_field_size(3, len(c.quoted_message))
 		}
@@ -1491,7 +1611,9 @@ text_message_context_size :: proc(m: Text_Message) -> (int, Message_Error) {
 text_message_encoded_sizes :: proc(m: Text_Message) -> (int, int, int, Message_Error) {
 	c, s := m.context_info, m.sender_key_distribution
 	context_size, context_error := text_message_context_size(m)
-	if context_error != .None do return 0, 0, 0, context_error
+	if context_error != .None {
+		return 0, 0, 0, context_error
+	}
 	sender_size, content_size := 0, 0
 
 	if m.has_sender_key_distribution {

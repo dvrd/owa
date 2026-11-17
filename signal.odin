@@ -94,8 +94,10 @@ signal_group_init_sender :: proc(
 		return e
 	}
 
-	for s in record.states[:record.count] do if s.id == id {
-		return .Conflicting_Key
+	for s in record.states[:record.count] {
+		if s.id == id {
+			return .Conflicting_Key
+		}
 	}
 
 	state := Signal_Group_State {
@@ -124,7 +126,9 @@ signal_group_distribution_encode :: proc(
 		return 0, e
 	}
 
-	if record.count == 0 do return 0, .Unknown_Key
+	if record.count == 0 {
+		return 0, .Unknown_Key
+	}
 
 	s := &record.states[record.count - 1]
 	if s.next_iteration > cast(u64)max(u32) {
@@ -157,7 +161,9 @@ signal_group_distribution_decode :: proc(src: []u8) -> (d: Signal_Group_Distribu
 		return {}, .Payload_Oversized
 	}
 
-	if len(src) < 1 do return {}, .Invalid_Protobuf
+	if len(src) < 1 {
+		return {}, .Invalid_Protobuf
+	}
 
 	if src[0] != SIGNAL_GROUP_VERSION {
 		return {}, .Invalid_Version
@@ -167,12 +173,18 @@ signal_group_distribution_decode :: proc(src: []u8) -> (d: Signal_Group_Distribu
 
 	for at < len(src) {
 		f, e := protobuf_field_read(src, &at)
-		if e != .None do return {}, .Invalid_Protobuf
+		if e != .None {
+			return {}, .Invalid_Protobuf
+		}
 
-		if f.number < 1 || f.number > 4 do continue
+		if f.number < 1 || f.number > 4 {
+			continue
+		}
 
 		mask := cast(u8)1 << f.number
-		if seen & mask != 0 do return {}, .Duplicate_Field
+		if seen & mask != 0 {
+			return {}, .Duplicate_Field
+		}
 
 		seen |= mask
 
@@ -211,7 +223,9 @@ signal_group_distribution_decode :: proc(src: []u8) -> (d: Signal_Group_Distribu
 		}
 	}
 
-	if seen != 30 do return {}, .Missing_Field
+	if seen != 30 {
+		return {}, .Missing_Field
+	}
 
 	return d, .None
 }
@@ -228,10 +242,14 @@ signal_group_distribution_process :: proc(record: ^Signal_Group_Record, wire: []
 
 	d, e := signal_group_distribution_decode(wire)
 	defer crypto.zero_explicit(&d, size_of(d))
-	if e != .None do return e
+	if e != .None {
+		return e
+	}
 
 	for &s in record.states[:record.count] {
-		if s.id != d.id do continue
+		if s.id != d.id {
+			continue
+		}
 
 		if crypto.compare_constant_time(s.signing_public[:], d.signing_public[:]) != 1 {
 			return .Conflicting_Key
@@ -269,7 +287,9 @@ signal_group_message_decode :: proc(src: []u8) -> (m: Signal_Group_Message, err:
 		return {}, .Payload_Oversized
 	}
 
-	if len(src) < 65 do return {}, .Invalid_Protobuf
+	if len(src) < 65 {
+		return {}, .Invalid_Protobuf
+	}
 
 	if src[0] != SIGNAL_GROUP_VERSION {
 		return {}, .Invalid_Version
@@ -280,12 +300,18 @@ signal_group_message_decode :: proc(src: []u8) -> (m: Signal_Group_Message, err:
 
 	for at < len(m.signed_bytes) {
 		f, e := protobuf_field_read(m.signed_bytes, &at)
-		if e != .None do return {}, .Invalid_Protobuf
+		if e != .None {
+			return {}, .Invalid_Protobuf
+		}
 
-		if f.number < 1 || f.number > 3 do continue
+		if f.number < 1 || f.number > 3 {
+			continue
+		}
 
 		mask := cast(u8)1 << f.number
-		if seen & mask != 0 do return {}, .Duplicate_Field
+		if seen & mask != 0 {
+			return {}, .Duplicate_Field
+		}
 
 		seen |= mask
 
@@ -308,7 +334,9 @@ signal_group_message_decode :: proc(src: []u8) -> (m: Signal_Group_Message, err:
 		}
 	}
 
-	if seen != 14 do return {}, .Missing_Field
+	if seen != 14 {
+		return {}, .Missing_Field
+	}
 
 	if len(m.ciphertext) == 0 || len(m.ciphertext) % 16 != 0 {
 		return {}, .Invalid_Ciphertext
@@ -338,13 +366,19 @@ signal_group_encrypt :: proc(
 		return 0, e
 	}
 
-	if record.count == 0 do return 0, .Unknown_Key
+	if record.count == 0 {
+		return 0, .Unknown_Key
+	}
 
 	s := &record.states[record.count - 1]
-	if !s.has_private do return 0, .Invalid_Key
+	if !s.has_private {
+		return 0, .Invalid_Key
+	}
 
 	iteration := s.next_iteration
-	if iteration != 0 do iteration += 1
+	if iteration != 0 {
+		iteration += 1
+	}
 
 	if iteration > cast(u64)max(u32) {
 		return 0, .Counter_Exhausted
@@ -357,7 +391,9 @@ signal_group_encrypt :: proc(
 	cipher_size := (len(plaintext) / 16 + 1) * 16
 	header_size := group_message_header_size(s.id, cast(u32)iteration, cipher_size)
 	size := header_size + cipher_size + 64
-	if len(dst) < size do return 0, .Destination_Undersized
+	if len(dst) < size {
+		return 0, .Destination_Undersized
+	}
 
 	if bytes.alias(dst[:size], plaintext) ||
 	   group_record_alias(record, dst[:size]) ||
@@ -365,20 +401,28 @@ signal_group_encrypt :: proc(
 		return 0, .Overlapping_Buffers
 	}
 
-	when !crypto.HAS_RAND_BYTES do return 0, .Entropy_Unavailable
+	when !crypto.HAS_RAND_BYTES {
+		return 0, .Entropy_Unavailable
+	}
 	candidate := s^
 	defer crypto.zero_explicit(&candidate, size_of(candidate))
 	seed, e := group_message_seed(&candidate, cast(u32)iteration)
 	defer crypto.zero_explicit(&seed, size_of(seed))
-	if e != .None do return 0, e
+	if e != .None {
+		return 0, e
+	}
 
 	keys := signal_group_message_keys(seed)
 	defer crypto.zero_explicit(&keys, size_of(keys))
 	_, ce := signal_cbc_encrypt(dst[header_size:][:cipher_size], keys.cipher_key, keys.iv, plaintext)
-	if ce != .None do return 0, .Cipher_Failed
+	if ce != .None {
+		return 0, .Cipher_Failed
+	}
 
 	signed_size, sign_error := group_message_sign(dst, s, iteration, cipher_size)
-	if sign_error != .None do return 0, sign_error
+	if sign_error != .None {
+		return 0, sign_error
+	}
 
 	s^ = candidate
 	return signed_size, .None
@@ -395,7 +439,9 @@ group_message_sign :: proc(
 ) {
 	written = group_message_header(dst, s.id, cast(u32)iteration, cipher_size) + cipher_size
 	signature, se := signal_curve_sign(s.signing_private, dst[:written])
-	if se != .None do return 0, .Signature_Failed
+	if se != .None {
+		return 0, .Signature_Failed
+	}
 
 	written += copy(dst[written:], signature[:])
 	return written, .None
@@ -414,18 +460,24 @@ signal_group_decrypt :: proc(
 	}
 
 	m, e := signal_group_message_decode(wire)
-	if e != .None do return 0, e
+	if e != .None {
+		return 0, e
+	}
 
 	if bytes.alias(dst, wire) || group_record_alias(record, dst) || group_record_alias(record, wire) {
 		return 0, .Overlapping_Buffers
 	}
 
 	index := -1
-	for s, i in record.states[:record.count] do if s.id == m.id {
-		index = i
+	for s, i in record.states[:record.count] {
+		if s.id == m.id {
+			index = i
+		}
 	}
 
-	if index < 0 do return 0, .Unknown_Key
+	if index < 0 {
+		return 0, .Unknown_Key
+	}
 
 	s := &record.states[index]
 	if signal_curve_verify(s.signing_public, m.signed_bytes, m.signature) != .None {
@@ -436,7 +488,9 @@ signal_group_decrypt :: proc(
 	defer crypto.zero_explicit(&candidate, size_of(candidate))
 	seed, ke := group_message_seed(&candidate, m.iteration)
 	defer crypto.zero_explicit(&seed, size_of(seed))
-	if ke != .None do return 0, ke
+	if ke != .None {
+		return 0, ke
+	}
 
 	keys := signal_group_message_keys(seed)
 	defer crypto.zero_explicit(&keys, size_of(keys))
@@ -456,10 +510,14 @@ signal_group_decrypt :: proc(
 group_message_seed :: proc(state: ^Signal_Group_State, iteration: u32) -> (seed: [32]u8, err: Signal_Group_Error) {
 	if state.next_iteration > cast(u64)iteration {
 		for key, i in state.skipped[:state.skipped_count] {
-			if key.iteration != iteration do continue
+			if key.iteration != iteration {
+				continue
+			}
 
 			seed = key.seed
-			for j in i ..< state.skipped_count - 1 do state.skipped[j] = state.skipped[j + 1]
+			for j in i ..< state.skipped_count - 1 {
+				state.skipped[j] = state.skipped[j + 1]
+			}
 			state.skipped_count -= 1
 			crypto.zero_explicit(&state.skipped[state.skipped_count], size_of(Signal_Group_Skipped_Key))
 			return seed, .None
@@ -485,7 +543,9 @@ group_message_seed :: proc(state: ^Signal_Group_State, iteration: u32) -> (seed:
 		}
 
 		if state.skipped_count == MAX_GROUP_SKIPPED_KEYS {
-			for i in 0 ..< state.skipped_count - 1 do state.skipped[i] = state.skipped[i + 1]
+			for i in 0 ..< state.skipped_count - 1 {
+				state.skipped[i] = state.skipped[i + 1]
+			}
 			state.skipped_count -= 1
 		}
 
@@ -503,7 +563,9 @@ group_message_seed :: proc(state: ^Signal_Group_State, iteration: u32) -> (seed:
 
 group_state_append :: proc(record: ^Signal_Group_Record, state: ^Signal_Group_State) {
 	if record.count == MAX_GROUP_KEY_STATES {
-		for i in 0 ..< record.count - 1 do record.states[i] = record.states[i + 1]
+		for i in 0 ..< record.count - 1 {
+			record.states[i] = record.states[i + 1]
+		}
 		record.count -= 1
 	}
 
@@ -530,8 +592,10 @@ group_record_validate :: proc(record: ^Signal_Group_Record) -> Signal_Group_Erro
 			return .Invalid_State
 		}
 
-		for previous in record.states[:i] do if previous.id == s.id {
-			return .Invalid_State
+		for previous in record.states[:i] {
+			if previous.id == s.id {
+				return .Invalid_State
+			}
 		}
 
 		if s.has_private {
@@ -595,8 +659,12 @@ signal_group_record_encode :: proc(dst: []u8, record: ^Signal_Group_Record) -> (
 	}
 
 	size := 11 + 32
-	for s in record.states[:record.count] do size += 111 + s.skipped_count * 36
-	if len(dst) < size do return 0, .Destination_Undersized
+	for s in record.states[:record.count] {
+		size += 111 + s.skipped_count * 36
+	}
+	if len(dst) < size {
+		return 0, .Destination_Undersized
+	}
 
 	if group_record_alias(record, dst[:size]) {
 		return 0, .Overlapping_Buffers
@@ -629,7 +697,9 @@ signal_group_record_encode :: proc(dst: []u8, record: ^Signal_Group_Record) -> (
 }
 
 signal_group_record_decode :: proc(record: ^Signal_Group_Record, src: []u8) -> Signal_Group_Error {
-	if record == nil do return .Invalid_State
+	if record == nil {
+		return .Invalid_State
+	}
 
 	if len(src) > MAX_GROUP_KEY_SNAPSHOT_SIZE {
 		return .Payload_Oversized
@@ -658,7 +728,9 @@ signal_group_record_decode :: proc(record: ^Signal_Group_Record, src: []u8) -> S
 
 	allocator := context.allocator
 	next, allocation_err := new(Signal_Group_Record, allocator)
-	if allocation_err != nil do return .Allocation_Failed
+	if allocation_err != nil {
+		return .Allocation_Failed
+	}
 
 	defer {
 		signal_group_record_clear(next)
@@ -671,8 +743,12 @@ signal_group_record_decode :: proc(record: ^Signal_Group_Record, src: []u8) -> S
 		return .Invalid_Snapshot
 	}
 
-	if state_error := group_snapshot_states_decode(next, src, &at, end); state_error != .None do return state_error
-	if at != end do return .Invalid_Snapshot
+	if state_error := group_snapshot_states_decode(next, src, &at, end); state_error != .None {
+		return state_error
+	}
+	if at != end {
+		return .Invalid_Snapshot
+	}
 
 	if e := group_record_validate(next); e != .None {
 		return e
@@ -686,7 +762,9 @@ signal_group_record_decode :: proc(record: ^Signal_Group_Record, src: []u8) -> S
 
 group_snapshot_states_decode :: proc(next: ^Signal_Group_Record, src: []u8, at: ^int, end: int) -> Signal_Group_Error {
 	for &s in next.states[:next.count] {
-		if end - at^ < 111 do return .Invalid_Snapshot
+		if end - at^ < 111 {
+			return .Invalid_Snapshot
+		}
 
 		s.id = cast(u32)store_get(src, at, 4)
 		s.next_iteration = store_get(src, at, 8)
@@ -694,7 +772,9 @@ group_snapshot_states_decode :: proc(next: ^Signal_Group_Record, src: []u8, at: 
 		at^ += copy(s.signing_public[:], src[at^:][:32])
 		at^ += copy(s.signing_private[:], src[at^:][:32])
 		flag := store_get(src, at, 1)
-		if flag > 1 do return .Invalid_Snapshot
+		if flag > 1 {
+			return .Invalid_Snapshot
+		}
 
 		s.has_private = flag == 1
 		s.skipped_count = cast(int)store_get(src, at, 2)
@@ -900,9 +980,13 @@ signal_cbc_decrypt :: proc(
 		copy(previous[:], ciphertext[final_at - aes.BLOCK_SIZE:final_at])
 	}
 
-	for &value, i in last do value ~= previous[i]
+	for &value, i in last {
+		value ~= previous[i]
+	}
 	padding, padding_error := signal_cbc_padding_size(last[:])
-	if padding_error != .None do return 0, padding_error
+	if padding_error != .None {
+		return 0, padding_error
+	}
 
 	written = len(ciphertext) - cast(int)padding
 	if written > MAX_SIGNAL_PLAINTEXT_SIZE {
@@ -926,7 +1010,9 @@ signal_cbc_blocks_decrypt :: proc(ctx: ^aes.Context_ECB, dst, ciphertext: []u8, 
 
 	for at := 0; at < final_at; at += aes.BLOCK_SIZE {
 		aes.decrypt_ecb(ctx, block[:], ciphertext[at:][:aes.BLOCK_SIZE])
-		for &value, i in block do value ~= chain[i]
+		for &value, i in block {
+			value ~= chain[i]
+		}
 		copy(dst[at:][:aes.BLOCK_SIZE], block[:])
 		copy(chain[:], ciphertext[at:][:aes.BLOCK_SIZE])
 	}
@@ -942,7 +1028,9 @@ signal_cbc_padding_size :: proc(last: []u8) -> (u32, Signal_Key_Error) {
 		bad |= (cast(u32)last[15 - i] ~ padding) & (0 - selected)
 	}
 
-	if bad != 0 do return 0, .Invalid_Padding
+	if bad != 0 {
+		return 0, .Invalid_Padding
+	}
 
 	return padding, .None
 }
@@ -988,7 +1076,9 @@ signal_message_mac_verify :: proc(
 	}
 
 	expected, err := signal_message_mac(mac_key, sender_identity, receiver_identity, serialized_message)
-	if err != .None do return err
+	if err != .None {
+		return err
+	}
 
 	defer crypto.zero_explicit(&expected, size_of(expected))
 	if crypto.compare_constant_time(expected[:], mac) != 1 {
@@ -1118,7 +1208,9 @@ signal_session_init_initiator :: proc(
 	bundle: Signal_Prekey_Bundle,
 	trusted_identity: [32]u8,
 ) -> Signal_Session_Error {
-	if session == nil do return {kind = .Invalid_State}
+	if session == nil {
+		return {kind = .Invalid_State}
+	}
 
 	if session.initialized {
 		return {kind = .Already_Initialized}
@@ -1134,9 +1226,13 @@ signal_session_init_initiator :: proc(
 		return {kind = .Invalid_Key}
 	}
 
-	if bundle_error := signal_initiator_bundle_validate(bundle); bundle_error.kind != .None do return bundle_error
+	if bundle_error := signal_initiator_bundle_validate(bundle); bundle_error.kind != .None {
+		return bundle_error
+	}
 
-	when !crypto.HAS_RAND_BYTES do return {kind = .Entropy_Unavailable}
+	when !crypto.HAS_RAND_BYTES {
+		return {kind = .Entropy_Unavailable}
+	}
 	next: Signal_Session
 	defer signal_session_clear(&next)
 	base_private: [32]u8
@@ -1152,7 +1248,9 @@ signal_session_init_initiator :: proc(
 	next.pending_signed_prekey_id = bundle.signed_prekey_id
 	next.has_pending_prekey, next.pending_prekey_id = bundle.has_prekey, bundle.prekey_id
 	next.pending_prekey, next.initiator = true, true
-	if root_error := signal_initiator_root_derive(&next, identity, base_private, bundle); root_error.kind != .None do return root_error
+	if root_error := signal_initiator_root_derive(&next, identity, base_private, bundle); root_error.kind != .None {
+		return root_error
+	}
 	dh: [32]u8
 	defer crypto.zero_explicit(&dh, size_of(dh))
 	if err := signal_agreement(dh[:], next.local_ratchet_private, bundle.signed_prekey_public); err.kind != .None {
@@ -1174,7 +1272,9 @@ signal_initiator_bundle_validate :: proc(bundle: Signal_Prekey_Bundle) -> Signal
 
 	signed: [33]u8
 	signed[0] = 5
-	for value, i in bundle.signed_prekey_public do signed[1 + i] = value
+	for value, i in bundle.signed_prekey_public {
+		signed[1 + i] = value
+	}
 	prekey_signature := bundle.signed_prekey_signature
 
 	if err := signal_curve_verify(bundle.identity_public, signed[:], prekey_signature[:]); err != .None {
@@ -1191,7 +1291,9 @@ signal_initiator_root_derive :: proc(
 ) -> Signal_Session_Error {
 	material: [160]u8
 	defer crypto.zero_explicit(&material, size_of(material))
-	for i in 0 ..< 32 do material[i] = 0xff
+	for i in 0 ..< 32 {
+		material[i] = 0xff
+	}
 	if err := signal_agreement(material[32:64], identity, bundle.signed_prekey_public); err.kind != .None {
 		return err
 	}
@@ -1303,18 +1405,24 @@ signal_whisper_decode :: proc(wire: []u8) -> (message: Signal_Whisper, error: Si
 			return {}, {kind = .Protobuf_Failed, protobuf = part_err}
 		}
 
-		if part.number < 1 || part.number > 4 do continue
+		if part.number < 1 || part.number > 4 {
+			continue
+		}
 
 		if seen[part.number - 1] {
 			return {}, {kind = .Invalid_Message}
 		}
 
 		seen[part.number - 1] = true
-		if field_error := signal_whisper_decode_field(&message, part); field_error.kind != .None do return {}, field_error
+		if field_error := signal_whisper_decode_field(&message, part); field_error.kind != .None {
+			return {}, field_error
+		}
 	}
 
-	for present in seen do if !present {
-		return {}, {kind = .Invalid_Message}
+	for present in seen {
+		if !present {
+			return {}, {kind = .Invalid_Message}
+		}
 	}
 
 	if !signal_public_valid(message.ratchet_public) {
@@ -1367,7 +1475,9 @@ signal_prekey_message_decode :: proc(wire: []u8) -> (message: Signal_Prekey_Mess
 		return {}, {kind = .Payload_Oversized}
 	}
 
-	if len(wire) < 2 do return {}, {kind = .Invalid_Message}
+	if len(wire) < 2 {
+		return {}, {kind = .Invalid_Message}
+	}
 
 	if wire[0] != SIGNAL_SESSION_WIRE_VERSION {
 		return {}, {kind = .Unsupported_Version}
@@ -1384,18 +1494,24 @@ signal_prekey_message_decode :: proc(wire: []u8) -> (message: Signal_Prekey_Mess
 			return {}, {kind = .Protobuf_Failed, protobuf = part_err}
 		}
 
-		if part.number < 1 || part.number > 6 do continue
+		if part.number < 1 || part.number > 6 {
+			continue
+		}
 
 		if seen[part.number - 1] {
 			return {}, {kind = .Invalid_Message}
 		}
 
 		seen[part.number - 1] = true
-		if field_error := signal_prekey_message_decode_field(&message, part); field_error.kind != .None do return {}, field_error
+		if field_error := signal_prekey_message_decode_field(&message, part); field_error.kind != .None {
+			return {}, field_error
+		}
 	}
 
-	for i in 1 ..< 6 do if !seen[i] {
-		return {}, {kind = .Invalid_Message}
+	for i in 1 ..< 6 {
+		if !seen[i] {
+			return {}, {kind = .Invalid_Message}
+		}
 	}
 
 	if message.signed_prekey_id > MAX_DEVICE_PREKEY_ID ||
@@ -1495,7 +1611,9 @@ signal_session_encrypt :: proc(
 	keys := signal_message_keys(step.message_seed)
 	defer crypto.zero_explicit(&keys, size_of(keys))
 	whisper := dst[prefix_size:][:whisper_size]
-	if encryption_error := signal_session_whisper_encrypt(session, whisper, plaintext, &keys, counter, cipher_size); encryption_error.kind != .None do return {}, 0, encryption_error
+	if encryption_error := signal_session_whisper_encrypt(session, whisper, plaintext, &keys, counter, cipher_size); encryption_error.kind != .None {
+		return {}, 0, encryption_error
+	}
 	if session.pending_prekey {
 		signal_session_prekey_wrap(session, dst, prefix_size, whisper_size, required)
 	}
@@ -1620,12 +1738,16 @@ signal_session_decrypt :: proc(
 	}
 
 	message, decode_err := signal_whisper_decode(wire)
-	if decode_err.kind != .None do return 0, decode_err
+	if decode_err.kind != .None {
+		return 0, decode_err
+	}
 
 	next := session^
 	defer signal_session_clear(&next)
 	written, error = signal_session_decrypt_next(&next, dst, message)
-	if error.kind != .None do return 0, error
+	if error.kind != .None {
+		return 0, error
+	}
 
 	session^ = next
 	return written, {}
@@ -1654,19 +1776,25 @@ signal_session_decrypt_prekey :: proc(
 	}
 
 	prekey, prekey_err := signal_prekey_message_decode(wire)
-	if prekey_err.kind != .None do return 0, 0, prekey_err
+	if prekey_err.kind != .None {
+		return 0, 0, prekey_err
+	}
 
 	if !signal_identity_equal(prekey.identity_public, trusted_identity) {
 		return 0, 0, {kind = .Untrusted_Identity}
 	}
 
 	message, message_err := signal_whisper_decode(prekey.message)
-	if message_err.kind != .None do return 0, 0, message_err
+	if message_err.kind != .None {
+		return 0, 0, message_err
+	}
 
 	next: Signal_Session
 	defer signal_session_clear(&next)
 	if session.initialized {
-		if session_error := signal_prekey_existing_session_validate(session, trusted_identity, prekey, local); session_error.kind != .None do return 0, 0, session_error
+		if session_error := signal_prekey_existing_session_validate(session, trusted_identity, prekey, local); session_error.kind != .None {
+			return 0, 0, session_error
+		}
 
 		next = session^
 	} else {
@@ -1680,7 +1808,9 @@ signal_session_decrypt_prekey :: proc(
 	}
 
 	written, error = signal_session_decrypt_next(&next, dst, message)
-	if error.kind != .None do return 0, 0, error
+	if error.kind != .None {
+		return 0, 0, error
+	}
 
 	session^ = next
 	return written, consumed_prekey_id, {}
@@ -1712,11 +1842,15 @@ signal_session_init_recipient :: proc(
 	local: Signal_Recipient_Keys,
 	message: Signal_Prekey_Message,
 ) -> Signal_Session_Error {
-	if key_error := signal_recipient_keys_validate(local, message); key_error.kind != .None do return key_error
+	if key_error := signal_recipient_keys_validate(local, message); key_error.kind != .None {
+		return key_error
+	}
 
 	material: [160]u8
 	defer crypto.zero_explicit(&material, size_of(material))
-	for i in 0 ..< 32 do material[i] = 0xff
+	for i in 0 ..< 32 {
+		material[i] = 0xff
+	}
 	if err := signal_agreement(material[32:64], local.signed_prekey_private, message.identity_public);
 	   err.kind != .None {
 		return err
@@ -1797,7 +1931,9 @@ signal_session_decrypt_next :: proc(
 
 	seed, seed_err := signal_session_message_seed(next, index, message.counter)
 	defer crypto.zero_explicit(&seed, size_of(seed))
-	if seed_err.kind != .None do return 0, seed_err
+	if seed_err.kind != .None {
+		return 0, seed_err
+	}
 
 	keys := signal_message_keys(seed)
 	defer crypto.zero_explicit(&keys, size_of(keys))
@@ -1837,7 +1973,9 @@ signal_session_ratchet :: proc(next: ^Signal_Session, remote: [32]u8, previous_c
 	}
 
 	index := signal_receiving_chain_slot(next)
-	if index < 0 do return {kind = .Receiving_Chain_Limit}
+	if index < 0 {
+		return {kind = .Receiving_Chain_Limit}
+	}
 
 	dh: [32]u8
 	defer crypto.zero_explicit(&dh, size_of(dh))
@@ -1860,7 +1998,9 @@ signal_session_ratchet :: proc(next: ^Signal_Session, remote: [32]u8, previous_c
 		next.previous_counter = cast(u32)next.send_counter
 	}
 
-	when !crypto.HAS_RAND_BYTES do return {kind = .Entropy_Unavailable}
+	when !crypto.HAS_RAND_BYTES {
+		return {kind = .Entropy_Unavailable}
+	}
 	signal_private_generate(&next.local_ratchet_private)
 	next.local_ratchet_public = signal_curve_public(next.local_ratchet_private)
 
@@ -1899,7 +2039,9 @@ signal_session_message_seed :: proc(
 		return {}, {kind = .Replay}
 	}
 
-	if chain.closed do return {}, {kind = .Chain_Closed}
+	if chain.closed {
+		return {}, {kind = .Chain_Closed}
+	}
 
 	if cast(i64)counter - chain.counter > MAX_SIGNAL_SKIPPED_KEYS {
 		return {}, {kind = .Counter_Gap_Exceeded}
@@ -1918,16 +2060,22 @@ signal_session_message_seed :: proc(
 
 		err := signal_session_save_skipped(next, index, cast(u32)chain.counter, step.message_seed)
 		crypto.zero_explicit(&step, size_of(step))
-		if err.kind != .None do return {}, err
+		if err.kind != .None {
+			return {}, err
+		}
 	}
 	unreachable()
 }
 
 signal_session_skip_through :: proc(next: ^Signal_Session, index: int, counter: u32) -> Signal_Session_Error {
 	chain := &next.receiving[index]
-	if chain.counter >= cast(i64)counter do return {}
+	if chain.counter >= cast(i64)counter {
+		return {}
+	}
 
-	if chain.closed do return {kind = .Chain_Closed}
+	if chain.closed {
+		return {kind = .Chain_Closed}
+	}
 
 	if cast(i64)counter - chain.counter > MAX_SIGNAL_SKIPPED_KEYS {
 		return {kind = .Counter_Gap_Exceeded}
@@ -1939,7 +2087,9 @@ signal_session_skip_through :: proc(next: ^Signal_Session, index: int, counter: 
 		chain.counter += 1
 		err := signal_session_save_skipped(next, index, cast(u32)chain.counter, step.message_seed)
 		crypto.zero_explicit(&step, size_of(step))
-		if err.kind != .None do return err
+		if err.kind != .None {
+			return err
+		}
 	}
 
 	return {}
@@ -1982,17 +2132,23 @@ signal_receiving_chain_find :: proc(session: ^Signal_Session, public: [32]u8) ->
 }
 
 signal_receiving_chain_slot :: proc(session: ^Signal_Session) -> int {
-	for chain, i in session.receiving do if !chain.in_use {
-		return i
+	for chain, i in session.receiving {
+		if !chain.in_use {
+			return i
+		}
 	}
 
 	for &chain, i in session.receiving {
-		if !chain.closed do continue
+		if !chain.closed {
+			continue
+		}
 
 		cached := false
 
-		for key in session.skipped do if key.in_use && key.chain_index == cast(u16)i {
-			cached = true
+		for key in session.skipped {
+			if key.in_use && key.chain_index == cast(u16)i {
+				cached = true
+			}
 		}
 
 		if !cached {
@@ -2033,7 +2189,9 @@ signal_session_put_uint :: proc(dst: []u8, at: ^int, field: u8, value: u32) {
 
 signal_session_put_public :: proc(dst: []u8, at: ^int, field: u8, public: [32]u8) {
 	dst[at^], dst[at^ + 1], dst[at^ + 2] = field << 3 | 2, 33, 5
-	for value, i in public do dst[at^ + 3 + i] = value
+	for value, i in public {
+		dst[at^ + 3 + i] = value
+	}
 	at^ += 35
 }
 
@@ -2075,14 +2233,18 @@ signal_session_chains_validate :: proc(session: ^Signal_Session) -> Signal_Sessi
 	active := 0
 
 	for chain, i in session.receiving {
-		if !chain.in_use do continue
+		if !chain.in_use {
+			continue
+		}
 
 		if !signal_public_valid(chain.ratchet_public) || chain.counter < -1 || chain.counter > cast(i64)max(u32) {
 			return {kind = .Invalid_State}
 		}
 
-		for other in session.receiving[:i] do if other.in_use && other.ratchet_public == chain.ratchet_public {
-			return {kind = .Invalid_State}
+		for other in session.receiving[:i] {
+			if other.in_use && other.ratchet_public == chain.ratchet_public {
+				return {kind = .Invalid_State}
+			}
 		}
 
 		if !chain.closed {
@@ -2094,12 +2256,16 @@ signal_session_chains_validate :: proc(session: ^Signal_Session) -> Signal_Sessi
 		}
 	}
 
-	if active > 1 do return {kind = .Invalid_State}
+	if active > 1 {
+		return {kind = .Invalid_State}
+	}
 
 	count := 0
 
 	for key, i in session.skipped {
-		if !key.in_use do continue
+		if !key.in_use {
+			continue
+		}
 
 		count += 1
 
@@ -2137,8 +2303,10 @@ signal_session_encode :: proc(dst: []u8, session: ^Signal_Session) -> (written: 
 
 	chains := 0
 
-	for chain in session.receiving do if chain.in_use {
-		chains += 1
+	for chain in session.receiving {
+		if chain.in_use {
+			chains += 1
+		}
 	}
 
 	required := 330 + chains * 74 + session.skipped_count * 39
@@ -2154,13 +2322,21 @@ signal_session_encode :: proc(dst: []u8, session: ^Signal_Session) -> (written: 
 	copy(dst[:8], SIGNAL_SESSION_STORE_MAGIC)
 	dst[8], dst[9] = 0, 1
 	dst[10] = 0
-	if session.initiator do dst[10] |= 1
+	if session.initiator {
+		dst[10] |= 1
+	}
 
-	if session.pending_prekey do dst[10] |= 2
+	if session.pending_prekey {
+		dst[10] |= 2
+	}
 
-	if session.has_pending_prekey do dst[10] |= 4
+	if session.has_pending_prekey {
+		dst[10] |= 4
+	}
 
-	if session.sending do dst[10] |= 8
+	if session.sending {
+		dst[10] |= 8
+	}
 
 	written = 11
 	signal_session_keys_encode(dst, session, &written)
@@ -2184,7 +2360,9 @@ signal_session_keys_encode :: proc(dst: []u8, session: ^Signal_Session, at: ^int
 		session.previous_counter,
 	}
 
-	for value in metadata do store_put(dst, at, cast(u64)value, 4)
+	for value in metadata {
+		store_put(dst, at, cast(u64)value, 4)
+	}
 	parts := [?][]u8 {
 		session.local_identity_public[:],
 		session.remote_identity_public[:],
@@ -2196,12 +2374,16 @@ signal_session_keys_encode :: proc(dst: []u8, session: ^Signal_Session, at: ^int
 		session.send_chain_key[:],
 	}
 
-	for part in parts do at^ += copy(dst[at^:], part)
+	for part in parts {
+		at^ += copy(dst[at^:], part)
+	}
 }
 
 signal_session_chains_encode :: proc(dst: []u8, session: ^Signal_Session, at: ^int) {
 	for chain, i in session.receiving {
-		if !chain.in_use do continue
+		if !chain.in_use {
+			continue
+		}
 
 		dst[at^], dst[at^ + 1] = cast(u8)i, chain.closed ? 1 : 0
 		at^ += 2
@@ -2220,7 +2402,9 @@ signal_session_chains_encode :: proc(dst: []u8, session: ^Signal_Session, at: ^i
 	}
 
 	for key, i in session.skipped {
-		if !key.in_use do continue
+		if !key.in_use {
+			continue
+		}
 
 		store_put(dst, at, cast(u64)i, 2)
 		dst[at^] = cast(u8)key.chain_index
@@ -2235,9 +2419,13 @@ signal_session_chains_encode :: proc(dst: []u8, session: ^Signal_Session, at: ^i
 }
 
 signal_session_decode :: proc(session: ^Signal_Session, src: []u8) -> Signal_Session_Error {
-	if session == nil do return {kind = .Invalid_State}
+	if session == nil {
+		return {kind = .Invalid_State}
+	}
 
-	if header_error := signal_session_snapshot_validate(src); header_error.kind != .None do return header_error
+	if header_error := signal_session_snapshot_validate(src); header_error.kind != .None {
+		return header_error
+	}
 
 	next := Signal_Session {
 		initialized        = true,
@@ -2265,7 +2453,9 @@ signal_session_decode :: proc(session: ^Signal_Session, src: []u8) -> Signal_Ses
 		return {kind = .Invalid_Format}
 	}
 
-	if chains_error := signal_session_chains_decode(&next, src, &at, chains, skipped); chains_error.kind != .None do return chains_error
+	if chains_error := signal_session_chains_decode(&next, src, &at, chains, skipped); chains_error.kind != .None {
+		return chains_error
+	}
 
 	if err := signal_session_validate(&next); err.kind != .None {
 		return err

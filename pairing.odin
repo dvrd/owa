@@ -164,7 +164,9 @@ session_init :: proc(session: ^Session, client: ^Client, auth: ^Auth_State, conf
 
 	payload: [MAX_CLIENT_PAYLOAD_SIZE]u8
 	_, payload_err := session_payload_encode(payload[:], auth, settings.payload)
-	if payload_err.kind != .None do return payload_err
+	if payload_err.kind != .None {
+		return payload_err
+	}
 
 	session^ = {
 		client = client,
@@ -291,7 +293,9 @@ session_node_observe :: proc(session: ^Session, node: Binary_Node) {
 
 		if children, found := node.content.([]Binary_Node); found {
 			for child in children {
-				if count == len(tags) do break
+				if count == len(tags) {
+					break
+				}
 
 				tags[count] = child.tag
 				count += 1
@@ -527,7 +531,9 @@ session_close :: proc(session: ^Session) -> Session_Error {
 		return {kind = .Invalid_State}
 	}
 
-	if session.phase == .Closed do return {}
+	if session.phase == .Closed {
+		return {}
+	}
 
 	binary_document_destroy(&session.document)
 	pairing_qr_clear(&session.qr_state)
@@ -579,7 +585,9 @@ session_payload_encode :: proc(dst: []u8, auth: ^Auth_State, config: Payload_Con
 }
 
 session_checkpoint :: proc(session: ^Session) -> Session_Error {
-	if session.config.auth_path == "" do return {}
+	if session.config.auth_path == "" {
+		return {}
+	}
 
 	if err := auth_state_save(session.config.auth_path, session.auth); err.kind != .None {
 		return {kind = .Authentication_State_Failed, auth = err}
@@ -589,7 +597,9 @@ session_checkpoint :: proc(session: ^Session) -> Session_Error {
 }
 
 session_receiving :: proc(session: ^Session) -> bool {
-	if session == nil do return false
+	if session == nil {
+		return false
+	}
 
 	#partial switch session.phase {
 	case .Awaiting_Pairing, .Authenticating, .Paired, .Login_Accepted:
@@ -721,7 +731,9 @@ Pairing_QR_State :: struct {
 pairing_node_child :: proc(node: Binary_Node, tag: string) -> (^Binary_Node, bool) {
 	if children, ok := node.content.([]Binary_Node); ok {
 		for &child in children {
-			if child.tag == tag do return &child, true
+			if child.tag == tag {
+				return &child, true
+			}
 		}
 	}
 
@@ -732,7 +744,9 @@ pairing_node_child :: proc(node: Binary_Node, tag: string) -> (^Binary_Node, boo
 // remains explicit; group/broadcast addresses cannot become login identities.
 pairing_jid_decode :: proc(jid: string) -> (user: string, device: u32, err: Pairing_Error) {
 	at := strings.index_byte(jid, '@')
-	if at <= 0 do return "", 0, {kind = .Invalid_JID}
+	if at <= 0 {
+		return "", 0, {kind = .Invalid_JID}
+	}
 
 	domain := jid[at + 1:]
 
@@ -789,7 +803,9 @@ pairing_jid_decode :: proc(jid: string) -> (user: string, device: u32, err: Pair
 	}
 
 	_, valid := strconv.parse_u64(local, 10)
-	if !valid do return "", 0, {kind = .Invalid_JID}
+	if !valid {
+		return "", 0, {kind = .Invalid_JID}
+	}
 
 	return local, device, {}
 }
@@ -898,7 +914,9 @@ pairing_device_handle :: proc(
 		return 0, {kind = .Invalid_Credentials}
 	}
 
-	if iq.tag != "iq" do return 0, {kind = .Invalid_Stanza}
+	if iq.tag != "iq" {
+		return 0, {kind = .Invalid_Stanza}
+	}
 
 	if kind, ok := node_attr(iq, "type"); !ok || kind != "set" {
 		return 0, {kind = .Invalid_Stanza}
@@ -910,7 +928,9 @@ pairing_device_handle :: proc(
 	}
 
 	pair, found := pairing_node_child(iq, "pair-device")
-	if !found do return 0, {kind = .Invalid_Stanza}
+	if !found {
+		return 0, {kind = .Invalid_Stanza}
+	}
 
 	children, children_ok := pair.content.([]Binary_Node)
 	if !children_ok {
@@ -919,7 +939,9 @@ pairing_device_handle :: proc(
 
 	next: Pairing_QR_State
 	defer crypto.zero_explicit(&next, size_of(next))
-	if ref_error := pairing_refs_decode(&next, children); ref_error.kind != .None do return 0, ref_error
+	if ref_error := pairing_refs_decode(&next, children); ref_error.kind != .None {
+		return 0, ref_error
+	}
 
 	attrs := [?]Binary_Node_Attribute{{"to", PAIRING_SERVER}, {"type", "result"}, {"id", id}}
 	written, node_err := binary_node_encode(reply, {tag = "iq", attrs = attrs[:]})
@@ -939,7 +961,9 @@ pairing_device_handle :: proc(
 
 pairing_refs_decode :: proc(next: ^Pairing_QR_State, children: []Binary_Node) -> Pairing_Error {
 	for child in children {
-		if child.tag != "ref" do continue
+		if child.tag != "ref" {
+			continue
+		}
 
 		if next.count == MAX_PAIRING_REFS {
 			return {kind = .Too_Many_Refs}
@@ -1002,7 +1026,9 @@ pairing_qr_next :: proc(
 	}
 
 	duration := state.subsequent_timeout
-	if state.next == 0 do duration = state.initial_timeout
+	if state.next == 0 {
+		duration = state.initial_timeout
+	}
 
 	state.next += 1
 	state.next_at = time.time_add(now, duration)
@@ -1035,26 +1061,38 @@ pairing_success_handle :: proc(
 	}
 
 	id, pair, identity_node, device_node, stanza_error := pairing_success_stanza_decode(iq)
-	if stanza_error.kind != .None do return 0, stanza_error
+	if stanza_error.kind != .None {
+		return 0, stanza_error
+	}
 	identity_bytes, has_bytes := identity_node.content.([]u8)
 	if !has_bytes || len(identity_bytes) > MAX_PAIRING_IDENTITY_SIZE {
 		return 0, {kind = .Invalid_Identity}
 	}
 
 	wrapper, wrapper_error := pairing_success_hmac_decode(identity_bytes, credentials)
-	if wrapper_error.kind != .None do return 0, wrapper_error
+	if wrapper_error.kind != .None {
+		return 0, wrapper_error
+	}
 	identity, details, identity_error := pairing_success_signed_identity_decode(wrapper)
-	if identity_error.kind != .None do return 0, identity_error
+	if identity_error.kind != .None {
+		return 0, identity_error
+	}
 	next := Paired_Account {
 		valid            = true,
 		hosted           = wrapper.account_type == 1,
 		key_index        = details.key_index,
 		signature_policy = .Current,
 	}
-	if metadata_error := pairing_success_metadata_decode(&next, pair, device_node); metadata_error.kind != .None do return 0, metadata_error
-	if signature_error := pairing_success_signatures_prepare(&next, credentials, identity, details); signature_error.kind != .None do return 0, signature_error
+	if metadata_error := pairing_success_metadata_decode(&next, pair, device_node); metadata_error.kind != .None {
+		return 0, metadata_error
+	}
+	if signature_error := pairing_success_signatures_prepare(&next, credentials, identity, details); signature_error.kind != .None {
+		return 0, signature_error
+	}
 	written, reply_error := pairing_success_reply_encode(reply, &next, id)
-	if reply_error.kind != .None do return 0, reply_error
+	if reply_error.kind != .None {
+		return 0, reply_error
+	}
 
 	account^ = next
 	return written, {}
@@ -1069,7 +1107,9 @@ pairing_success_stanza_decode :: proc(
 	^Binary_Node,
 	Pairing_Error,
 ) {
-	if iq.tag != "iq" do return "", nil, nil, nil, {kind = .Invalid_Stanza}
+	if iq.tag != "iq" {
+		return "", nil, nil, nil, {kind = .Invalid_Stanza}
+	}
 
 	id, present := node_attr(iq, "id")
 	if !present || id == "" {
@@ -1077,7 +1117,9 @@ pairing_success_stanza_decode :: proc(
 	}
 
 	pair, found := pairing_node_child(iq, "pair-success")
-	if !found do return "", nil, nil, nil, {kind = .Invalid_Stanza}
+	if !found {
+		return "", nil, nil, nil, {kind = .Invalid_Stanza}
+	}
 
 	identity_node, has_identity := pairing_node_child(pair^, "device-identity")
 	device_node, has_device := pairing_node_child(pair^, "device")
@@ -1158,7 +1200,9 @@ pairing_success_signed_identity_decode :: proc(
 
 pairing_success_metadata_decode :: proc(next: ^Paired_Account, pair, device_node: ^Binary_Node) -> Pairing_Error {
 	jid, has_jid := node_attr(device_node^, "jid")
-	if !has_jid do return {kind = .Invalid_JID}
+	if !has_jid {
+		return {kind = .Invalid_JID}
+	}
 
 	if _, _, jid_err := pairing_jid_decode(jid); jid_err.kind != .None {
 		return jid_err
@@ -1201,7 +1245,9 @@ pairing_success_signatures_prepare :: proc(
 	copy(account_key[:], identity.account_signature_key)
 	signed: [2 + MAX_PAIRING_DETAILS_SIZE + 32 + 32]u8
 	account_domain, domain_error := paired_account_signature_domain(.Current, details)
-	if domain_error.kind != .None do return domain_error
+	if domain_error.kind != .None {
+		return domain_error
+	}
 	signed[0], signed[1] = 6, account_domain
 	copy(signed[2:], identity.details)
 	copy(signed[2 + len(identity.details):], identity_public[:])
@@ -1269,7 +1315,9 @@ pairing_ref_valid :: proc(ref: string) -> bool {
 	}
 
 	for c in ref {
-		if c <= ' ' || c > '~' || c == ',' do return false
+		if c <= ' ' || c > '~' || c == ',' {
+			return false
+		}
 	}
 
 	return true
@@ -1326,7 +1374,9 @@ paired_account_signature_domain :: proc(
 	case .Legacy:
 		return 0, {}
 	case .Current:
-		if details.device_type > 1 do return 0, {kind = .Invalid_Account_Type}
+		if details.device_type > 1 {
+			return 0, {kind = .Invalid_Account_Type}
+		}
 		return details.device_type == 1 ? 5 : 0, {}
 	case:
 		return 0, {kind = .Invalid_Account_Type}
@@ -1341,7 +1391,9 @@ paired_account_signatures_validate :: proc(
 	identity_public := signal_curve_public(credentials.identity_private)
 	message: [2 + MAX_PAIRING_DETAILS_SIZE + 64]u8
 	account_domain, domain_error := paired_account_signature_domain(account.signature_policy, details)
-	if domain_error.kind != .None do return domain_error
+	if domain_error.kind != .None {
+		return domain_error
+	}
 	message[0], message[1] = 6, account_domain
 	copy(message[2:], account.details[:account.details_size])
 	copy(message[2 + account.details_size:], identity_public[:])
@@ -1354,7 +1406,9 @@ paired_account_signatures_validate :: proc(
 	}
 
 	message[1] = 1
-	if account.signature_policy == .Legacy && account.hosted do message[1] = 6
+	if account.signature_policy == .Legacy && account.hosted {
+		message[1] = 6
+	}
 	copy(message[2 + account.details_size + 32:], account.account_signature_key[:])
 	if err := signal_curve_verify(
 		identity_public,
@@ -1502,7 +1556,9 @@ qr_encode :: proc(text: string) -> (code: QR_Code, err: QR_Error) {
 		return {}, .Text_Oversized
 	}
 
-	if !utf8.valid_string(text) do return {}, .Invalid_UTF8
+	if !utf8.valid_string(text) {
+		return {}, .Invalid_UTF8
+	}
 
 	version := 1
 
@@ -1514,7 +1570,9 @@ qr_encode :: proc(text: string) -> (code: QR_Code, err: QR_Error) {
 		}
 	}
 
-	if version > 40 do return {}, .Text_Oversized
+	if version > 40 {
+		return {}, .Text_Oversized
+	}
 
 	code.version, code.size = version, version * 4 + 17
 	data, interleaved: [3706]u8
@@ -1525,7 +1583,9 @@ qr_encode :: proc(text: string) -> (code: QR_Code, err: QR_Error) {
 	bit := 0
 
 	for right := code.size - 1; right >= 1; right -= 2 {
-		if right == 6 do right = 5
+		if right == 6 {
+			right = 5
+		}
 
 		for vert in 0 ..< code.size {
 			for j in 0 ..< 2 {
@@ -1566,7 +1626,9 @@ qr_data_encode :: proc(data: []u8, text: string, version: int) {
 	bits := 0
 	qr_bits_write(data, &bits, 4, 4) // Byte-mode indicator.
 	qr_bits_write(data, &bits, cast(u32)len(text), version < 10 ? 8 : 16)
-	for i in 0 ..< len(text) do qr_bits_write(data, &bits, cast(u32)text[i], 8)
+	for i in 0 ..< len(text) {
+		qr_bits_write(data, &bits, cast(u32)text[i], 8)
+	}
 	capacity := qr_data_words(version) * 8
 	qr_bits_write(data, &bits, 0, min(4, capacity - bits))
 	qr_bits_write(data, &bits, 0, (8 - bits % 8) % 8)
@@ -1616,7 +1678,9 @@ qr_terminal_render :: proc(code: ^QR_Code, allocator := context.allocator) -> (s
 	}
 
 	buffer, ae := make([]u8, size, allocator)
-	if ae != nil do return "", .Allocation_Failed
+	if ae != nil {
+		return "", .Allocation_Failed
+	}
 
 	at := 0
 
@@ -1660,7 +1724,9 @@ qr_raw_modules :: proc(version: int) -> int {
 	if version >= 2 {
 		n := version / 7 + 2
 		result -= (25 * n - 10) * n - 55
-		if version >= 7 do result -= 36
+		if version >= 7 {
+			result -= 36
+		}
 	}
 
 	return result
@@ -1707,14 +1773,20 @@ qr_interleave :: proc(data: []u8, version: int, result: []u8) {
 
 		for value in data[at:at + size] {
 			factor := value ~ ecc[0]
-			for j in 0 ..< ecc_size - 1 do ecc[j] = ecc[j + 1]
+			for j in 0 ..< ecc_size - 1 {
+				ecc[j] = ecc[j + 1]
+			}
 			ecc[ecc_size - 1] = 0
-			for j in 0 ..< ecc_size do ecc[j] ~= qr_multiply(divisor[j], factor)
+			for j in 0 ..< ecc_size {
+				ecc[j] ~= qr_multiply(divisor[j], factor)
+			}
 		}
 
 		for j, k := 0, block; j < size; j, k = j + 1, k + blocks {
 			index := k
-			if j == short_data_size do index -= short_blocks
+			if j == short_data_size {
+				index -= short_blocks
+			}
 
 			result[index] = data[at + j]
 		}
@@ -1785,7 +1857,9 @@ qr_functions :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]bool
 
 	if code.version >= 7 {
 		remainder := code.version
-		for _ in 0 ..< 12 do remainder = (remainder << 1) ~ ((remainder >> 11) * 0x1f25)
+		for _ in 0 ..< 12 {
+			remainder = (remainder << 1) ~ ((remainder >> 11) * 0x1f25)
+		}
 		bits := code.version << 12 | remainder
 
 		for i in 0 ..< 18 {
@@ -1799,13 +1873,19 @@ qr_functions :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]bool
 qr_format :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]bool, mask: int) {
 	data := 1 << 3 | mask // ECC-L format selector = 1.
 	remainder := data
-	for _ in 0 ..< 10 do remainder = (remainder << 1) ~ ((remainder >> 9) * 0x537)
+	for _ in 0 ..< 10 {
+		remainder = (remainder << 1) ~ ((remainder >> 9) * 0x537)
+	}
 	bits := (data << 10 | remainder) ~ 0x5412
-	for i in 0 ..< 6 do qr_set_function(code, functions, 8, i, (bits >> cast(uint)i) & 1 != 0)
+	for i in 0 ..< 6 {
+		qr_set_function(code, functions, 8, i, (bits >> cast(uint)i) & 1 != 0)
+	}
 	qr_set_function(code, functions, 8, 7, (bits >> 6) & 1 != 0)
 	qr_set_function(code, functions, 8, 8, (bits >> 7) & 1 != 0)
 	qr_set_function(code, functions, 7, 8, (bits >> 8) & 1 != 0)
-	for i in 9 ..< 15 do qr_set_function(code, functions, 14 - i, 8, (bits >> cast(uint)i) & 1 != 0)
+	for i in 9 ..< 15 {
+		qr_set_function(code, functions, 14 - i, 8, (bits >> cast(uint)i) & 1 != 0)
+	}
 
 	for i in 0 ..< 8 {
 		qr_set_function(code, functions, code.size - 1 - i, 8, (bits >> cast(uint)i) & 1 != 0)
@@ -1821,7 +1901,9 @@ qr_mask :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]bool, mas
 	for y in 0 ..< code.size {
 		for x in 0 ..< code.size {
 			index := y * code.size + x
-			if functions[index] do continue
+			if functions[index] {
+				continue
+			}
 
 			invert := false
 
@@ -1859,7 +1941,9 @@ qr_penalty :: proc(code: ^QR_Code) -> int {
 
 			for moving in 0 ..< code.size {
 				x, y := moving, fixed
-				if direction == 1 do x, y = y, x
+				if direction == 1 {
+					x, y = y, x
+				}
 
 				current := qr_module(code, x, y)
 
@@ -1897,7 +1981,9 @@ qr_penalty :: proc(code: ^QR_Code) -> int {
 	for y in 0 ..< code.size {
 		for x in 0 ..< code.size {
 			c := qr_module(code, x, y)
-			if c do dark += 1
+			if c {
+				dark += 1
+			}
 
 			if x + 1 < code.size &&
 			   y + 1 < code.size &&
@@ -1916,9 +2002,13 @@ qr_penalty :: proc(code: ^QR_Code) -> int {
 }
 qr_history_add :: proc(history: ^[7]int, run, size: int) {
 	value := run
-	if history[0] == 0 do value += size
+	if history[0] == 0 {
+		value += size
+	}
 
-	for i := 6; i > 0; i -= 1 do history[i] = history[i - 1]
+	for i := 6; i > 0; i -= 1 {
+		history[i] = history[i - 1]
+	}
 	history[0] = value
 }
 qr_history_patterns :: proc(h: ^[7]int) -> int {
@@ -1987,7 +2077,9 @@ web_version_discover :: proc(
 		settings.max_body_size = WA_WEB_VERSION_BODY_MAX
 	}
 	get := fetcher.get
-	if get == nil do get = version_fetch_http
+	if get == nil {
+		get = version_fetch_http
+	}
 
 	result.version = default_payload_config().version
 	result.source = .Pinned
@@ -2045,25 +2137,43 @@ web_version_revision :: proc(src: []u8) -> (revision: u32, err: Version_Error) {
 
 	for i in 0 ..= last {
 		matches, escaped := revision_key_at(src, i)
-		if !matches do continue
+		if !matches {
+			continue
+		}
 		value, ok, invalid := revision_digits(src, i + len(key), escaped)
-		if invalid do return 0, {kind = .Invalid_Version}
-		if !ok do continue
-		if found && revision != value do return 0, {kind = .Invalid_Version}
+		if invalid {
+			return 0, {kind = .Invalid_Version}
+		}
+		if !ok {
+			continue
+		}
+		if found && revision != value {
+			return 0, {kind = .Invalid_Version}
+		}
 		revision = value
 		found = true
 	}
 
-	if found do return revision, {}
+	if found {
+		return revision, {}
+	}
 
 	return 0, {kind = .Missing_Version}
 }
 
 revision_key_at :: proc(src: []u8, i: int) -> (matches, escaped: bool) {
 	key := CLIENT_REVISION_KEY
-	if i < 1 || i + len(key) > len(src) do return false, false
-	if src[i - 1] != '"' do return false, false
-	for c, n in key do if src[i + n] != cast(u8)c do return false, false
+	if i < 1 || i + len(key) > len(src) {
+		return false, false
+	}
+	if src[i - 1] != '"' {
+		return false, false
+	}
+	for c, n in key {
+		if src[i + n] != cast(u8)c {
+			return false, false
+		}
+	}
 	after := i + len(key)
 
 	if after < len(src) && src[after] != '"' && src[after] != '\\' {
@@ -2072,7 +2182,9 @@ revision_key_at :: proc(src: []u8, i: int) -> (matches, escaped: bool) {
 
 	escaped = i >= 2 && src[i - 2] == '\\'
 	// More escaping layers are outside this literal format.
-	if escaped && i >= 3 && src[i - 3] == '\\' do return false, false
+	if escaped && i >= 3 && src[i - 3] == '\\' {
+		return false, false
+	}
 
 	return true, escaped
 }
@@ -2081,26 +2193,42 @@ revision_digits :: proc(src: []u8, at: int, escaped: bool) -> (value: u32, ok, i
 	i := at
 
 	if escaped {
-		if i >= len(src) || src[i] != '\\' do return 0, false, true
+		if i >= len(src) || src[i] != '\\' {
+			return 0, false, true
+		}
 		i += 1
 	}
 
-	if i >= len(src) || src[i] != '"' do return 0, false, true
+	if i >= len(src) || src[i] != '"' {
+		return 0, false, true
+	}
 	i += 1
-	for i < len(src) && revision_space(src[i]) do i += 1
-	if i >= len(src) || src[i] != ':' do return 0, false, false
+	for i < len(src) && revision_space(src[i]) {
+		i += 1
+	}
+	if i >= len(src) || src[i] != ':' {
+		return 0, false, false
+	}
 	i += 1
-	for i < len(src) && revision_space(src[i]) do i += 1
+	for i < len(src) && revision_space(src[i]) {
+		i += 1
+	}
 	start := i
 
 	for i < len(src) && i - start < 10 && is_digit(src[i]) {
 		i += 1
 	}
 
-	if i == start do return 0, false, true
-	if i < len(src) && is_digit(src[i]) do return 0, false, true
+	if i == start {
+		return 0, false, true
+	}
+	if i < len(src) && is_digit(src[i]) {
+		return 0, false, true
+	}
 	end := i
-	for i < len(src) && revision_space(src[i]) do i += 1
+	for i < len(src) && revision_space(src[i]) {
+		i += 1
+	}
 
 	if i >= len(src) || (src[i] != ',' && src[i] != '}') {
 		return 0, false, true // Numeric prefixes and incomplete literals are refused.
@@ -2131,15 +2259,21 @@ web_version_parse :: proc(text: string) -> (version: [3]u32, err: Version_Error_
 
 		if component < 2 {
 			dot := strings.index_byte(text[at:], '.')
-			if dot < 0 do return {}, .Invalid_Version
+			if dot < 0 {
+				return {}, .Invalid_Version
+			}
 
 			end = at + dot
 		}
 
-		if end == at do return {}, .Invalid_Version
-
-		for c in text[at:end] do if !is_digit(c) {
+		if end == at {
 			return {}, .Invalid_Version
+		}
+
+		for c in text[at:end] {
+			if !is_digit(c) {
+				return {}, .Invalid_Version
+			}
 		}
 
 		n, valid := strconv.parse_u64(text[at:end], 10)
@@ -2152,7 +2286,9 @@ web_version_parse :: proc(text: string) -> (version: [3]u32, err: Version_Error_
 		at = end + 1
 	}
 
-	if version == ([3]u32{}) do return {}, .Invalid_Version
+	if version == ([3]u32{}) {
+		return {}, .Invalid_Version
+	}
 
 	return version, .None
 }

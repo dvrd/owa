@@ -121,7 +121,9 @@ socket_message_node_process :: proc(socket: ^Socket, node: Binary_Node) -> (Sock
 		return {}, err
 	}
 
-	if receipt_error := socket_message_receipts_send(socket, node, event, history_receipt); receipt_error.kind != .None do return {}, receipt_error
+	if receipt_error := socket_message_receipts_send(socket, node, event, history_receipt); receipt_error.kind != .None {
+		return {}, receipt_error
+	}
 
 	return event, {}
 }
@@ -175,7 +177,9 @@ socket_process_message :: proc(
 	Socket_Error,
 ) {
 	group, participant, id, route_error := socket_message_route_decode(node)
-	if route_error.kind != .None do return {}, route_error
+	if route_error.kind != .None {
+		return {}, route_error
+	}
 
 	// Preflight every encrypted child before deduplication, self filtering or
 	// staged ratchet work. Mixed supported/unsupported content is indivisible.
@@ -197,7 +201,9 @@ socket_process_message :: proc(
 	}
 
 	name, name_error := socket_inbox_key_store(&candidate, group, participant, id)
-	if name_error.kind != .None do return {}, name_error
+	if name_error.kind != .None {
+		return {}, name_error
+	}
 
 	defer delete(name)
 	if _, found := state_store_get(&candidate, .Processed_Message, name); found {
@@ -215,7 +221,9 @@ socket_process_message :: proc(
 		return {}, socket_message_processed_commit(socket, &candidate, name)
 	}
 	var_payload, payload_error := socket_message_payload_decrypt(socket, &candidate, node, group, participant)
-	if payload_error.kind != .None do return {}, payload_error
+	if payload_error.kind != .None {
+		return {}, payload_error
+	}
 	defer if var_payload != nil {
 		crypto.zero_explicit(raw_data(var_payload), len(var_payload))
 		delete(var_payload)
@@ -233,7 +241,9 @@ socket_process_message :: proc(
 		own,
 		history_receipt,
 	)
-	if handled do return {}, control_error
+	if handled {
+		return {}, control_error
+	}
 	return socket_message_event_commit(socket, &candidate, node, name, group, participant, id, var_payload, own)
 }
 
@@ -318,7 +328,9 @@ socket_message_cipher_decrypt :: proc(
 		}
 	} else {
 		n, e := socket_pairwise_decrypt(staged, participant, kind, cipher, plaintext)
-		if e.kind != .None do return 0, e
+		if e.kind != .None {
+			return 0, e
+		}
 
 		count = n
 	}
@@ -398,16 +410,22 @@ socket_message_child_decrypt :: proc(
 		cipher,
 		plaintext,
 	)
-	if decrypt_error.kind != .None do return decrypt_error
+	if decrypt_error.kind != .None {
+		return decrypt_error
+	}
 	unpadded, e := socket_message_unpad(plaintext[:count])
-	if e.kind != .None do return e
+	if e.kind != .None {
+		return e
+	}
 
 	parsed, pe := text_message_decode(unpadded)
 	if pe != .None {
 		return {kind = .Message_Failed, message = pe}
 	}
 
-	if distribution_error := socket_message_distribution_install(staged, parsed, group, signal_participant, kind); distribution_error.kind != .None do return distribution_error
+	if distribution_error := socket_message_distribution_install(staged, parsed, group, signal_participant, kind); distribution_error.kind != .None {
+		return distribution_error
+	}
 
 	// Distribution-only/control payloads have no business message. Unknown
 	// payloads are retained for the application, including media/protocol.
@@ -430,11 +448,15 @@ MESSAGE_NACK_UNRECOGNIZED_ENCRYPTION: u32 : 490
 MESSAGE_NACK_MISSING_SECRET: u32 : 495
 socket_message_encryption_nack :: proc(node: Binary_Node) -> u32 {
 	children, ok := node.content.([]Binary_Node)
-	if !ok do return 0 // Shape validation remains with the ordinary decoder.
+	if !ok {
+		return 0 // Shape validation remains with the ordinary decoder.
+	}
 	reason: u32
 
 	for child in children {
-		if child.tag != "enc" do continue
+		if child.tag != "enc" {
+			continue
+		}
 		kind, _ := node_attr(child, "type")
 
 		switch kind {
@@ -477,7 +499,9 @@ socket_message_payload_decrypt :: proc(
 
 	defer delete(signal_participant)
 	children, ok := node.content.([]Binary_Node)
-	if !ok do return nil, {kind = .Protocol_Error}
+	if !ok {
+		return nil, {kind = .Protocol_Error}
+	}
 
 	var_payload: []u8
 	success := false
@@ -489,7 +513,9 @@ socket_message_payload_decrypt :: proc(
 	// same stanza regardless of the order supplied by the server.
 	for pass in 0 ..< 2 {
 		for child in children {
-			if child.tag != "enc" do continue
+			if child.tag != "enc" {
+				continue
+			}
 
 			kind, _ := node_attr(child, "type")
 
@@ -497,9 +523,13 @@ socket_message_payload_decrypt :: proc(
 				continue
 			}
 
-			if pass == 1 && kind != "skmsg" do continue
+			if pass == 1 && kind != "skmsg" {
+				continue
+			}
 
-			if child_error := socket_message_child_decrypt(staged, child, group, participant, signal_participant, kind, &var_payload); child_error.kind != .None do return nil, child_error
+			if child_error := socket_message_child_decrypt(staged, child, group, participant, signal_participant, kind, &var_payload); child_error.kind != .None {
+				return nil, child_error
+			}
 		}
 	}
 	success = true
@@ -556,18 +586,24 @@ socket_message_event_commit :: proc(
 	timestamp: u64
 	if raw, have := node_attr(node, "t"); have {
 		value, valid := strconv.parse_u64(raw)
-		if !valid do return {}, {kind = .Protocol_Error}
+		if !valid {
+			return {}, {kind = .Protocol_Error}
+		}
 
 		timestamp = value
 	}
 
 	offline, _ := node_attr(node, "offline")
 	message, message_error := socket_message_new(group, participant, id, var_payload, own, timestamp, offline != "")
-	if message_error.kind != .None do return {}, message_error
+	if message_error.kind != .None {
+		return {}, message_error
+	}
 
 	success := false
 	defer {
-		if !success do socket_message_destroy(message)
+		if !success {
+			socket_message_destroy(message)
+		}
 	}
 	if e := socket_inbox_stage(candidate, name, message); e.kind != .None {
 		return {}, e
@@ -599,7 +635,9 @@ socket_pairwise_decrypt :: proc(socket: ^Socket, jid, kind: string, wire, dst: [
 	defer delete(session_name)
 	trusted: [32]u8
 	pinned, state_error := socket_pairwise_state_load(socket, address, session, &trusted)
-	if state_error.kind != .None do return 0, state_error
+	if state_error.kind != .None {
+		return 0, state_error
+	}
 
 	local := Signal_Recipient_Keys {
 		identity_private      = socket.auth.credentials.identity_private,
@@ -639,8 +677,12 @@ socket_pairwise_decrypt :: proc(socket: ^Socket, jid, kind: string, wire, dst: [
 		)
 	}
 
-	if var_error.kind != .None do return 0, var_error
-	if stage_error := socket_pairwise_decryption_stage(socket, address, session_name, session, &trusted, pinned, consumed, consumed_id); stage_error.kind != .None do return 0, stage_error
+	if var_error.kind != .None {
+		return 0, var_error
+	}
+	if stage_error := socket_pairwise_decryption_stage(socket, address, session_name, session, &trusted, pinned, consumed, consumed_id); stage_error.kind != .None {
+		return 0, stage_error
+	}
 
 	return count, {}
 }
@@ -767,15 +809,21 @@ socket_pairwise_prekey_open :: proc(
 		return 0, false, 0, {kind = .Identity_Changed}
 	}
 
-	if !pinned do trusted^ = peek.identity_public
+	if !pinned {
+		trusted^ = peek.identity_public
+	}
 
 	if session.initialized && session.base_public != peek.base_public {
-		if archive_error := socket_pairwise_prekey_archive_select(socket, address, session, session_name, peek, trusted); archive_error.kind != .None do return 0, false, 0, archive_error
+		if archive_error := socket_pairwise_prekey_archive_select(socket, address, session, session_name, peek, trusted); archive_error.kind != .None {
+			return 0, false, 0, archive_error
+		}
 	}
 
 	fresh := !session.initialized
 	if fresh && peek.has_prekey {
-		if key_error := socket_pairwise_one_time_prekey_load(socket, peek, local); key_error.kind != .None do return 0, false, 0, key_error
+		if key_error := socket_pairwise_one_time_prekey_load(socket, peek, local); key_error.kind != .None {
+			return 0, false, 0, key_error
+		}
 	}
 
 	n, _, de := signal_session_decrypt_prekey(session, dst, wire, local^, trusted^)
@@ -798,7 +846,9 @@ socket_pairwise_whisper_open :: proc(
 	int,
 	Socket_Error,
 ) {
-	if !pinned do return 0, {kind = .Identity_Changed}
+	if !pinned {
+		return 0, {kind = .Identity_Changed}
+	}
 
 	n, e := signal_session_decrypt(session, dst, wire, trusted^)
 	if e.kind != .None {
@@ -900,8 +950,10 @@ socket_message_unpad :: proc(message: []u8) -> ([]u8, Socket_Error) {
 		return nil, {kind = .Protocol_Error}
 	}
 
-	for byte in message[len(message) - count:] do if cast(int)byte != count {
-		return nil, {kind = .Protocol_Error}
+	for byte in message[len(message) - count:] {
+		if cast(int)byte != count {
+			return nil, {kind = .Protocol_Error}
+		}
 	}
 
 	return message[:len(message) - count], {}
@@ -932,10 +984,14 @@ socket_store_commit :: proc(socket: ^Socket, next: ^State_Store) -> Socket_Error
 }
 
 socket_inbox_id_valid :: proc(id: string) -> bool {
-	if len(id) == 0 || len(id) > 128 do return false
-
-	for byte in transmute([]u8)id do if byte < 33 || byte > 126 || byte == '|' {
+	if len(id) == 0 || len(id) > 128 {
 		return false
+	}
+
+	for byte in transmute([]u8)id {
+		if byte < 33 || byte > 126 || byte == '|' {
+			return false
+		}
 	}
 
 	return true
@@ -951,8 +1007,10 @@ socket_receive_group_valid :: proc(jid: string) -> bool {
 		return false
 	}
 
-	for byte in transmute([]u8)user do if !is_digit(byte) && byte != '-' {
-		return false
+	for byte in transmute([]u8)user {
+		if !is_digit(byte) && byte != '-' {
+			return false
+		}
 	}
 
 	return true
@@ -970,7 +1028,9 @@ socket_inbox_key_store :: proc(store: ^State_Store, group, participant, id: stri
 	}
 
 	canonical, e := socket_signal_address_store(store, participant)
-	if e.kind != .None do return "", e
+	if e.kind != .None {
+		return "", e
+	}
 
 	defer delete(canonical)
 
@@ -989,10 +1049,14 @@ socket_sender_is_self_store :: proc(store: ^State_Store, auth: ^Auth_State, jid:
 	}
 
 	user, _, e := pairing_jid_decode(jid)
-	if e.kind != .None do return false
+	if e.kind != .None {
+		return false
+	}
 
 	domain := jid[strings.index_byte(jid, '@') + 1:]
-	if domain == "c.us" do domain = "s.whatsapp.net"
+	if domain == "c.us" {
+		domain = "s.whatsapp.net"
+	}
 
 	own := cast(string)auth.account.jid[:auth.account.jid_size]
 	values := [2]string{own, ""}
@@ -1003,7 +1067,9 @@ socket_sender_is_self_store :: proc(store: ^State_Store, auth: ^Auth_State, jid:
 
 	for value in values {
 		own_user, _, oe := pairing_jid_decode(value)
-		if oe.kind != .None do continue
+		if oe.kind != .None {
+			continue
+		}
 
 		own_domain := value[strings.index_byte(value, '@') + 1:]
 
@@ -1018,7 +1084,9 @@ socket_sender_is_self_store :: proc(store: ^State_Store, auth: ^Auth_State, jid:
 
 	if domain == "lid" {
 		canonical, ce := socket_signal_address_store(store, jid)
-		if ce.kind != .None do return false
+		if ce.kind != .None {
+			return false
+		}
 
 		defer delete(canonical)
 		canonical_user, _, cpe := pairing_jid_decode(canonical)
@@ -1053,7 +1121,9 @@ socket_message_new :: proc(
 	message.allocator = a
 	success := false
 	defer {
-		if !success do socket_message_destroy(message)
+		if !success {
+			socket_message_destroy(message)
+		}
 	}
 	group_copy, ge := strings.clone(group, a)
 	if ge != nil {
@@ -1138,7 +1208,9 @@ socket_message_complete :: proc(socket: ^Socket, message: ^Socket_Message) -> So
 	}
 
 	name, name_error := socket_inbox_key(socket, message.group, message.participant, message.id)
-	if name_error.kind != .None do return name_error
+	if name_error.kind != .None {
+		return name_error
+	}
 
 	defer delete(name)
 	candidate: State_Store
@@ -1173,15 +1245,21 @@ socket_inbox_restore :: proc(socket: ^Socket) -> Socket_Error {
 	success := false
 	defer {
 		if !success {
-			for message in pending do socket_message_destroy(message)
+			for message in pending {
+				socket_message_destroy(message)
+			}
 		}
 	}
 
 	for record in socket.store.records {
-		if record.kind != .Inbox_Message do continue
+		if record.kind != .Inbox_Message {
+			continue
+		}
 
 		message, message_error := socket_inbox_record_restore(socket, record)
-		if message_error.kind != .None do return message_error
+		if message_error.kind != .None {
+			return message_error
+		}
 
 		_, ae := append(&pending, message)
 
@@ -1248,7 +1326,9 @@ socket_inbox_record_restore :: proc(socket: ^Socket, record: State_Record) -> (^
 
 	message, me := socket_message_new(group, participant, id, raw, own == "1", stamp, offline == "1")
 	binary_document_destroy(&doc)
-	if me.kind != .None do return nil, me
+	if me.kind != .None {
+		return nil, me
+	}
 
 	return message, {}
 }
@@ -1263,7 +1343,9 @@ socket_cleanup_consumed_prekeys :: proc(socket: ^Socket) -> Socket_Error {
 	changed := false
 
 	for record in socket.store.records {
-		if record.kind != .Consumed_Prekey do continue
+		if record.kind != .Consumed_Prekey {
+			continue
+		}
 
 		id, ok := strconv.parse_u64(record.name)
 
@@ -1276,7 +1358,9 @@ socket_cleanup_consumed_prekeys :: proc(socket: ^Socket) -> Socket_Error {
 		}
 
 		e := prekey_store_remove_consumed(socket.prekeys, cast(u32)id)
-		if e.kind == .Pending_Upload_Exists do continue
+		if e.kind == .Pending_Upload_Exists {
+			continue
+		}
 
 		if e.kind != .None {
 			return {kind = .Prekey_Failed, prekey = e}
@@ -1595,7 +1679,9 @@ socket_delivery_receipt :: proc(socket: ^Socket, node: Binary_Node) -> Socket_Er
 	category, _ := node_attr(node, "category")
 	kind := ""
 	author := from
-	if participant != "" do author = participant
+	if participant != "" {
+		author = participant
+	}
 
 	if category == "peer" {
 		kind = "peer_msg"
@@ -1648,7 +1734,9 @@ socket_delivery_receipt :: proc(socket: ^Socket, node: Binary_Node) -> Socket_Er
 socket_processed_stamp :: proc() -> [8]u8 {
 	value := cast(u64)max(0, time.to_unix_seconds(time.now()))
 	stamp: [8]u8
-	for i in 0 ..< 8 do stamp[i] = cast(u8)(value >> cast(uint)(56 - 8 * i))
+	for i in 0 ..< 8 {
+		stamp[i] = cast(u8)(value >> cast(uint)(56 - 8 * i))
+	}
 
 	return stamp
 }
@@ -1672,7 +1760,9 @@ socket_history_notification :: proc(message: []u8, depth: int) -> bool {
 
 	for at < len(message) {
 		field, e := protobuf_field_read(message, &at)
-		if e != .None do return false
+		if e != .None {
+			return false
+		}
 
 		switch field.number {
 		case 12:
@@ -1692,7 +1782,9 @@ socket_history_notification :: proc(message: []u8, depth: int) -> bool {
 	}
 
 	if protocol != nil {
-		if wrapper != nil do return false
+		if wrapper != nil {
+			return false
+		}
 
 		return socket_protocol_has_history(protocol)
 	}
@@ -1703,7 +1795,9 @@ socket_history_notification :: proc(message: []u8, depth: int) -> bool {
 
 		for at < len(wrapper) {
 			field, e := protobuf_field_read(wrapper, &at)
-			if e != .None do return false
+			if e != .None {
+				return false
+			}
 
 			if field.number == wrapper_field {
 				if field.wire_type != 2 || inner != nil {
@@ -1728,7 +1822,9 @@ socket_protocol_has_history :: proc(protocol: []u8) -> bool {
 
 	for at < len(protocol) {
 		field, e := protobuf_field_read(protocol, &at)
-		if e != .None do return false
+		if e != .None {
+			return false
+		}
 
 		if field.number == 6 {
 			if field.wire_type != 2 || found {
@@ -1751,10 +1847,14 @@ socket_history_receipt :: proc(socket: ^Socket, node: Binary_Node) -> Socket_Err
 	}
 
 	user, _, e := pairing_jid_decode(from)
-	if e.kind != .None do return {kind = .Protocol_Error}
+	if e.kind != .None {
+		return {kind = .Protocol_Error}
+	}
 
 	domain := from[strings.index_byte(from, '@') + 1:]
-	if domain == "c.us" do domain = "s.whatsapp.net"
+	if domain == "c.us" {
+		domain = "s.whatsapp.net"
+	}
 
 	destination := fmt.aprintf("%s@%s", user, domain)
 	defer delete(destination)
@@ -1881,7 +1981,9 @@ socket_retry_outgoing :: proc(socket: ^Socket, receipt: Binary_Node) -> Socket_E
 	}
 
 	content, found := state_store_get(socket.store, .Outbound_Content, id)
-	if !found do return {}
+	if !found {
+		return {}
+	}
 
 	doc, decoded := binary_node_decode(content)
 
@@ -1891,11 +1993,15 @@ socket_retry_outgoing :: proc(socket: ^Socket, receipt: Binary_Node) -> Socket_E
 
 	defer binary_document_destroy(&doc)
 	group, _ := node_attr(doc.root, "to")
-	if from != group do return {kind = .Protocol_Error}
+	if from != group {
+		return {kind = .Protocol_Error}
+	}
 
 	media_type, _ := node_attr(doc.root, "mediatype")
 	protobuf, ok := doc.root.content.([]u8)
-	if !ok do return {kind = .Protocol_Error}
+	if !ok {
+		return {kind = .Protocol_Error}
+	}
 
 	count_name := fmt.aprintf("out:%s|%s", id, participant)
 	defer delete(count_name)
@@ -1916,7 +2022,9 @@ socket_retry_outgoing :: proc(socket: ^Socket, receipt: Binary_Node) -> Socket_E
 		return error
 	}
 
-	if archive_error := socket_retry_session_archive(socket, participant); archive_error.kind != .None do return archive_error
+	if archive_error := socket_retry_session_archive(socket, participant); archive_error.kind != .None {
+		return archive_error
+	}
 
 	new_id, err := socket_send_group(socket, group, protobuf, media_type, id, participant)
 	delete(new_id)
@@ -1926,7 +2034,9 @@ socket_retry_outgoing :: proc(socket: ^Socket, receipt: Binary_Node) -> Socket_E
 
 socket_retry_session_archive :: proc(socket: ^Socket, participant: string) -> Socket_Error {
 	address, address_err := socket_signal_address(socket, participant)
-	if address_err.kind != .None do return address_err
+	if address_err.kind != .None {
+		return address_err
+	}
 
 	defer delete(address)
 
@@ -1959,7 +2069,9 @@ socket_replay_outbox :: proc(socket: ^Socket) -> Socket_Error {
 	}
 
 	for record in socket.store.records {
-		if record.kind != .Outbound_Message do continue
+		if record.kind != .Outbound_Message {
+			continue
+		}
 
 		if e := socket_write(socket, record.data); e.kind != .None {
 			return e
@@ -1983,7 +2095,9 @@ socket_trust_identity :: proc(socket: ^Socket, device_jid: string, identity: [32
 	}
 
 	address, address_error := socket_signal_address(socket, device_jid)
-	if address_error.kind != .None do return address_error
+	if address_error.kind != .None {
+		return address_error
+	}
 
 	defer delete(address)
 	candidate: State_Store

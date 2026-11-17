@@ -12,7 +12,9 @@ Socket_Group_Summary :: struct {
 }
 
 socket_group_summaries_destroy :: proc(groups: ^[dynamic]Socket_Group_Summary) {
-	if groups == nil do return
+	if groups == nil {
+		return
+	}
 
 	for group in groups^ {
 		delete(group.jid)
@@ -26,7 +28,9 @@ socket_group_summaries_destroy :: proc(groups: ^[dynamic]Socket_Group_Summary) {
 // This request matches Baileys' participating-groups IQ. The returned
 // summaries own their strings and remain valid after the response is freed.
 socket_groups_participating :: proc(socket: ^Socket) -> ([dynamic]Socket_Group_Summary, Socket_Error) {
-	if socket == nil do return {}, {kind = .Invalid_Config}
+	if socket == nil {
+		return {}, {kind = .Invalid_Config}
+	}
 
 	id_buffer: [128]u8
 	id := socket_next_id(socket, id_buffer[:])
@@ -40,7 +44,9 @@ socket_groups_participating :: proc(socket: ^Socket) -> ([dynamic]Socket_Group_S
 			},
 		},
 	)
-	if query_error.kind != .None do return {}, query_error
+	if query_error.kind != .None {
+		return {}, query_error
+	}
 
 	defer binary_document_destroy(&doc)
 
@@ -49,17 +55,23 @@ socket_groups_participating :: proc(socket: ^Socket) -> ([dynamic]Socket_Group_S
 
 socket_groups_decode :: proc(root: Binary_Node, request_id: string) -> ([dynamic]Socket_Group_Summary, Socket_Error) {
 	children, children_error := socket_groups_children_decode(root, request_id)
-	if children_error.kind != .None do return {}, children_error
+	if children_error.kind != .None {
+		return {}, children_error
+	}
 
 	groups: [dynamic]Socket_Group_Summary
 	groups.allocator = context.allocator
 	seen := make(map[string]bool)
 	defer delete(seen)
 	success := false
-	defer if !success do socket_group_summaries_destroy(&groups)
+	defer if !success {
+		socket_group_summaries_destroy(&groups)
+	}
 
 	for child in children {
-		if child.tag != "group" do continue
+		if child.tag != "group" {
+			continue
+		}
 
 		if len(groups) >= 10000 {
 			return {}, {kind = .Protocol_Error}
@@ -114,7 +126,9 @@ socket_groups_children_decode :: proc(root: Binary_Node, request_id: string) -> 
 	}
 
 	container, found := pairing_node_child(root, "groups")
-	if !found do return nil, {kind = .Protocol_Error}
+	if !found {
+		return nil, {kind = .Protocol_Error}
+	}
 
 	children, ok := container.content.([]Binary_Node)
 
@@ -132,7 +146,9 @@ Socket_Group :: struct {
 	jid:          string,
 }
 socket_group_destroy :: proc(group: ^Socket_Group) {
-	if group == nil do return
+	if group == nil {
+		return
+	}
 
 	binary_document_destroy(&group.document)
 	delete(group.participants)
@@ -157,13 +173,19 @@ socket_group_metadata :: proc(socket: ^Socket, jid: string) -> (Socket_Group, So
 			content = []Binary_Node{{tag = "query", attrs = []Binary_Node_Attribute{{"request", "interactive"}}}},
 		},
 	)
-	if query_err.kind != .None do return {}, query_err
+	if query_err.kind != .None {
+		return {}, query_err
+	}
 
 	result.document = doc
 	success := false
-	defer if !success do socket_group_destroy(&result)
+	defer if !success {
+		socket_group_destroy(&result)
+	}
 
-	if metadata_error := socket_group_metadata_decode(&result, doc, jid, id); metadata_error.kind != .None do return {}, metadata_error
+	if metadata_error := socket_group_metadata_decode(&result, doc, jid, id); metadata_error.kind != .None {
+		return {}, metadata_error
+	}
 	metadata := result.metadata
 
 	if e := socket_record_group_lid_mappings(socket, metadata); e.kind != .None {
@@ -258,7 +280,9 @@ socket_send_group :: proc(
 		return id, error
 	}
 	metadata, meta_err := socket_group_metadata(socket, group)
-	if meta_err.kind != .None do return "", meta_err
+	if meta_err.kind != .None {
+		return "", meta_err
+	}
 
 	defer socket_group_destroy(&metadata)
 	devices, device_err := socket_group_devices(socket, metadata.metadata)
@@ -266,10 +290,15 @@ socket_send_group :: proc(
 		devices, device_err = socket_group_device_select(socket, devices, only_device)
 	}
 
-	if device_err.kind != .None do return "", device_err
+	if device_err.kind != .None {
+		return "", device_err
+	}
 
 	defer {
-		for jid in devices do delete(jid); delete(devices)
+		for jid in devices {
+			delete(jid)
+		}
+		delete(devices)
 	}
 	mode := metadata.metadata.addressing_mode
 	me := cast(string)socket.auth.account.jid[:socket.auth.account.jid_size]
@@ -277,7 +306,9 @@ socket_send_group :: proc(
 	defer delete(self_lid_copy)
 	if mode == "lid" {
 		lid, found := state_store_get(socket.store, .LID_Mapping, "self")
-		if !found do return "", {kind = .Invalid_State}
+		if !found {
+			return "", {kind = .Invalid_State}
+		}
 
 		// Queries can replace the state store. Keep this copy until the whole
 		// send finishes, beyond the lifetime of this conditional block.
@@ -313,13 +344,19 @@ socket_group_device_select :: proc(
 	Socket_Error,
 ) {
 	if !device_user_valid(only_device, true) {
-		for jid in devices do delete(jid); delete(devices)
+		for jid in devices {
+			delete(jid)
+		}
+		delete(devices)
 		return nil, {kind = .Invalid_Config}
 	}
 
 	requested, e := socket_signal_address(socket, only_device)
 	if e.kind != .None {
-		for jid in devices do delete(jid); delete(devices)
+		for jid in devices {
+			delete(jid)
+		}
+		delete(devices)
 		return nil, e
 	}
 
@@ -329,7 +366,10 @@ socket_group_device_select :: proc(
 		canonical, canonical_err := socket_signal_address(socket, jid)
 
 		if canonical_err.kind != .None {
-			for item in devices do delete(item); delete(devices)
+			for item in devices {
+				delete(item)
+			}
+			delete(devices)
 			return nil, canonical_err
 		}
 
@@ -340,7 +380,9 @@ socket_group_device_select :: proc(
 
 		delete(canonical)
 	}
-	for jid in devices do delete(jid)
+	for jid in devices {
+		delete(jid)
+	}
 	delete(devices)
 	if selected == "" {
 		return nil, {kind = .Invalid_Config}
@@ -425,7 +467,9 @@ Socket_Group_Participants :: struct {
 }
 
 socket_group_participants_destroy :: proc(participants: ^Socket_Group_Participants) {
-	for data in participants.ciphertexts do delete(data)
+	for data in participants.ciphertexts {
+		delete(data)
+	}
 	delete(participants.ciphertexts)
 	delete(participants.participant_nodes)
 	delete(participants.participant_children)
@@ -480,7 +524,9 @@ socket_group_participants_prepare :: proc(
 	result.ciphertexts = make([][]u8, len(devices))
 	result.enc_attrs = make([][3]Binary_Node_Attribute, len(devices))
 	success := false
-	defer if !success do socket_group_participants_destroy(&result)
+	defer if !success {
+		socket_group_participants_destroy(&result)
+	}
 	for jid, i in devices {
 		result.ciphertexts[i] = make([]u8, 2048)
 		kind, size, encryption_error := socket_group_distribution_encrypt(
@@ -489,7 +535,9 @@ socket_group_participants_prepare :: proc(
 			result.ciphertexts[i],
 			padded_distribution,
 		)
-		if encryption_error.kind != .None do return {}, encryption_error
+		if encryption_error.kind != .None {
+			return {}, encryption_error
+		}
 		type := "msg"
 
 		if kind == .Prekey {
@@ -558,7 +606,9 @@ socket_group_stanza_wire :: proc(
 	}
 	child_count := include_identity ? 3 : 2
 	effective_mode := mode
-	if effective_mode == "" do effective_mode = "pn"
+	if effective_mode == "" {
+		effective_mode = "pn"
+	}
 
 	node := Binary_Node {
 		tag     = "message",
@@ -616,7 +666,9 @@ socket_group_stanza_encode :: proc(
 			},
 			true,
 		)
-		if e != .None do return nil, {kind = .Protocol_Error}
+		if e != .None {
+			return nil, {kind = .Protocol_Error}
+		}
 
 		identity_size = n
 	}
@@ -766,7 +818,9 @@ socket_group_outbound_commit :: proc(
 	   intent_error.kind != .None {
 		return intent_error
 	}
-	if content_error := socket_group_content_stage(socket, group, media_type, id, protobuf); content_error.kind != .None do return content_error
+	if content_error := socket_group_content_stage(socket, group, media_type, id, protobuf); content_error.kind != .None {
+		return content_error
+	}
 	if e := state_store_set(socket.store, .Outbound_Message, id, wire); e.kind != .None {
 		return {kind = .State_Failed, state = e}
 	}
@@ -794,13 +848,19 @@ socket_group_dispatch :: proc(
 	}
 
 	success := false
-	defer if !success do delete(id)
+	defer if !success {
+		delete(id)
+	}
 
 	wire, wire_error := socket_group_stanza_encode(socket, group, mode, only_device, id, ciphertext, participants)
-	if wire_error.kind != .None do return "", wire_error
+	if wire_error.kind != .None {
+		return "", wire_error
+	}
 	defer delete(wire)
 	commit_error := socket_group_outbound_commit(socket, group, media_type, id, protobuf, wire)
-	if commit_error.kind != .None do return "", commit_error
+	if commit_error.kind != .None {
+		return "", commit_error
+	}
 
 	success = true
 	if e := socket_write(socket, wire); e.kind != .None {
@@ -832,7 +892,9 @@ socket_group_payload_send :: proc(
 		return "", {kind = .Group_Failed, group = group_err}
 	}
 
-	if stage_error := socket_group_sender_stage(socket, record, key_name, members, only_device); stage_error.kind != .None do return "", stage_error
+	if stage_error := socket_group_sender_stage(socket, record, key_name, members, only_device); stage_error.kind != .None {
+		return "", stage_error
+	}
 	return socket_group_dispatch(
 		socket,
 		group,
@@ -864,9 +926,13 @@ socket_group_send_prepared :: proc(
 	}
 	members := strings.join(devices[:], "\n")
 	defer delete(members)
-	if sender_error := socket_group_sender_prepare(socket, record, key_name, members, only_device); sender_error.kind != .None do return "", sender_error
+	if sender_error := socket_group_sender_prepare(socket, record, key_name, members, only_device); sender_error.kind != .None {
+		return "", sender_error
+	}
 	padded_distribution, distribution_error := socket_group_distribution_pad(group, record)
-	if distribution_error.kind != .None do return "", distribution_error
+	if distribution_error.kind != .None {
+		return "", distribution_error
+	}
 	defer {
 		crypto.zero_explicit(raw_data(padded_distribution), len(padded_distribution)); delete(padded_distribution)
 	}
@@ -876,7 +942,9 @@ socket_group_send_prepared :: proc(
 		padded_distribution,
 		media_type,
 	)
-	if participant_error.kind != .None do return "", participant_error
+	if participant_error.kind != .None {
+		return "", participant_error
+	}
 	defer socket_group_participants_destroy(&participants)
 	return socket_group_payload_send(
 		socket,
@@ -902,7 +970,9 @@ socket_stage_session :: proc(socket: ^Socket, jid: string, session: ^Signal_Sess
 	}
 
 	canonical, e := socket_signal_address(socket, base)
-	if e.kind != .None do return e
+	if e.kind != .None {
+		return e
+	}
 
 	defer delete(canonical)
 	address := fmt.aprintf("%s%s", canonical, suffix)
@@ -928,7 +998,9 @@ socket_stage_session :: proc(socket: ^Socket, jid: string, session: ^Signal_Sess
 
 socket_outgoing_session :: proc(socket: ^Socket, jid: string, session: ^Signal_Session) -> Socket_Error {
 	address, address_err := socket_signal_address(socket, jid)
-	if address_err.kind != .None do return address_err
+	if address_err.kind != .None {
+		return address_err
+	}
 
 	defer delete(address)
 
@@ -939,7 +1011,9 @@ socket_outgoing_session :: proc(socket: ^Socket, jid: string, session: ^Signal_S
 	id_buffer: [128]u8
 	id := socket_next_id(socket, id_buffer[:])
 	doc, query_err := socket_outgoing_keys_query(socket, jid, id)
-	if query_err.kind != .None do return query_err
+	if query_err.kind != .None {
+		return query_err
+	}
 
 	defer binary_document_destroy(&doc)
 	requested := [1]string{jid}
@@ -951,7 +1025,9 @@ socket_outgoing_session :: proc(socket: ^Socket, jid: string, session: ^Signal_S
 	}
 
 	bundle := bundles[0].bundle
-	if identity_error := socket_outgoing_identity_validate(socket, address, &bundle); identity_error.kind != .None do return identity_error
+	if identity_error := socket_outgoing_identity_validate(socket, address, &bundle); identity_error.kind != .None {
+		return identity_error
+	}
 
 	if err := signal_session_init_initiator(
 		session,
@@ -1025,15 +1101,23 @@ socket_outgoing_keys_query :: proc(socket: ^Socket, jid, id: string) -> (Binary_
 socket_group_devices :: proc(socket: ^Socket, group: Group_Metadata) -> (result: []string, err: Socket_Error) {
 	users := make([dynamic]string)
 	defer {
-		for user in users do delete(user); delete(users)
+		for user in users {
+			delete(user)
+		}
+		delete(users)
 	}
 
-	if users_error := socket_group_users_collect(group, &users); users_error.kind != .None do return nil, users_error
+	if users_error := socket_group_users_collect(group, &users); users_error.kind != .None {
+		return nil, users_error
+	}
 	devices := make([dynamic]string)
 	success := false
 
 	defer if !success {
-		for jid in devices do delete(jid); delete(devices)
+		for jid in devices {
+			delete(jid)
+		}
+		delete(devices)
 	}
 
 	me := cast(string)socket.auth.account.jid[:socket.auth.account.jid_size]
@@ -1043,7 +1127,9 @@ socket_group_devices :: proc(socket: ^Socket, group: Group_Metadata) -> (result:
 
 	for start := 0; start < len(users); start += MAX_DEVICE_QUERY_USERS {
 		batch := users[start:min(start + MAX_DEVICE_QUERY_USERS, len(users))]
-		if batch_error := socket_group_devices_batch(socket, batch, &devices, me, lid, have_lid); batch_error.kind != .None do return nil, batch_error
+		if batch_error := socket_group_devices_batch(socket, batch, &devices, me, lid, have_lid); batch_error.kind != .None {
+			return nil, batch_error
+		}
 	}
 
 	result = make([]string, len(devices))
@@ -1073,7 +1159,9 @@ socket_group_users_collect :: proc(group: Group_Metadata, users: ^[dynamic]strin
 		}
 
 		domain := jid[strings.index_byte(jid, '@') + 1:]
-		if domain == "c.us" do domain = "s.whatsapp.net"
+		if domain == "c.us" {
+			domain = "s.whatsapp.net"
+		}
 
 		normalized := fmt.aprintf("%s@%s", user, domain)
 
@@ -1084,8 +1172,10 @@ socket_group_users_collect :: proc(group: Group_Metadata, users: ^[dynamic]strin
 
 		duplicate := false
 
-		for existing in users^ do if existing == normalized {
-			duplicate = true
+		for existing in users^ {
+			if existing == normalized {
+				duplicate = true
+			}
 		}
 
 		if duplicate {
@@ -1118,8 +1208,10 @@ socket_group_devices_append :: proc(
 
 		duplicate := false
 
-		for existing in devices^ do if jid == existing {
-			duplicate = true
+		for existing in devices^ {
+			if jid == existing {
+				duplicate = true
+			}
 		}
 
 		if !duplicate {
@@ -1152,7 +1244,9 @@ socket_group_devices_batch :: proc(
 
 	defer binary_document_destroy(&query)
 	doc, query_err := socket_query(socket, query.root)
-	if query_err.kind != .None do return query_err
+	if query_err.kind != .None {
+		return query_err
+	}
 
 	defer binary_document_destroy(&doc)
 	_, measured := devices_response_decode(doc.root, batch, id, nil)
@@ -1176,7 +1270,9 @@ socket_pad :: proc(message: []u8) -> []u8 {
 	n := cast(int)(byte[0] & 15) + 1
 	result := make([]u8, len(message) + n)
 	copy(result, message)
-	for &c in result[len(message):] do c = cast(u8)n
+	for &c in result[len(message):] {
+		c = cast(u8)n
+	}
 
 	return result
 }

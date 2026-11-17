@@ -75,7 +75,9 @@ Binary_Document :: struct {
 }
 
 binary_document_destroy :: proc(document: ^Binary_Document) {
-	if document == nil do return
+	if document == nil {
+		return
+	}
 
 	if document.allocator.procedure != nil {
 		delete(document.storage, document.allocator)
@@ -107,7 +109,9 @@ binary_node_encode :: proc(
 	}
 	binary_write_byte(&measure, 0)
 	binary_write_node(&measure, node, 0)
-	if measure.err.kind != .None do return 0, measure.err
+	if measure.err.kind != .None {
+		return 0, measure.err
+	}
 
 	if len(dst) < measure.used {
 		return measure.used, {kind = .Destination_Undersized}
@@ -142,14 +146,18 @@ binary_node_decode :: proc(
 		return {}, {kind = .Payload_Oversized}
 	}
 
-	if len(src) < 1 do return {}, {kind = .Truncated}
+	if len(src) < 1 {
+		return {}, {kind = .Truncated}
+	}
 
 	if src[0] != 0 && src[0] != 2 {
 		return {}, {kind = .Unsupported_Flags}
 	}
 
 	document.allocator = allocator
-	if payload_error := binary_document_payload_copy(&document, src, allocator, max_payload); payload_error.kind != .None do return {}, payload_error
+	if payload_error := binary_document_payload_copy(&document, src, allocator, max_payload); payload_error.kind != .None {
+		return {}, payload_error
+	}
 	if tree_error := binary_document_tree_decode(&document, allocator); tree_error.kind != .None {
 		binary_document_destroy(&document)
 		return {}, tree_error
@@ -251,7 +259,9 @@ binary_document_tree_decode :: proc(document: ^Binary_Document, allocator: mem.A
 
 node_attr :: proc(node: Binary_Node, key: string) -> (value: string, found: bool) {
 	for attr in node.attrs {
-		if attr.key == key do return attr.value, true
+		if attr.key == key {
+			return attr.value, true
+		}
 	}
 
 	return "", false
@@ -261,7 +271,9 @@ node_child :: proc(node: Binary_Node, tag: string) -> ^Binary_Node {
 	#partial switch children in node.content {
 	case []Binary_Node:
 		for &child in children {
-			if child.tag == tag do return &child
+			if child.tag == tag {
+				return &child
+			}
 		}
 	}
 
@@ -276,7 +288,9 @@ Binary_Writer :: struct {
 }
 
 binary_write_byte :: proc(writer: ^Binary_Writer, value: u8) {
-	if writer.err.kind != .None do return
+	if writer.err.kind != .None {
+		return
+	}
 
 	if writer.used >= writer.limit {
 		writer.err = {
@@ -286,13 +300,17 @@ binary_write_byte :: proc(writer: ^Binary_Writer, value: u8) {
 		return
 	}
 
-	if writer.dst != nil do writer.dst[writer.used] = value
+	if writer.dst != nil {
+		writer.dst[writer.used] = value
+	}
 
 	writer.used += 1
 }
 
 binary_write_bytes :: proc(writer: ^Binary_Writer, data: []u8) {
-	if writer.err.kind != .None do return
+	if writer.err.kind != .None {
+		return
+	}
 
 	if bytes.alias(writer.target, data) {
 		writer.err = {
@@ -353,11 +371,15 @@ binary_write_length :: proc(writer: ^Binary_Writer, size: int) {
 }
 
 binary_write_node :: proc(writer: ^Binary_Writer, node: Binary_Node, depth: int) {
-	if !binary_write_node_validate(writer, node, depth) do return
+	if !binary_write_node_validate(writer, node, depth) {
+		return
+	}
 
 	has_content := node.content != nil
 	list_size := 1 + 2 * len(node.attrs)
-	if has_content do list_size += 1
+	if has_content {
+		list_size += 1
+	}
 
 	binary_write_list(writer, list_size)
 	binary_write_string(writer, node.tag, 0)
@@ -381,12 +403,16 @@ binary_write_node :: proc(writer: ^Binary_Writer, node: Binary_Node, depth: int)
 		}
 
 		binary_write_list(writer, len(content))
-		for child in content do binary_write_node(writer, child, depth + 1)
+		for child in content {
+			binary_write_node(writer, child, depth + 1)
+		}
 	}
 }
 
 binary_write_node_validate :: proc(writer: ^Binary_Writer, node: Binary_Node, depth: int) -> bool {
-	if writer.err.kind != .None do return false
+	if writer.err.kind != .None {
+		return false
+	}
 
 	if depth >= MAX_BINARY_NODE_DEPTH {
 		writer.err = {
@@ -439,7 +465,9 @@ binary_write_node_validate :: proc(writer: ^Binary_Writer, node: Binary_Node, de
 }
 
 binary_write_string :: proc(writer: ^Binary_Writer, value: string, depth: int) {
-	if writer.err.kind != .None do return
+	if writer.err.kind != .None {
+		return
+	}
 
 	if bytes.alias(writer.target, transmute([]u8)value) {
 		writer.err = {
@@ -465,8 +493,12 @@ binary_write_string :: proc(writer: ^Binary_Writer, value: string, depth: int) {
 		return
 	}
 
-	if binary_write_token(writer, value) do return
-	if binary_write_packed_string(writer, value) do return
+	if binary_write_token(writer, value) {
+		return
+	}
+	if binary_write_packed_string(writer, value) {
+		return
+	}
 
 	if at := strings.index_byte(value, '@'); at >= 0 {
 		binary_write_jid(writer, value, at, depth)
@@ -507,20 +539,30 @@ binary_write_packed_string :: proc(writer: ^Binary_Writer, value: string) -> boo
 		nibble, hex := true, true
 
 		for c in value {
-			if !is_digit(c) && c != '-' && c != '.' do nibble = false
+			if !is_digit(c) && c != '-' && c != '.' {
+				nibble = false
+			}
 
-			if !is_hex_upper(c) do hex = false
+			if !is_hex_upper(c) {
+				hex = false
+			}
 		}
 
-		if nibble do packed_type = .NIBBLE_8
+		if nibble {
+			packed_type = .NIBBLE_8
+		}
 
-		if !nibble && hex do packed_type = .HEX_8
+		if !nibble && hex {
+			packed_type = .HEX_8
+		}
 	}
 
 	if packed_type != .LIST_EMPTY {
 		binary_write_byte(writer, cast(u8)packed_type)
 		length := cast(u8)((len(value) + 1) / 2)
-		if len(value) % 2 != 0 do length |= 128
+		if len(value) % 2 != 0 {
+			length |= 128
+		}
 
 		binary_write_byte(writer, length)
 
@@ -577,7 +619,9 @@ binary_write_jid :: proc(writer: ^Binary_Writer, value: string, at, depth: int) 
 	if device_present {
 		binary_write_byte(writer, cast(u8)Binary_Tag.AD_JID)
 		domain := cast(u8)0
-		if server == "lid" do domain = 1
+		if server == "lid" {
+			domain = 1
+		}
 
 		binary_write_byte(writer, domain)
 		binary_write_byte(writer, device)
@@ -592,11 +636,17 @@ binary_write_jid :: proc(writer: ^Binary_Writer, value: string, at, depth: int) 
 }
 
 binary_pack_char :: proc(c: u8) -> u8 {
-	if is_digit(c) do return c - '0'
+	if is_digit(c) {
+		return c - '0'
+	}
 
-	if c == '-' do return 10
+	if c == '-' {
+		return 10
+	}
 
-	if c == '.' do return 11
+	if c == '.' {
+		return 11
+	}
 
 	return c - 'A' + 10
 }
@@ -609,7 +659,9 @@ Binary_Reader :: struct {
 }
 
 binary_read_bytes :: proc(reader: ^Binary_Reader, size: int) -> []u8 {
-	if reader.err.kind != .None do return nil
+	if reader.err.kind != .None {
+		return nil
+	}
 
 	if size < 0 || size > len(reader.src) - reader.at {
 		reader.err = {
@@ -628,7 +680,9 @@ binary_read_bytes :: proc(reader: ^Binary_Reader, size: int) -> []u8 {
 
 binary_read_byte :: proc(reader: ^Binary_Reader) -> u8 {
 	data := binary_read_bytes(reader, 1)
-	if reader.err.kind != .None do return 0
+	if reader.err.kind != .None {
+		return 0
+	}
 
 	return data[0]
 }
@@ -636,7 +690,9 @@ binary_read_byte :: proc(reader: ^Binary_Reader) -> u8 {
 binary_read_integer :: proc(reader: ^Binary_Reader, count: int) -> u32 {
 	data := binary_read_bytes(reader, count)
 	value: u32
-	for b in data do value = value << 8 | cast(u32)b
+	for b in data {
+		value = value << 8 | cast(u32)b
+	}
 
 	return value
 }
@@ -680,7 +736,9 @@ binary_read_list_size :: proc(reader: ^Binary_Reader, tag: u8) -> int {
 }
 
 binary_read_node :: proc(reader: ^Binary_Reader, depth: int) -> (node: Binary_Node) {
-	if reader.err.kind != .None do return
+	if reader.err.kind != .None {
+		return
+	}
 
 	if depth >= MAX_BINARY_NODE_DEPTH {
 		reader.err = {
@@ -703,7 +761,9 @@ binary_read_node :: proc(reader: ^Binary_Reader, depth: int) -> (node: Binary_No
 	}
 
 	size := binary_read_list_size(reader, binary_read_byte(reader))
-	if reader.err.kind != .None do return
+	if reader.err.kind != .None {
+		return
+	}
 
 	if size < 1 {
 		reader.err = {
@@ -715,7 +775,9 @@ binary_read_node :: proc(reader: ^Binary_Reader, depth: int) -> (node: Binary_No
 	}
 
 	node.tag = binary_read_string(reader, binary_read_byte(reader), 0)
-	if reader.err.kind != .None do return
+	if reader.err.kind != .None {
+		return
+	}
 
 	if len(node.tag) == 0 {
 		reader.err = {
@@ -727,8 +789,12 @@ binary_read_node :: proc(reader: ^Binary_Reader, depth: int) -> (node: Binary_No
 	}
 
 	binary_read_attributes(reader, &node, size)
-	if reader.err.kind != .None do return
-	if size % 2 == 0 do binary_read_content(reader, &node, depth)
+	if reader.err.kind != .None {
+		return
+	}
+	if size % 2 == 0 {
+		binary_read_content(reader, &node, depth)
+	}
 
 	return
 }
@@ -747,7 +813,9 @@ binary_read_attribute_keys_validate :: proc(reader: ^Binary_Reader, node: ^Binar
 			return
 		}
 
-		for attr, i in node.attrs do keys[i] = attr.key
+		for attr, i in node.attrs {
+			keys[i] = attr.key
+		}
 		sort.quick_sort(keys)
 
 		for i in 1 ..< len(keys) {
@@ -793,7 +861,9 @@ binary_read_attributes :: proc(reader: ^Binary_Reader, node: ^Binary_Node, size:
 	for &attr in node.attrs {
 		attr.key = binary_read_string(reader, binary_read_byte(reader), 0)
 		attr.value = binary_read_string(reader, binary_read_byte(reader), 0)
-		if reader.err.kind != .None do return
+		if reader.err.kind != .None {
+			return
+		}
 	}
 
 	binary_read_attribute_keys_validate(reader, node, attrs)
@@ -801,7 +871,9 @@ binary_read_attributes :: proc(reader: ^Binary_Reader, node: ^Binary_Node, size:
 
 binary_read_content :: proc(reader: ^Binary_Reader, node: ^Binary_Node, depth: int) {
 	tag := binary_read_byte(reader)
-	if reader.err.kind != .None do return
+	if reader.err.kind != .None {
+		return
+	}
 
 	if tag == cast(u8)Binary_Tag.LIST_EMPTY || tag == cast(u8)Binary_Tag.LIST_8 || tag == cast(u8)Binary_Tag.LIST_16 {
 		count := binary_read_list_size(reader, tag)
@@ -829,7 +901,9 @@ binary_read_content :: proc(reader: ^Binary_Reader, node: ^Binary_Node, depth: i
 
 		for &child in children {
 			child = binary_read_node(reader, depth + 1)
-			if reader.err.kind != .None do return
+			if reader.err.kind != .None {
+				return
+			}
 		}
 
 		node.content = children
@@ -840,7 +914,9 @@ binary_read_content :: proc(reader: ^Binary_Reader, node: ^Binary_Node, depth: i
 		node.content = binary_read_bytes(reader, count)
 	} else {
 		value := binary_read_string(reader, tag, 0)
-		if reader.err.kind != .None do return
+		if reader.err.kind != .None {
+			return
+		}
 
 		content, content_err := make([]u8, len(value), reader.allocator)
 
@@ -860,7 +936,9 @@ binary_read_content :: proc(reader: ^Binary_Reader, node: ^Binary_Node, depth: i
 }
 
 binary_read_string :: proc(reader: ^Binary_Reader, tag: u8, depth: int) -> string {
-	if reader.err.kind != .None do return ""
+	if reader.err.kind != .None {
+		return ""
+	}
 
 	if depth >= MAX_BINARY_NODE_DEPTH {
 		reader.err = {
@@ -934,7 +1012,9 @@ binary_unpack_bytes :: proc(reader: ^Binary_Reader, tag: u8, packed, data: []u8)
 
 			if tag == cast(u8)Binary_Tag.HEX_8 {
 				c = '0' + nibble
-				if nibble >= 10 do c = 'A' + nibble - 10
+				if nibble >= 10 {
+					c = 'A' + nibble - 10
+				}
 			} else if nibble <= 9 {
 				c = '0' + nibble
 			} else {
@@ -965,7 +1045,9 @@ binary_unpack_bytes :: proc(reader: ^Binary_Reader, tag: u8, packed, data: []u8)
 binary_read_packed_string :: proc(reader: ^Binary_Reader, tag: u8) -> string {
 	length := binary_read_byte(reader)
 	packed := binary_read_bytes(reader, cast(int)(length & 127))
-	if reader.err.kind != .None do return ""
+	if reader.err.kind != .None {
+		return ""
+	}
 
 	if len(packed) == 0 && length & 128 != 0 {
 		reader.err = {
@@ -977,7 +1059,9 @@ binary_read_packed_string :: proc(reader: ^Binary_Reader, tag: u8) -> string {
 	}
 
 	count := len(packed) * 2
-	if length & 128 != 0 do count -= 1
+	if length & 128 != 0 {
+		count -= 1
+	}
 
 	data, allocation_err := make([]u8, len(packed) * 2, reader.allocator)
 
@@ -991,7 +1075,9 @@ binary_read_packed_string :: proc(reader: ^Binary_Reader, tag: u8) -> string {
 		return ""
 	}
 
-	if !binary_unpack_bytes(reader, tag, packed, data) do return ""
+	if !binary_unpack_bytes(reader, tag, packed, data) {
+		return ""
+	}
 
 	return cast(string)data[:count]
 }
@@ -999,7 +1085,9 @@ binary_read_packed_string :: proc(reader: ^Binary_Reader, tag: u8) -> string {
 binary_read_jid_pair :: proc(reader: ^Binary_Reader, depth: int) -> string {
 	user := binary_read_string(reader, binary_read_byte(reader), depth + 1)
 	server := binary_read_string(reader, binary_read_byte(reader), depth + 1)
-	if reader.err.kind != .None do return ""
+	if reader.err.kind != .None {
+		return ""
+	}
 
 	if len(server) == 0 {
 		reader.err = {
@@ -1014,7 +1102,9 @@ binary_read_jid_pair :: proc(reader: ^Binary_Reader, depth: int) -> string {
 }
 
 binary_reader_join_jid :: proc(reader: ^Binary_Reader, user, server: string, device: u8) -> string {
-	if reader.err.kind != .None do return ""
+	if reader.err.kind != .None {
+		return ""
+	}
 
 	suffix: [4]u8
 	device_suffix := ""

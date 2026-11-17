@@ -85,7 +85,9 @@ state_store_init :: proc(store: ^State_Store, identity: [32]u8, allocator := con
 	return {}
 }
 state_store_clear :: proc(store: ^State_Store) {
-	if store == nil do return
+	if store == nil {
+		return
+	}
 
 	if store.initialized {
 		for record in store.records {
@@ -107,8 +109,10 @@ state_store_get :: proc(store: ^State_Store, kind: State_Record_Kind, name: stri
 		return nil, false
 	}
 
-	for record in store.records do if record.kind == kind && record.name == name {
-		return record.data, true
+	for record in store.records {
+		if record.kind == kind && record.name == name {
+			return record.data, true
+		}
 	}
 
 	return nil, false
@@ -156,7 +160,9 @@ state_store_set :: proc(store: ^State_Store, kind: State_Record_Kind, name: stri
 	}
 
 	index, index_error := state_store_set_index(store, kind, name, data)
-	if index_error.kind != .None do return index_error
+	if index_error.kind != .None {
+		return index_error
+	}
 
 	value, alloc_err := make([]u8, len(data), store.allocator)
 
@@ -236,7 +242,9 @@ state_store_encode :: proc(dst: []u8, store: ^State_Store) -> (int, State_Error)
 	}
 
 	size := 8 + 2 + 32 + 8 + 4 + 32
-	for record in store.records do size += 1 + 2 + 4 + len(record.name) + len(record.data)
+	for record in store.records {
+		size += 1 + 2 + 4 + len(record.name) + len(record.data)
+	}
 
 	if size > MAX_STATE_STORE_SIZE {
 		return 0, {kind = .Limit_Exceeded}
@@ -522,7 +530,9 @@ state_store_save :: proc(store: ^State_Store, path: string) -> State_Error {
 	}
 
 	_, encoded := state_store_encode(buffer, store)
-	if encoded.kind != .None do return encoded
+	if encoded.kind != .None {
+		return encoded
+	}
 
 	step, io_err := durable_write(path, buffer)
 
@@ -545,7 +555,9 @@ state_store_save :: proc(store: ^State_Store, path: string) -> State_Error {
 }
 state_store_load :: proc(store: ^State_Store, path: string, identity: [32]u8) -> State_Error {
 	file, err := os.open(path)
-	if err != nil do return {kind = .Read_Failed, io = err}
+	if err != nil {
+		return {kind = .Read_Failed, io = err}
+	}
 
 	defer os.close(file)
 	size, stat_err := os.file_size(file)
@@ -592,7 +604,11 @@ state_record_valid :: proc(kind: State_Record_Kind, name: string, data: []u8) ->
 		return false
 	}
 
-	for c in name do if c < 33 || c > 126 do return false
+	for c in name {
+		if c < 33 || c > 126 {
+			return false
+		}
+	}
 
 	return true
 }
@@ -615,13 +631,19 @@ durable_write :: proc(path: string, data: []u8) -> (Durable_Write_Step, os.Error
 	tmp := fmt.aprintf("%s.tmp-%016x", path, transmute(u64)random)
 	defer delete(tmp)
 	file, open_err := os.open(tmp, {.Write, .Create, .Excl}, {.Read_User, .Write_User})
-	if open_err != nil do return .Write, open_err
+	if open_err != nil {
+		return .Write, open_err
+	}
 
 	closed, renamed := false, false
 	defer {
-		if !closed do os.close(file)
+		if !closed {
+			os.close(file)
+		}
 
-		if !renamed do os.remove(tmp)
+		if !renamed {
+			os.remove(tmp)
+		}
 	}
 
 	at := 0
@@ -629,23 +651,35 @@ durable_write :: proc(path: string, data: []u8) -> (Durable_Write_Step, os.Error
 	for at < len(data) {
 		n, err := os.write(file, data[at:])
 		at += n
-		if err != nil || n == 0 do return .Write, err
+		if err != nil || n == 0 {
+			return .Write, err
+		}
 	}
 
-	if err := os.flush(file); err != nil do return .Flush, err
+	if err := os.flush(file); err != nil {
+		return .Flush, err
+	}
 
 	close_err := os.close(file)
 	closed = true
-	if close_err != nil do return .Close, close_err
+	if close_err != nil {
+		return .Close, close_err
+	}
 
-	if err := os.rename(tmp, path); err != nil do return .Rename, err
+	if err := os.rename(tmp, path); err != nil {
+		return .Rename, err
+	}
 
 	renamed = true
 	parent, parent_err := os.open(filepath.dir(path))
-	if parent_err != nil do return .Directory, parent_err
+	if parent_err != nil {
+		return .Directory, parent_err
+	}
 
 	defer os.close(parent)
-	if err := os.flush(parent); err != nil do return .Directory, err
+	if err := os.flush(parent); err != nil {
+		return .Directory, err
+	}
 
 	return .None, nil
 }
@@ -656,11 +690,17 @@ bounded_read :: proc(file: ^os.File, buffer: []u8) -> (used: int, err: os.Error)
 	for used < len(buffer) {
 		n, read_err := os.read(file, buffer[used:])
 		used += n
-		if read_err == io.Error.EOF do break
+		if read_err == io.Error.EOF {
+			break
+		}
 
-		if read_err != nil do return used, read_err
+		if read_err != nil {
+			return used, read_err
+		}
 
-		if n == 0 do break
+		if n == 0 {
+			break
+		}
 	}
 
 	return used, nil
@@ -676,12 +716,16 @@ sha256 :: proc(src: []u8) -> [32]u8 {
 	return digest
 }
 store_put :: proc(dst: []u8, at: ^int, value: u64, size: int) {
-	for i in 0 ..< size do dst[at^ + i] = cast(u8)(value >> cast(uint)((size - 1 - i) * 8))
+	for i in 0 ..< size {
+		dst[at^ + i] = cast(u8)(value >> cast(uint)((size - 1 - i) * 8))
+	}
 	at^ += size
 }
 store_get :: proc(src: []u8, at: ^int, size: int) -> u64 {
 	value: u64
-	for i in 0 ..< size do value = value << 8 | cast(u64)src[at^ + i]
+	for i in 0 ..< size {
+		value = value << 8 | cast(u64)src[at^ + i]
+	}
 	at^ += size
 
 	return value
