@@ -1,6 +1,5 @@
 package whatsapp
 
-import ascii "../ascii"
 import http "../http"
 import "core:crypto"
 import "core:crypto/hmac"
@@ -899,7 +898,7 @@ pairing_jid_decode :: proc(
 		}
 
 		for c in local[colon + 1:] {
-			if !ascii.is_digit(c) {
+			if c < '0' || c > '9' {
 				return "", 0, {kind = .Invalid_JID}
 			}
 
@@ -916,7 +915,7 @@ pairing_jid_decode :: proc(
 	if underscore := strings.index_byte(local, '_');
 	   underscore >= 0 {
 		for c in local[underscore + 1:] {
-			if !ascii.is_digit(c) {
+			if c < '0' || c > '9' {
 				return "", 0, {kind = .Invalid_JID}
 			}
 
@@ -933,7 +932,7 @@ pairing_jid_decode :: proc(
 	}
 
 	for c in local {
-		if !ascii.is_digit(c) {
+		if c < '0' || c > '9' {
 			return "", 0, {kind = .Invalid_JID}
 		}
 
@@ -2297,9 +2296,9 @@ revision_digits :: proc(
 	i += 1
 	for i < len(src) && revision_space(src[i]) do i += 1
 	start := i
-	for i < len(src) && i - start < 10 && ascii.is_digit(src[i]) {i += 1}
+	for i < len(src) && i - start < 10 && src[i] >= '0' && src[i] <= '9' {i += 1}
 	if i == start do return 0, false, true
-	if i < len(src) && ascii.is_digit(src[i]) do return 0, false, true
+	if i < len(src) && src[i] >= '0' && src[i] <= '9' do return 0, false, true
 	end := i
 	for i < len(src) && revision_space(src[i]) do i += 1
 	if i >= len(src) || (src[i] != ',' && src[i] != '}') {
@@ -2338,7 +2337,7 @@ web_version_parse :: proc(
 
 		if end == at do return {}, .Invalid_Version
 
-		for c in text[at:end] do if !ascii.is_digit(c) {
+		for c in text[at:end] do if c < '0' || c > '9' {
 			return {}, .Invalid_Version
 		}
 

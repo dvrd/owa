@@ -1,6 +1,5 @@
 package whatsapp
 
-import ascii "../ascii"
 import "core:crypto"
 import "core:encoding/hex"
 import "core:fmt"
@@ -1005,7 +1004,7 @@ socket_receive_group_valid :: proc(jid: string) -> bool {
 		return false
 	}
 
-	for byte in transmute([]u8)user do if (!ascii.is_digit(byte)) && byte != '-' {
+	for byte in transmute([]u8)user do if (byte < '0' || byte > '9') && byte != '-' {
 		return false
 	}
 

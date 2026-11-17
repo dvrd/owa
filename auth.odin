@@ -9,7 +9,6 @@ import "core:mem"
 import "core:os"
 import "core:path/filepath"
 import "core:slice"
-import ascii "../ascii"
 import "core:strconv"
 
 // Device credentials and authentication persistence.
@@ -1092,7 +1091,7 @@ prekey_count_response :: proc(
 	}
 
 	for c in value {
-		if !ascii.is_digit(c) {
+		if c < '0' || c > '9' {
 			return 0, {kind = .Invalid_Response}
 		}
 

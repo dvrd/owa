@@ -4,7 +4,6 @@ import "core:fmt"
 import "core:slice"
 import "core:strconv"
 import "core:strings"
-import ascii "../ascii"
 import "core:unicode/utf8"
 import "core:bytes"
 import "core:crypto"
@@ -906,13 +905,12 @@ group_jid_valid :: proc(jid: string) -> bool {
 	}
 
 	local := jid[:len(jid) - len("@g.us")]
-	if !ascii.is_digit(local[0]) || !ascii.is_digit(local[len(local) - 1]) {
+	if local[0] == '-' || local[len(local) - 1] == '-' {
 		return false
 	}
 
 	for c in local {
-		if (!ascii.is_digit(c)) && c != '-' do return false
-
+		if (c < '0' || c > '9') && c != '-' do return false
 	}
 	return true
 }

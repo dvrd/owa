@@ -1,6 +1,5 @@
 package whatsapp
 
-import ascii "../ascii"
 import http "../http"
 import network_client "../surf"
 import "core:bytes"
@@ -1761,9 +1760,11 @@ media_upload_url :: proc(
 media_upload_auth_encode :: proc(scratch: []u8, at: ^int, auth: string) -> Media_Error {
 	hex_digits := "0123456789ABCDEF"
 	for c in transmute([]u8)auth {
-		unescaped :=
-			ascii.is_alphanumeric(c) ||
-			strings.contains_rune("-_.!~*'()", cast(rune)c)
+		unescaped := false
+		switch c {
+		case 'a'..='z', 'A'..='Z', '0'..='9', '-', '_', '.', '!', '~', '*', '\'', '(', ')':
+			unescaped = true
+		}
 		required := 3; if unescaped do required = 1
 
 		if required > len(scratch) - at^ {
@@ -2131,8 +2132,9 @@ media_hostname_valid :: proc(host: string) -> bool {
 			continue
 		}
 
-		if !(ascii.is_alphanumeric(c) ||
-			   c == '-') {
+		switch c {
+		case 'a'..='z', 'A'..='Z', '0'..='9', '-':
+		case:
 			return false
 		}
 

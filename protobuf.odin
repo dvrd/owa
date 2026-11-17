@@ -1,6 +1,5 @@
 package whatsapp
 
-import ascii "../ascii"
 import "core:bytes"
 import "core:crypto/legacy/md5"
 import "core:slice"
@@ -684,7 +683,7 @@ login_payload_encode :: proc(
 
 	username: u64
 	for c in user {
-		if !ascii.is_digit(c) do return 0, .Invalid_Username
+		if c < '0' || c > '9' do return 0, .Invalid_Username
 
 		digit := cast(u64)(c - '0')
 		if username > (0xffff_ffff_ffff_ffff - digit) / 10 {
@@ -847,10 +846,11 @@ payload_config_validate :: proc(
 	}
 
 	for c in config.country_code {
-		if !(ascii.is_alpha(c)) {
+		switch c {
+		case 'a'..='z', 'A'..='Z':
+		case:
 			return .Invalid_Country_Code
 		}
-
 	}
 	return .None
 }

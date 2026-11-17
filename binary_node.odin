@@ -1,6 +1,5 @@
 package whatsapp
 
-import ascii "../ascii"
 
 import "core:bytes"
 import "core:fmt"
@@ -540,15 +539,12 @@ binary_write_packed_string :: proc(writer: ^Binary_Writer, value: string) -> boo
 	if len(value) > 0 && len(value) <= BINARY_PACKED_MAX {
 		nibble, hex := true, true
 		for c in value {
-			if !(ascii.is_digit(c) ||
-				   slice.contains([]type_of(c){'-', '.'}, c)) {
-				nibble = false
+			switch c {
+			case '0'..='9':
+			case '-', '.': hex = false
+			case 'A'..='F': nibble = false
+			case: nibble, hex = false, false
 			}
-
-			if !(ascii.is_digit(c) || c >= 'A' && c <= 'F') {
-				hex = false
-			}
-
 		}
 		if nibble do packed_type = .NIBBLE_8
 
@@ -626,7 +622,7 @@ binary_write_jid :: proc(writer: ^Binary_Writer, value: string, at, depth: int) 
 }
 
 binary_pack_char :: proc(c: u8) -> u8 {
-	if ascii.is_digit(c) do return c - '0'
+	if c >= '0' && c <= '9' do return c - '0'
 
 	if c == '-' do return 10
 
