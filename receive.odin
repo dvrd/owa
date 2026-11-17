@@ -1804,8 +1804,6 @@ socket_history_receipt :: proc(
 	return socket_write(socket, buffer[:n])
 }
 
-// Receipts and targeted retry handling.
-
 // Receipt-triggered sends run outside any outstanding IQ/media wait. Retaining
 // an owned node avoids nested queries consuming an outer query's response.
 socket_defer_retry :: proc(
@@ -2085,8 +2083,6 @@ socket_trust_identity :: proc(
 	}
 	return socket_store_commit(socket, &candidate)
 }
-
-// Durable message retention.
 
 // Pending work protects its retry counters even after the replay horizon.
 // Hash keys borrow no mutable record strings and bound map memory.

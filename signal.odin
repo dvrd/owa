@@ -822,8 +822,6 @@ group_bytes_write :: proc(
 	at^ += copy(dst[at^:], value)
 }
 
-// Signal key derivation and message encryption primitives.
-
 // Wire-compatible crypto labels/layouts from libsignal-node
 // bcea72df9ec34d9d9140ab30619cf479c7c144c7 and Baileys 6.7.23 Group keys.
 // This module is stateless: callers commit chain/counter changes only after
@@ -1150,8 +1148,6 @@ signal_message_mac_verify :: proc(
 
 	return .None
 }
-
-// Pairwise Signal sessions and Double Ratchet.
 
 SIGNAL_SESSION_WIRE_VERSION :: cast(u8)0x33
 MAX_SIGNAL_SKIPPED_KEYS :: 2000

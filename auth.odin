@@ -8,8 +8,6 @@ import "core:strconv"
 
 // Device credentials and authentication persistence.
 
-// Device credentials
-
 MAX_DEVICE_PREKEY_ID :: cast(u32)0xff_ffff
 
 // Initial device key material only. The caller owns these secrets and must
@@ -177,8 +175,6 @@ device_private_valid :: proc(private: ^[32]u8) -> bool {
 		crypto.is_zero_constant_time(private[:]) != 1 \
 	)
 }
-
-// Authentication state persistence
 
 MAX_AUTH_STATE_SIZE :: 8192
 AUTH_STATE_VERSION :: 2
@@ -525,8 +521,6 @@ auth_state_load :: proc(
 
 	return auth_state_decode(state, buffer[:used])
 }
-
-// One-time prekey provisioning and persistence.
 
 MAX_STORED_PREKEYS :: 1024
 MAX_PREKEY_UPLOAD_COUNT :: 256

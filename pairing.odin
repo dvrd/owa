@@ -14,8 +14,6 @@ import network_client "../surf"
 
 // Registration, pairing and session establishment.
 
-// Session orchestration and keepalive
-
 Session_Phase :: enum {
 	Uninitialized,
 	Initialized,
@@ -751,8 +749,6 @@ session_keepalive :: proc(session: ^Session) -> Session_Error {
 
 	return {}
 }
-
-// Device pairing and QR lifecycle
 
 MAX_PAIRING_REFS :: 16
 MAX_PAIRING_REF_SIZE :: 1024
@@ -1527,8 +1523,6 @@ paired_account_signatures_validate :: proc(
 	return {}
 }
 
-// QR encoding and terminal rendering.
-
 /* 
  * QR Code generator library (C)
  * 
@@ -2122,8 +2116,6 @@ qr_history_patterns :: proc(h: ^[7]int) -> int {
 		(core && h[6] >= n * 4 && h[0] >= n ? 1 : 0) \
 	)
 }
-
-// WhatsApp Web version discovery.
 
 // The service worker at web.whatsapp.com publishes client_revision. The
 // handshake triple is 2.3000 plus that revision. The compiled pin is used

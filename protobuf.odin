@@ -6,8 +6,6 @@ import "core:unicode/utf8"
 
 // Protobuf fields, login payloads and pairing codecs.
 
-// Noise handshake and certificate protobufs
-
 // Field numbers match Baileys 6.7.23 WAProto/WAProto.proto, HandshakeMessage
 // and CertChain. This deliberately implements only these small wire messages;
 // field semantics and Noise cryptographic lengths belong to the handshake.
@@ -522,8 +520,6 @@ protobuf_varint_write :: proc(dst: []u8, at: ^int, value: u64) {
 	at^ += 1
 }
 
-// Registration and login payload protobufs
-
 MAX_CLIENT_PAYLOAD_SIZE :: 16384
 MAX_PAYLOAD_BROWSER_STRING_SIZE :: 255
 
@@ -989,8 +985,6 @@ payload_decimal :: proc(dst: []u8, value: u32) -> int {
 	return size
 }
 
-// Pairing identity protobufs
-
 // ADV* field numbers from the pinned Baileys 6.7.23 WAProto schema.
 // All decoded byte strings borrow src, including the signed raw details.
 Pairing_Device_Identity_HMAC :: struct {
@@ -1236,8 +1230,6 @@ pairing_signed_identity_encode :: proc(
 	}
 	return written, .None
 }
-
-// Text messages and quoted context.
 
 // Baileys 6.7.23 WAProto.proto: Message, ExtendedTextMessage, ContextInfo,
 // FutureProofMessage and Message.SenderKeyDistributionMessage. This codec

@@ -14,8 +14,6 @@ import "core:crypto/sha2"
 
 // Noise client, framing and transport.
 
-// Noise client handshake and lifecycle
-
 Noise_Credentials :: struct {
 	// Persisted device Noise key, distinct from the per-connection ephemeral.
 	static_private_key: [32]u8,
@@ -728,8 +726,6 @@ client_finish_wire_size :: proc(payload_size: int) -> int {
 	return 1 + protobuf_varint_size(cast(u64)inner) + inner
 }
 
-// Encrypted client message I/O
-
 // Sends an opaque encoded WhatsApp binary node under the established Noise
 // keys. The node codec and account/session state live above this layer.
 client_write :: proc(
@@ -876,8 +872,6 @@ client_encrypted_frame_receive :: proc(client: ^Client, ciphertext: []u8) -> (in
 	return size, {}
 }
 
-// WhatsApp envelope framing
-
 FRAME_HEADER_SIZE :: 3
 MAX_FRAME_PAYLOAD :: 0xff_ffff
 
@@ -961,8 +955,6 @@ frame_decode :: proc(
 
 	return src[FRAME_HEADER_SIZE:required], required, .None
 }
-
-// WhatsApp envelopes over WebSocket
 
 FRAME_INTRO :: [4]u8{87, 65, 6, 3}
 DEFAULT_TRANSPORT_MAX_PAYLOAD :: 1 << 20
@@ -1368,10 +1360,6 @@ frame_transport_fail :: proc(
 	return err
 }
 
-// Noise and Curve25519 cryptographic primitives.
-
-// Noise cryptographic state
-
 NOISE_HEADER :: [4]u8{87, 65, 6, 3}
 NOISE_MODE :: "Noise_XX_25519_AESGCM_SHA256\x00\x00\x00\x00"
 NOISE_TAG_SIZE :: 16
@@ -1677,8 +1665,6 @@ noise_fail :: proc(
 	state.phase, state.failure = .Failed, err
 	return err
 }
-
-// Signal Curve25519 signatures
 
 /*
 Signal's Curve25519 signature construction follows curve25519-js 0.0.4:

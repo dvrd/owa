@@ -581,8 +581,6 @@ device_entry_decode :: proc(
 	}, {}
 }
 
-// Group metadata codecs.
-
 MAX_GROUP_PARTICIPANTS :: 2048
 
 Group_Participant :: struct {
@@ -875,8 +873,6 @@ group_participant_decode :: proc(
 
 	return result, {}
 }
-
-// PN/LID mappings and identity trust.
 
 // Call only for PN/LID pairs from an authenticated, validated server query
 // (for example fresh group metadata). Sender-provided protobuf/stanza claims

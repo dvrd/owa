@@ -2487,8 +2487,6 @@ media_retry_notification_decode :: proc(
 	return notification, {}
 }
 
-// HTTP workers and WhatsApp event pumping.
-
 // An HTTP worker never accesses Socket, its stores or its WebSocket. Borrowed
 // request bytes, media metadata, connection strings and TLS roots remain alive
 // until join. Its default thread allocator owns/frees all HTTP scratch state.
@@ -2841,8 +2839,6 @@ socket_http_event_process :: proc(socket: ^Socket, event: Socket_Event) -> Socke
 	}
 	return {}
 }
-
-// Socket media send, download and retry operations.
 
 // Returns an owned message ID, destroyed with delete(id) by the caller. Media
 // is encrypted locally before upload; only its encrypted bytes reach HTTP.

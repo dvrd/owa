@@ -917,8 +917,6 @@ socket_control_node :: proc(
 	return socket_provision_write(socket, buffer[:size])
 }
 
-// Synchronous queries and group metadata access.
-
 // Polls the native connection without consuming an incomplete TLS/WS record.
 // This keeps timers on the same thread as I/O. Once a peer starts a frame, the
 // bounded read deadline prevents a partial frame from stalling indefinitely.
