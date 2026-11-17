@@ -84,28 +84,21 @@ media_keys_clear :: proc(keys: ^Media_Keys) {
 	if keys != nil {
 		crypto.zero_explicit(keys, size_of(Media_Keys))
 	}
-
 }
 media_metadata_clear :: proc(metadata: ^Media_Metadata) {
 	if metadata != nil {
 		crypto.zero_explicit(metadata, size_of(Media_Metadata))
 	}
-
 }
 
 media_key_generate :: proc() -> (key: [32]u8, err: Media_Error) {
 	when !crypto.HAS_RAND_BYTES do return {}, {kind = .Entropy_Unavailable}
 	crypto.rand_bytes(key[:])
+
 	return key, {}
 }
 
-media_keys_derive :: proc(
-	kind: Media_Kind,
-	media_key: [32]u8,
-) -> (
-	keys: Media_Keys,
-	err: Media_Error,
-) {
+media_keys_derive :: proc(kind: Media_Kind, media_key: [32]u8) -> (keys: Media_Keys, err: Media_Error) {
 	info: string
 	#partial switch kind {
 	case .Image:
@@ -115,22 +108,18 @@ media_keys_derive :: proc(
 	case:
 		return {}, {kind = .Invalid_Kind}
 	}
+
 	key := media_key
 	defer crypto.zero_explicit(&key, 32)
 	expanded: [112]u8
 	defer crypto.zero_explicit(&expanded, 112)
 	salt: [32]u8
-	hkdf.extract_and_expand(
-		.SHA256,
-		salt[:],
-		key[:],
-		transmute([]u8)info,
-		expanded[:],
-	)
+	hkdf.extract_and_expand(.SHA256, salt[:], key[:], transmute([]u8)info, expanded[:])
 	copy(keys.iv[:], expanded[:16])
 	copy(keys.cipher_key[:], expanded[16:48])
 	copy(keys.mac_key[:], expanded[48:80])
 	copy(keys.reference_key[:], expanded[80:])
+
 	return keys, {}
 }
 
@@ -180,12 +169,14 @@ media_encrypt :: proc(
 	for at := 0; at < cipher_size; at += 16 {
 		for i in 0 ..< 16 {
 			value := padding
+
 			if at + i < len(plaintext) {
 				value = plaintext[at + i]
 			}
 
 			block[i] = value ~ previous[i]
 		}
+
 		aes.encrypt_ecb(&ctx, dst[at:at + 16], block[:])
 		copy(previous[:], dst[at:at + 16])
 	}
@@ -239,55 +230,40 @@ media_decrypt :: proc(
 	if key_err.kind != .None do return 0, key_err
 
 	defer media_keys_clear(&keys)
-	if authentication_error := media_ciphertext_authenticate(encrypted, &details, &keys);
-	   authentication_error.kind != .None do return 0, authentication_error
+	if authentication_error := media_ciphertext_authenticate(encrypted, &details, &keys); authentication_error.kind != .None do return 0, authentication_error
 	cipher_size := len(encrypted) - MEDIA_MAC_SIZE
 	plaintext, allocation_err := make([]u8, cipher_size)
 	if allocation_err != nil {
-		return 0, {
-			kind = .Allocation_Failed,
-			allocation = allocation_err,
-		}
+		return 0, {kind = .Allocation_Failed, allocation = allocation_err}
 	}
 
 	defer delete(plaintext)
 	defer crypto.zero_explicit(raw_data(plaintext), len(plaintext))
 	media_cbc_decrypt_blocks(plaintext, encrypted, cipher_size, &keys)
-	if plaintext_error := media_plaintext_validate(plaintext, cipher_size, plain_size, &details);
-	   plaintext_error.kind != .None do return 0, plaintext_error
+	if plaintext_error := media_plaintext_validate(plaintext, cipher_size, plain_size, &details); plaintext_error.kind != .None do return 0, plaintext_error
 	copy(dst, plaintext[:plain_size])
 	return plain_size, {}
 }
 
-media_ciphertext_authenticate :: proc(
-	encrypted: []u8, details: ^Media_Metadata, keys: ^Media_Keys,
-) -> Media_Error {
+media_ciphertext_authenticate :: proc(encrypted: []u8, details: ^Media_Metadata, keys: ^Media_Keys) -> Media_Error {
 	hash := sha256(encrypted)
-	if crypto.compare_constant_time(
-		   hash[:],
-		   details.file_enc_sha256[:],
-	   ) !=
-	   1 {
+
+	if crypto.compare_constant_time(hash[:], details.file_enc_sha256[:]) != 1 {
 		return {kind = .Encrypted_Hash_Mismatch}
 	}
 
 	cipher_size := len(encrypted) - MEDIA_MAC_SIZE
 	mac := media_mac(keys^, encrypted[:cipher_size])
 	defer crypto.zero_explicit(&mac, 32)
-	if crypto.compare_constant_time(
-		   mac[:MEDIA_MAC_SIZE],
-		   encrypted[cipher_size:],
-	   ) !=
-	   1 {
+
+	if crypto.compare_constant_time(mac[:MEDIA_MAC_SIZE], encrypted[cipher_size:]) != 1 {
 		return {kind = .MAC_Mismatch}
 	}
 
 	return {}
 }
 
-media_cbc_decrypt_blocks :: proc(
-	plaintext, encrypted: []u8, cipher_size: int, keys: ^Media_Keys,
-) {
+media_cbc_decrypt_blocks :: proc(plaintext, encrypted: []u8, cipher_size: int, keys: ^Media_Keys) {
 	ctx: aes.Context_ECB
 	aes.init_ecb(&ctx, keys.cipher_key[:])
 	defer aes.reset_ecb(&ctx)
@@ -295,6 +271,7 @@ media_cbc_decrypt_blocks :: proc(
 	defer crypto.zero_explicit(&previous, 16)
 	block: [16]u8
 	defer crypto.zero_explicit(&block, 16)
+
 	for at := 0; at < cipher_size; at += 16 {
 		aes.decrypt_ecb(&ctx, block[:], encrypted[at:at + 16])
 		for i in 0 ..< 16 do plaintext[at + i] = block[i] ~ previous[i]
@@ -303,7 +280,9 @@ media_cbc_decrypt_blocks :: proc(
 }
 
 media_plaintext_validate :: proc(
-	plaintext: []u8, cipher_size, plain_size: int, details: ^Media_Metadata,
+	plaintext: []u8,
+	cipher_size, plain_size: int,
+	details: ^Media_Metadata,
 ) -> Media_Error {
 	padding := cast(int)plaintext[cipher_size - 1]
 	if padding < 1 || padding > 16 {
@@ -313,10 +292,8 @@ media_plaintext_validate :: proc(
 	difference: u8
 	for i in 0 ..< 16 {
 		if i < padding {
-			difference |=
-				plaintext[cipher_size - 1 - i] ~ cast(u8)padding
+			difference |= plaintext[cipher_size - 1 - i] ~ cast(u8)padding
 		}
-
 	}
 	if difference != 0 {
 		return {kind = .Invalid_Padding}
@@ -327,11 +304,7 @@ media_plaintext_validate :: proc(
 	}
 
 	hash := sha256(plaintext[:plain_size])
-	if crypto.compare_constant_time(
-		   hash[:],
-		   details.file_sha256[:],
-	   ) !=
-	   1 {
+	if crypto.compare_constant_time(hash[:], details.file_sha256[:]) != 1 {
 		return {kind = .File_Hash_Mismatch}
 	}
 
@@ -347,6 +320,7 @@ media_mac :: proc(keys: Media_Keys, ciphertext: []u8) -> [32]u8 {
 	hmac.update(&ctx, ciphertext)
 	mac: [32]u8
 	hmac.final(&ctx, mac[:])
+
 	return mac
 }
 
@@ -354,39 +328,16 @@ media_mac :: proc(keys: Media_Keys, ciphertext: []u8) -> [32]u8 {
 // borrow the decoded protobuf. Presence flags preserve explicitly empty fields;
 // nonempty fields are also emitted when constructed without presence flags.
 Media_Message :: struct {
-	kind: Media_Kind,
-	url,
-	direct_path,
-	mime_type,
-	caption,
-	file_name,
-	title:                                       string,
-	media_key,
-	file_sha256,
-	file_enc_sha256,
-	jpeg_thumbnail:                                      []u8,
-	file_length: u64,
-	media_key_timestamp: i64,
-	height,
-	width,
-	page_count:                                                                    u32,
-	context_info: Message_Context,
-	has_url,
-	has_direct_path,
-	has_mime_type,
-	has_caption,
-	has_file_name,
-	has_title:               bool,
-	has_media_key,
-	has_file_sha256,
-	has_file_enc_sha256,
-	has_jpeg_thumbnail:                      bool,
-	has_file_length,
-	has_media_key_timestamp,
-	has_height,
-	has_width,
-	has_page_count,
-	has_context: bool,
+	kind:                                                                                         Media_Kind,
+	url, direct_path, mime_type, caption, file_name, title:                                       string,
+	media_key, file_sha256, file_enc_sha256, jpeg_thumbnail:                                      []u8,
+	file_length:                                                                                  u64,
+	media_key_timestamp:                                                                          i64,
+	height, width, page_count:                                                                    u32,
+	context_info:                                                                                 Message_Context,
+	has_url, has_direct_path, has_mime_type, has_caption, has_file_name, has_title:               bool,
+	has_media_key, has_file_sha256, has_file_enc_sha256, has_jpeg_thumbnail:                      bool,
+	has_file_length, has_media_key_timestamp, has_height, has_width, has_page_count, has_context: bool,
 }
 
 Message_Key :: struct {
@@ -396,21 +347,12 @@ Message_Key :: struct {
 }
 Reaction_Message :: struct {
 	key:                                                          Message_Key,
-	text,
-	grouping_key:                                           string,
+	text, grouping_key:                                           string,
 	sender_timestamp_ms:                                          i64,
-	has_key,
-	has_text,
-	has_grouping_key,
-	has_sender_timestamp_ms: bool,
+	has_key, has_text, has_grouping_key, has_sender_timestamp_ms: bool,
 }
 
-media_metadata_from_message :: proc(
-	message: Media_Message,
-) -> (
-	metadata: Media_Metadata,
-	err: Media_Error,
-) {
+media_metadata_from_message :: proc(message: Media_Message) -> (metadata: Media_Metadata, err: Media_Error) {
 	if message.kind != .Image && message.kind != .Document {
 		return {}, {kind = .Invalid_Kind}
 	}
@@ -426,37 +368,30 @@ media_metadata_from_message :: proc(
 	copy(metadata.file_sha256[:], message.file_sha256)
 	copy(metadata.file_enc_sha256[:], message.file_enc_sha256)
 	metadata.file_length = message.file_length
+
 	return metadata, {}
 }
 
 // Match Baileys' download routing: only the canonical CDN URL is accepted;
 // otherwise a valid directPath is attached to mmg.whatsapp.net. No arbitrary
 // sender-selected host is returned for the caller's HTTP downloader.
-media_download_url :: proc(
-	dst: []u8,
-	message: Media_Message,
-) -> (
-	url: string,
-	err: Media_Error,
-) {
-	if bytes.alias(dst, transmute([]u8)message.url) ||
-	   bytes.alias(dst, transmute([]u8)message.direct_path) {
+media_download_url :: proc(dst: []u8, message: Media_Message) -> (url: string, err: Media_Error) {
+	if bytes.alias(dst, transmute([]u8)message.url) || bytes.alias(dst, transmute([]u8)message.direct_path) {
 		return "", {kind = .Overlapping_Buffers}
 	}
 
 	url = message.url
+
 	if strings.has_prefix(url, "https://mmg.whatsapp.net/") {
 		for c in url {
 			if c <= 32 || c >= 127 {
 				return "", {kind = .Invalid_Download_Path}
 			}
-
 		}
-		if strings.contains(url, "#") ||
-		   strings.contains(url, "\\") {
+
+		if strings.contains(url, "#") || strings.contains(url, "\\") {
 			return "", {kind = .Invalid_Download_Path}
 		}
-
 	} else {
 		if len(message.direct_path) == 0 ||
 		   message.direct_path[0] != '/' ||
@@ -465,15 +400,13 @@ media_download_url :: proc(
 		}
 
 		for c in message.direct_path {
-			if c <= 32 ||
-			   c >= 127 ||
-			   c == '#' ||
-			   c == '\\' {
+			if c <= 32 || c >= 127 || c == '#' || c == '\\' {
 				return "", {kind = .Invalid_Download_Path}
 			}
-
 		}
+
 		prefix := "https://mmg.whatsapp.net"
+
 		if len(dst) < len(prefix) + len(message.direct_path) {
 			return "", {kind = .Destination_Undersized}
 		}
@@ -488,16 +421,11 @@ media_download_url :: proc(
 	}
 
 	copy(dst, transmute([]u8)url)
+
 	return cast(string)dst[:len(url)], {}
 }
 
-media_message_encode :: proc(
-	dst: []u8,
-	message: Media_Message,
-) -> (
-	int,
-	Media_Error,
-) {
+media_message_encode :: proc(dst: []u8, message: Media_Message) -> (int, Media_Error) {
 	if message.kind != .Image && message.kind != .Document {
 		return 0, {kind = .Invalid_Kind}
 	}
@@ -505,6 +433,7 @@ media_message_encode :: proc(
 	measure := Media_Writer {
 		target = dst,
 	}
+
 	media_emit_envelope(&measure, message)
 	if measure.err.kind != .None do return 0, measure.err
 
@@ -515,16 +444,13 @@ media_message_encode :: proc(
 	writer := Media_Writer {
 		dst = dst,
 	}
+
 	media_emit_envelope(&writer, message)
+
 	return writer.at, writer.err
 }
 
-media_message_decode :: proc(
-	src: []u8,
-) -> (
-	message: Media_Message,
-	err: Media_Error,
-) {
+media_message_decode :: proc(src: []u8) -> (message: Media_Message, err: Media_Error) {
 	if len(src) > MAX_PROTOBUF_MESSAGE_SIZE {
 		return {}, {kind = .Message_Oversized}
 	}
@@ -539,27 +465,27 @@ media_message_decode :: proc(
 	message.kind = .Image
 	if number == 7 do message.kind = .Document
 
-	key_field, path_field, timestamp_field :=
-		cast(u32)8, cast(u32)11, cast(u32)12
+	key_field, path_field, timestamp_field := cast(u32)8, cast(u32)11, cast(u32)12
+
 	if message.kind == .Document {
 		key_field, path_field, timestamp_field = 7, 10, 11
 	}
 
 	at := 0
 	seen: u64
+
 	for at < len(payload) {
 		field, protobuf_err := protobuf_field_read(payload, &at)
+
 		if protobuf_err != .None {
-			return {}, {
-				kind = .Invalid_Protobuf,
-				protobuf = protobuf_err,
-			}
+			return {}, {kind = .Invalid_Protobuf, protobuf = protobuf_err}
 		}
 
 		known := media_message_field_known(&message, field, key_field, path_field, timestamp_field)
 		if !known do continue
 
 		bit := cast(u64)1 << field.number
+
 		if seen & bit != 0 {
 			return {}, {kind = .Duplicate_Field}
 		}
@@ -570,20 +496,22 @@ media_message_decode :: proc(
 			field.number == 6 ||
 			field.number == timestamp_field ||
 			message.kind == .Image && field.number == 7
+
 		if integer {
-			if integer_error := media_message_integer_decode(&message, field, timestamp_field);
-			   integer_error.kind != .None do return {}, integer_error
+			if integer_error := media_message_integer_decode(&message, field, timestamp_field); integer_error.kind != .None do return {}, integer_error
 			continue
 		}
 
-		if bytes_error := media_message_bytes_decode(&message, field, key_field);
-		   bytes_error.kind != .None do return {}, bytes_error
+		if bytes_error := media_message_bytes_decode(&message, field, key_field); bytes_error.kind != .None do return {}, bytes_error
 	}
+
 	return message, {}
 }
 
 media_message_field_known :: proc(
-	message: ^Media_Message, field: Protobuf_Field, key_field, path_field, timestamp_field: u32,
+	message: ^Media_Message,
+	field: Protobuf_Field,
+	key_field, path_field, timestamp_field: u32,
 ) -> bool {
 	switch field.number {
 	case 1 ..= 6, 9, 16, 17:
@@ -593,51 +521,46 @@ media_message_field_known :: proc(
 	case 8, 20:
 		if message.kind == .Document do return true
 	}
-	return field.number == key_field ||
-		field.number == path_field ||
-		field.number == timestamp_field
+	return field.number == key_field || field.number == path_field || field.number == timestamp_field
 }
 
 media_message_integer_decode :: proc(
-	message: ^Media_Message, field: Protobuf_Field, timestamp_field: u32,
+	message: ^Media_Message,
+	field: Protobuf_Field,
+	timestamp_field: u32,
 ) -> Media_Error {
 	if field.wire_type != 0 {
 		return {kind = .Invalid_Protobuf}
 	}
 
 	if field.number == 5 {
-		message.file_length, message.has_file_length =
-			field.value, true
+		message.file_length, message.has_file_length = field.value, true
 	} else if field.number == timestamp_field {
-		message.media_key_timestamp, message.has_media_key_timestamp =
-			cast(i64)field.value, true
+		message.media_key_timestamp, message.has_media_key_timestamp = cast(i64)field.value, true
 	} else {
 		if field.value > cast(u64)max(u32) {
-			return {
-				kind = .Invalid_Protobuf,
-				protobuf = .Integer_Overflow,
-			}
+			return {kind = .Invalid_Protobuf, protobuf = .Integer_Overflow}
 		}
 
 		if message.kind == .Document {
-			message.page_count, message.has_page_count =
-				cast(u32)field.value, true
+			message.page_count, message.has_page_count = cast(u32)field.value, true
 		} else if field.number == 6 {
-			message.height, message.has_height =
-				cast(u32)field.value, true
+			message.height, message.has_height = cast(u32)field.value, true
 		} else {
-			message.width, message.has_width =
-				cast(u32)field.value, true
+			message.width, message.has_width = cast(u32)field.value, true
 		}
-
 	}
 
 	return {}
 }
 
 media_message_bytes_decode :: proc(
-	message: ^Media_Message, field: Protobuf_Field, key_field: u32,
-) -> (err: Media_Error) {
+	message: ^Media_Message,
+	field: Protobuf_Field,
+	key_field: u32,
+) -> (
+	err: Media_Error,
+) {
 	if field.wire_type != 2 {
 		return {kind = .Invalid_Protobuf}
 	}
@@ -648,29 +571,23 @@ media_message_bytes_decode :: proc(
 		}
 
 		if field.number == 4 {
-			message.file_sha256, message.has_file_sha256 =
-				field.data, true
+			message.file_sha256, message.has_file_sha256 = field.data, true
 		} else if field.number == 9 {
-			message.file_enc_sha256, message.has_file_enc_sha256 =
-				field.data, true
+			message.file_enc_sha256, message.has_file_enc_sha256 = field.data, true
 		} else {
-			message.media_key, message.has_media_key =
-				field.data, true
+			message.media_key, message.has_media_key = field.data, true
 		}
 
 		return {}
 	}
 
 	if field.number == 16 {
-		message.jpeg_thumbnail, message.has_jpeg_thumbnail =
-			field.data, true
+		message.jpeg_thumbnail, message.has_jpeg_thumbnail = field.data, true
 		return {}
 	}
 
 	if field.number == 17 {
-		message.context_info, err = media_context_decode(
-			field.data,
-		)
+		message.context_info, err = media_context_decode(field.data)
 		if err.kind != .None do return err
 
 		message.has_context = true
@@ -680,10 +597,9 @@ media_message_bytes_decode :: proc(
 	return media_message_string_decode(message, field)
 }
 
-media_message_string_decode :: proc(
-	message: ^Media_Message, field: Protobuf_Field,
-) -> Media_Error {
+media_message_string_decode :: proc(message: ^Media_Message, field: Protobuf_Field) -> Media_Error {
 	value := cast(string)field.data
+
 	if !utf8.valid_string(value) {
 		return {kind = .Invalid_UTF8}
 	}
@@ -705,22 +621,17 @@ media_message_string_decode :: proc(
 	case 20:
 		message.caption, message.has_caption = value, true
 	case:
-		message.direct_path, message.has_direct_path =
-			value, true
+		message.direct_path, message.has_direct_path = value, true
 	}
+
 	return {}
 }
 
-reaction_message_encode :: proc(
-	dst: []u8,
-	message: Reaction_Message,
-) -> (
-	int,
-	Media_Error,
-) {
+reaction_message_encode :: proc(dst: []u8, message: Reaction_Message) -> (int, Media_Error) {
 	measure := Media_Writer {
 		target = dst,
 	}
+
 	reaction_emit_envelope(&measure, message)
 	if measure.err.kind != .None do return 0, measure.err
 
@@ -731,16 +642,13 @@ reaction_message_encode :: proc(
 	writer := Media_Writer {
 		dst = dst,
 	}
+
 	reaction_emit_envelope(&writer, message)
+
 	return writer.at, writer.err
 }
 
-reaction_message_decode :: proc(
-	src: []u8,
-) -> (
-	message: Reaction_Message,
-	err: Media_Error,
-) {
+reaction_message_decode :: proc(src: []u8) -> (message: Reaction_Message, err: Media_Error) {
 	if len(src) > MAX_PROTOBUF_MESSAGE_SIZE {
 		return {}, {kind = .Message_Oversized}
 	}
@@ -752,39 +660,36 @@ reaction_message_decode :: proc(
 
 	at := 0
 	seen: u8
+
 	for at < len(payload) {
 		field, protobuf_err := protobuf_field_read(payload, &at)
+
 		if protobuf_err != .None {
-			return {}, {
-				kind = .Invalid_Protobuf,
-				protobuf = protobuf_err,
-			}
+			return {}, {kind = .Invalid_Protobuf, protobuf = protobuf_err}
 		}
 
 		if field.number < 1 || field.number > 4 do continue
 
 		bit := cast(u8)1 << field.number
+
 		if seen & bit != 0 {
 			return {}, {kind = .Duplicate_Field}
 		}
 
 		seen |= bit
-		if field_error := reaction_message_field_decode(&message, field);
-		   field_error.kind != .None do return {}, field_error
+		if field_error := reaction_message_field_decode(&message, field); field_error.kind != .None do return {}, field_error
 	}
+
 	return message, {}
 }
 
-reaction_message_field_decode :: proc(
-	message: ^Reaction_Message, field: Protobuf_Field,
-) -> (err: Media_Error) {
+reaction_message_field_decode :: proc(message: ^Reaction_Message, field: Protobuf_Field) -> (err: Media_Error) {
 	if field.number == 4 {
 		if field.wire_type != 0 {
 			return {kind = .Invalid_Protobuf}
 		}
 
-		message.sender_timestamp_ms, message.has_sender_timestamp_ms =
-			cast(i64)field.value, true
+		message.sender_timestamp_ms, message.has_sender_timestamp_ms = cast(i64)field.value, true
 		return {}
 	}
 
@@ -799,6 +704,7 @@ reaction_message_field_decode :: proc(
 		message.has_key = true
 	} else {
 		value := cast(string)field.data
+
 		if !utf8.valid_string(value) {
 			return {kind = .Invalid_UTF8}
 		}
@@ -806,23 +712,14 @@ reaction_message_field_decode :: proc(
 		if field.number == 2 {
 			message.text, message.has_text = value, true
 		} else {
-			message.grouping_key, message.has_grouping_key =
-				value, true
+			message.grouping_key, message.has_grouping_key = value, true
 		}
-
 	}
 
 	return {}
 }
 
-reaction_checkmark_encode :: proc(
-	dst: []u8,
-	key: Message_Key,
-	sender_timestamp_ms: i64,
-) -> (
-	int,
-	Media_Error,
-) {
+reaction_checkmark_encode :: proc(dst: []u8, key: Message_Key, sender_timestamp_ms: i64) -> (int, Media_Error) {
 	if len(key.remote_jid) == 0 || len(key.id) == 0 {
 		return 0, {kind = .Invalid_Reaction_Key}
 	}
@@ -852,8 +749,12 @@ media_write_varint :: proc(writer: ^Media_Writer, value: u64) {
 	}
 
 	size := protobuf_varint_size(value)
+
 	if size > MAX_PROTOBUF_MESSAGE_SIZE - writer.at {
-		writer.err = {kind = .Message_Oversized}
+		writer.err = {
+			kind = .Message_Oversized,
+		}
+
 		return
 	}
 
@@ -865,26 +766,19 @@ media_write_varint :: proc(writer: ^Media_Writer, value: u64) {
 	writer.at += size
 }
 
-media_write_header :: proc(
-	writer: ^Media_Writer,
-	number: u32,
-	size: int,
-) {
+media_write_header :: proc(writer: ^Media_Writer, number: u32, size: int) {
 	media_write_varint(writer, cast(u64)number << 3 | 2)
 	media_write_varint(writer, cast(u64)size)
 }
 
-media_write_bytes :: proc(
-	writer: ^Media_Writer,
-	number: u32,
-	data: []u8,
-) {
+media_write_bytes :: proc(writer: ^Media_Writer, number: u32, data: []u8) {
 	if writer.err.kind != .None do return
 
 	if bytes.alias(writer.target, data) {
 		writer.err = {
 			kind = .Overlapping_Buffers,
 		}
+
 		return
 	}
 
@@ -892,6 +786,7 @@ media_write_bytes :: proc(
 		writer.err = {
 			kind = .Message_Oversized,
 		}
+
 		return
 	}
 
@@ -902,6 +797,7 @@ media_write_bytes :: proc(
 		writer.err = {
 			kind = .Message_Oversized,
 		}
+
 		return
 	}
 
@@ -912,38 +808,30 @@ media_write_bytes :: proc(
 	writer.at += len(data)
 }
 
-media_write_string :: proc(
-	writer: ^Media_Writer,
-	number: u32,
-	value: string,
-) {
+media_write_string :: proc(writer: ^Media_Writer, number: u32, value: string) {
 	if !utf8.valid_string(value) {
 		writer.err = {
 			kind = .Invalid_UTF8,
 		}
+
 		return
 	}
 
 	media_write_bytes(writer, number, transmute([]u8)value)
 }
 
-media_write_integer :: proc(
-	writer: ^Media_Writer,
-	number: u32,
-	value: u64,
-) {
+media_write_integer :: proc(writer: ^Media_Writer, number: u32, value: u64) {
 	media_write_varint(writer, cast(u64)number << 3)
 	media_write_varint(writer, value)
 }
 
-media_emit_envelope :: proc(
-	writer: ^Media_Writer,
-	message: Media_Message,
-) {
+media_emit_envelope :: proc(writer: ^Media_Writer, message: Media_Message) {
 	measure := Media_Writer {
 		target = writer.target,
 	}
+
 	media_emit_body(&measure, message)
+
 	if measure.err.kind != .None {
 		writer.err = measure.err
 		return
@@ -956,15 +844,12 @@ media_emit_envelope :: proc(
 	media_emit_body(writer, message)
 }
 
-media_emit_body :: proc(
-	writer: ^Media_Writer,
-	message: Media_Message,
-) {
+media_emit_body :: proc(writer: ^Media_Writer, message: Media_Message) {
 	m := message
 	if !media_emit_kind_validate(writer, m) do return
 
-	caption, key, path, timestamp :=
-		cast(u32)3, cast(u32)8, cast(u32)11, cast(u32)12
+	caption, key, path, timestamp := cast(u32)3, cast(u32)8, cast(u32)11, cast(u32)12
+
 	if m.kind == .Document {
 		caption, key, path, timestamp = 20, 7, 10, 11
 	}
@@ -977,22 +862,19 @@ media_emit_body :: proc(
 		{1, m.url, m.has_url || len(m.url) > 0},
 		{2, m.mime_type, m.has_mime_type || len(m.mime_type) > 0},
 		{caption, m.caption, m.has_caption || len(m.caption) > 0},
-		{
-			path,
-			m.direct_path,
-			m.has_direct_path || len(m.direct_path) > 0,
-		},
+		{path, m.direct_path, m.has_direct_path || len(m.direct_path) > 0},
 		{8, m.file_name, m.has_file_name || len(m.file_name) > 0},
 		{3, m.title, m.has_title || len(m.title) > 0},
 	}
+
 	// Emit field-number order, as protobufjs's pinned encoder does.
 	for number in 1 ..= 20 {
 		for field in strings_to_write {
 			if field.number == cast(u32)number && field.present {
 				media_write_string(writer, field.number, field.value)
 			}
-
 		}
+
 		if !media_emit_bytes_fields(writer, m, number, key) do return
 		if !media_emit_integer_context_fields(writer, m, number, timestamp) do return
 	}
@@ -1012,50 +894,27 @@ media_emit_kind_validate :: proc(writer: ^Media_Writer, m: Media_Message) -> boo
 		return false
 	}
 
-	if m.kind == .Document &&
-	   (m.has_height ||
-			   m.height != 0 ||
-			   m.has_width ||
-			   m.width != 0) {
+	if m.kind == .Document && (m.has_height || m.height != 0 || m.has_width || m.width != 0) {
 		writer.err = {
 			kind = .Invalid_Metadata,
 		}
+
 		return false
 	}
 
 	return true
 }
 
-media_emit_bytes_fields :: proc(
-	writer: ^Media_Writer, m: Media_Message, number: int, key: u32,
-) -> bool {
+media_emit_bytes_fields :: proc(writer: ^Media_Writer, m: Media_Message, number: int, key: u32) -> bool {
 	for field in ([?]struct {
 			number:  u32,
 			data:    []u8,
 			present: bool,
 		} {
-			{
-				4,
-				m.file_sha256,
-				m.has_file_sha256 || len(m.file_sha256) > 0,
-			},
-			{
-				9,
-				m.file_enc_sha256,
-				m.has_file_enc_sha256 ||
-				len(m.file_enc_sha256) > 0,
-			},
-			{
-				key,
-				m.media_key,
-				m.has_media_key || len(m.media_key) > 0,
-			},
-			{
-				16,
-				m.jpeg_thumbnail,
-				m.has_jpeg_thumbnail ||
-				len(m.jpeg_thumbnail) > 0,
-			},
+			{4, m.file_sha256, m.has_file_sha256 || len(m.file_sha256) > 0},
+			{9, m.file_enc_sha256, m.has_file_enc_sha256 || len(m.file_enc_sha256) > 0},
+			{key, m.media_key, m.has_media_key || len(m.media_key) > 0},
+			{16, m.jpeg_thumbnail, m.has_jpeg_thumbnail || len(m.jpeg_thumbnail) > 0},
 		}) {
 		if field.number != cast(u32)number || !field.present {
 			continue
@@ -1065,29 +924,28 @@ media_emit_bytes_fields :: proc(
 			writer.err = {
 				kind = .Invalid_Metadata,
 			}
+
 			return false
 		}
 
 		media_write_bytes(writer, field.number, field.data)
 	}
+
 	return true
 }
 
 media_emit_integer_context_fields :: proc(
-	writer: ^Media_Writer, m: Media_Message, number: int, timestamp: u32,
+	writer: ^Media_Writer,
+	m: Media_Message,
+	number: int,
+	timestamp: u32,
 ) -> bool {
 	if number == 5 && (m.has_file_length || m.file_length != 0) {
 		media_write_integer(writer, 5, m.file_length)
 	}
 
-	if number == cast(int)timestamp &&
-	   (m.has_media_key_timestamp ||
-			   m.media_key_timestamp != 0) {
-		media_write_integer(
-			writer,
-			timestamp,
-			cast(u64)m.media_key_timestamp,
-		)
+	if number == cast(int)timestamp && (m.has_media_key_timestamp || m.media_key_timestamp != 0) {
+		media_write_integer(writer, timestamp, cast(u64)m.media_key_timestamp)
 	}
 
 	if m.kind == .Image {
@@ -1098,9 +956,7 @@ media_emit_integer_context_fields :: proc(
 		if number == 7 && (m.has_width || m.width != 0) {
 			media_write_integer(writer, 7, cast(u64)m.width)
 		}
-
-	} else if number == 6 &&
-	   (m.has_page_count || m.page_count != 0) {
+	} else if number == 6 && (m.has_page_count || m.page_count != 0) {
 		media_write_integer(writer, 6, cast(u64)m.page_count)
 	}
 
@@ -1108,7 +964,9 @@ media_emit_integer_context_fields :: proc(
 		measure := Media_Writer {
 			target = writer.target,
 		}
+
 		media_emit_context(&measure, m.context_info)
+
 		if measure.err.kind != .None {
 			writer.err = measure.err
 			return false
@@ -1121,11 +979,9 @@ media_emit_integer_context_fields :: proc(
 	return true
 }
 
-media_emit_context :: proc(
-	writer: ^Media_Writer,
-	context_info: Message_Context,
-) {
+media_emit_context :: proc(writer: ^Media_Writer, context_info: Message_Context) {
 	c := context_info
+
 	if c.has_stanza_id {
 		media_write_string(writer, 1, c.stanza_id)
 	}
@@ -1135,8 +991,7 @@ media_emit_context :: proc(
 	}
 
 	if c.has_quoted_message {
-		if err := media_validate_protobuf(c.quoted_message);
-		   err.kind != .None {
+		if err := media_validate_protobuf(c.quoted_message); err.kind != .None {
 			writer.err = err
 			return
 		}
@@ -1147,17 +1002,15 @@ media_emit_context :: proc(
 	if c.has_remote_jid {
 		media_write_string(writer, 4, c.remote_jid)
 	}
-
 }
 
-reaction_emit_envelope :: proc(
-	writer: ^Media_Writer,
-	message: Reaction_Message,
-) {
+reaction_emit_envelope :: proc(writer: ^Media_Writer, message: Reaction_Message) {
 	measure := Media_Writer {
 		target = writer.target,
 	}
+
 	reaction_emit_body(&measure, message)
+
 	if measure.err.kind != .None {
 		writer.err = measure.err
 		return
@@ -1167,16 +1020,16 @@ reaction_emit_envelope :: proc(
 	reaction_emit_body(writer, message)
 }
 
-reaction_emit_body :: proc(
-	writer: ^Media_Writer,
-	message: Reaction_Message,
-) {
+reaction_emit_body :: proc(writer: ^Media_Writer, message: Reaction_Message) {
 	m := message
+
 	if m.has_key || m.key.remote_jid != "" || m.key.id != "" {
 		measure := Media_Writer {
 			target = writer.target,
 		}
+
 		media_emit_message_key(&measure, m.key)
+
 		if measure.err.kind != .None {
 			writer.err = measure.err
 			return
@@ -1195,19 +1048,11 @@ reaction_emit_body :: proc(
 	}
 
 	if m.has_sender_timestamp_ms || m.sender_timestamp_ms != 0 {
-		media_write_integer(
-			writer,
-			4,
-			cast(u64)m.sender_timestamp_ms,
-		)
+		media_write_integer(writer, 4, cast(u64)m.sender_timestamp_ms)
 	}
-
 }
 
-media_emit_message_key :: proc(
-	writer: ^Media_Writer,
-	key: Message_Key,
-) {
+media_emit_message_key :: proc(writer: ^Media_Writer, key: Message_Key) {
 	if key.has_remote_jid || key.remote_jid != "" {
 		media_write_string(writer, 1, key.remote_jid)
 	}
@@ -1223,17 +1068,9 @@ media_emit_message_key :: proc(
 	if key.has_participant || key.participant != "" {
 		media_write_string(writer, 4, key.participant)
 	}
-
 }
 
-media_extract_content :: proc(
-	src: []u8,
-	depth: int,
-) -> (
-	payload: []u8,
-	number: u32,
-	err: Media_Error,
-) {
+media_extract_content :: proc(src: []u8, depth: int) -> (payload: []u8, number: u32, err: Media_Error) {
 	if depth > MAX_MESSAGE_NESTING {
 		return nil, 0, {kind = .Nesting_Limit}
 	}
@@ -1241,13 +1078,12 @@ media_extract_content :: proc(
 	at := 0
 	seen: bool
 	outer_number: u32
+
 	for at < len(src) {
 		field, protobuf_err := protobuf_field_read(src, &at)
+
 		if protobuf_err != .None {
-			return nil, 0, {
-				kind = .Invalid_Protobuf,
-				protobuf = protobuf_err,
-			}
+			return nil, 0, {kind = .Invalid_Protobuf, protobuf = protobuf_err}
 		}
 
 		switch field.number {
@@ -1258,6 +1094,7 @@ media_extract_content :: proc(
 
 			if seen {
 				kind: Media_Error_Kind = .Conflicting_Content
+
 				if outer_number == field.number {
 					kind = .Duplicate_Field
 				}
@@ -1267,6 +1104,7 @@ media_extract_content :: proc(
 
 			seen = true
 			outer_number = field.number
+
 			switch field.number {
 			case 37, 40, 53, 55, 59:
 				payload, number, err = media_extract_wrapper(field.data, depth)
@@ -1274,27 +1112,21 @@ media_extract_content :: proc(
 			case:
 				payload, number = field.data, field.number
 			}
-
 		}
 	}
+
 	return payload, number, {}
 }
 
-media_extract_wrapper :: proc(
-	src: []u8, depth: int,
-) -> (payload: []u8, number: u32, err: Media_Error) {
+media_extract_wrapper :: proc(src: []u8, depth: int) -> (payload: []u8, number: u32, err: Media_Error) {
 	inner_at := 0
 	inner_seen := false
+
 	for inner_at < len(src) {
-		inner, inner_err := protobuf_field_read(
-			src,
-			&inner_at,
-		)
+		inner, inner_err := protobuf_field_read(src, &inner_at)
+
 		if inner_err != .None {
-			return nil, 0, {
-				kind = .Invalid_Protobuf,
-				protobuf = inner_err,
-			}
+			return nil, 0, {kind = .Invalid_Protobuf, protobuf = inner_err}
 		}
 
 		if inner.number != 1 do continue
@@ -1308,15 +1140,13 @@ media_extract_wrapper :: proc(
 		}
 
 		inner_seen = true
-		payload, number, err = media_extract_content(
-			inner.data,
-			depth + 1,
-		)
+		payload, number, err = media_extract_content(inner.data, depth + 1)
+
 		if err.kind != .None {
 			return nil, 0, err
 		}
-
 	}
+
 	if !inner_seen {
 		return nil, 0, {kind = .Invalid_Protobuf}
 	}
@@ -1324,21 +1154,15 @@ media_extract_wrapper :: proc(
 	return payload, number, {}
 }
 
-media_context_decode :: proc(
-	src: []u8,
-) -> (
-	context_info: Message_Context,
-	err: Media_Error,
-) {
+media_context_decode :: proc(src: []u8) -> (context_info: Message_Context, err: Media_Error) {
 	at := 0
 	seen: u8
+
 	for at < len(src) {
 		field, protobuf_err := protobuf_field_read(src, &at)
+
 		if protobuf_err != .None {
-			return {}, {
-				kind = .Invalid_Protobuf,
-				protobuf = protobuf_err,
-			}
+			return {}, {kind = .Invalid_Protobuf, protobuf = protobuf_err}
 		}
 
 		if field.number < 1 || field.number > 4 do continue
@@ -1348,67 +1172,62 @@ media_context_decode :: proc(
 		}
 
 		bit := cast(u8)1 << field.number
+
 		if seen & bit != 0 {
 			return {}, {kind = .Duplicate_Field}
 		}
 
 		seen |= bit
+
 		if field.number == 3 {
-			if quoted_err := media_validate_protobuf(field.data);
-			   quoted_err.kind != .None {
+			if quoted_err := media_validate_protobuf(field.data); quoted_err.kind != .None {
 				return {}, quoted_err
 			}
 
-			context_info.quoted_message, context_info.has_quoted_message =
-				field.data, true
+			context_info.quoted_message, context_info.has_quoted_message = field.data, true
 			continue
 		}
 
 		value := cast(string)field.data
+
 		if !utf8.valid_string(value) {
 			return {}, {kind = .Invalid_UTF8}
 		}
 
 		switch field.number {
 		case 1:
-			context_info.stanza_id, context_info.has_stanza_id =
-				value, true
+			context_info.stanza_id, context_info.has_stanza_id = value, true
 		case 2:
-			context_info.participant, context_info.has_participant =
-				value, true
+			context_info.participant, context_info.has_participant = value, true
 		case 4:
-			context_info.remote_jid, context_info.has_remote_jid =
-				value, true
+			context_info.remote_jid, context_info.has_remote_jid = value, true
 		}
 	}
+
 	return context_info, {}
 }
 
-media_key_decode :: proc(
-	src: []u8,
-) -> (
-	key: Message_Key,
-	err: Media_Error,
-) {
+media_key_decode :: proc(src: []u8) -> (key: Message_Key, err: Media_Error) {
 	at := 0
 	seen: u8
+
 	for at < len(src) {
 		field, protobuf_err := protobuf_field_read(src, &at)
+
 		if protobuf_err != .None {
-			return {}, {
-				kind = .Invalid_Protobuf,
-				protobuf = protobuf_err,
-			}
+			return {}, {kind = .Invalid_Protobuf, protobuf = protobuf_err}
 		}
 
 		if field.number < 1 || field.number > 4 do continue
 
 		bit := cast(u8)1 << field.number
+
 		if seen & bit != 0 {
 			return {}, {kind = .Duplicate_Field}
 		}
 
 		seen |= bit
+
 		if field.number == 2 {
 			if field.wire_type != 0 || field.value > 1 {
 				return {}, {kind = .Invalid_Protobuf}
@@ -1423,6 +1242,7 @@ media_key_decode :: proc(
 		}
 
 		value := cast(string)field.data
+
 		if !utf8.valid_string(value) {
 			return {}, {kind = .Invalid_UTF8}
 		}
@@ -1436,6 +1256,7 @@ media_key_decode :: proc(
 			key.participant, key.has_participant = value, true
 		}
 	}
+
 	return key, {}
 }
 
@@ -1445,13 +1266,15 @@ media_validate_protobuf :: proc(src: []u8) -> Media_Error {
 	}
 
 	at := 0
+
 	for at < len(src) {
 		_, err := protobuf_field_read(src, &at)
+
 		if err != .None {
 			return {kind = .Invalid_Protobuf, protobuf = err}
 		}
-
 	}
+
 	return {}
 }
 
@@ -1495,13 +1318,7 @@ Media_Upload_Result :: struct {
 	direct_path_size: int,
 }
 
-media_connection_query_encode :: proc(
-	dst: []u8,
-	request_id: string,
-) -> (
-	int,
-	Media_Error,
-) {
+media_connection_query_encode :: proc(dst: []u8, request_id: string) -> (int, Media_Error) {
 	if !media_request_id_valid(request_id) {
 		return 0, {kind = .Invalid_Request_ID}
 	}
@@ -1516,7 +1333,9 @@ media_connection_query_encode :: proc(
 		},
 		content = []Binary_Node{{tag = "media_conn"}},
 	}
+
 	n, e := binary_node_encode(dst, node)
+
 	if e.kind != .None {
 		return n, {kind = .Binary_Node_Failed, binary = e}
 	}
@@ -1566,16 +1385,10 @@ media_connection_decode :: proc(
 		storage[at] = {hostname, length}
 		at += 1
 	}
-	return {
-		auth = auth,
-		ttl_seconds = cast(u32)ttl,
-		hosts = storage[:count],
-	}, {}
+	return {auth = auth, ttl_seconds = cast(u32)ttl, hosts = storage[:count]}, {}
 }
 
-media_connection_node_decode :: proc(
-	node: Binary_Node, request_id: string,
-) -> (^Binary_Node, Media_Error) {
+media_connection_node_decode :: proc(node: Binary_Node, request_id: string) -> (^Binary_Node, Media_Error) {
 	if !media_request_id_valid(request_id) {
 		return nil, {kind = .Invalid_Request_ID}
 	}
@@ -1583,10 +1396,8 @@ media_connection_node_decode :: proc(
 	id, _ := node_attr(node, "id")
 	kind, _ := node_attr(node, "type")
 	from, present := node_attr(node, "from")
-	if node.tag != "iq" ||
-	   id != request_id ||
-	   present &&
-		   (from != "s.whatsapp.net" && from != "@s.whatsapp.net") {
+
+	if node.tag != "iq" || id != request_id || present && (from != "s.whatsapp.net" && from != "@s.whatsapp.net") {
 		return nil, {kind = .Unexpected_Response}
 	}
 
@@ -1600,6 +1411,7 @@ media_connection_node_decode :: proc(
 
 	children, _ := node.content.([]Binary_Node)
 	target: ^Binary_Node
+
 	for &child in children {
 		if child.tag != "media_conn" do continue
 
@@ -1609,6 +1421,7 @@ media_connection_node_decode :: proc(
 
 		target = &child
 	}
+
 	if target == nil {
 		return nil, {kind = .Invalid_Connection}
 	}
@@ -1618,14 +1431,14 @@ media_connection_node_decode :: proc(
 
 media_connection_hosts_validate :: proc(hosts: []Binary_Node) -> (int, Media_Error) {
 	count := 0
+
 	for host in hosts {
 		if host.tag != "host" do continue
 
 		hostname, _ := node_attr(host, "hostname")
 		_, valid_limit := media_host_limit(host)
-		if !media_hostname_valid(hostname) ||
-		   !valid_limit ||
-		   count >= MAX_MEDIA_HOSTS {
+
+		if !media_hostname_valid(hostname) || !valid_limit || count >= MAX_MEDIA_HOSTS {
 			return 0, {kind = .Invalid_Connection}
 		}
 
@@ -1633,6 +1446,7 @@ media_connection_hosts_validate :: proc(hosts: []Binary_Node) -> (int, Media_Err
 		// responses can advertise the same host more than once.
 		count += 1
 	}
+
 	if count == 0 do return 0, {kind = .Invalid_Connection}
 
 	return count, {}
@@ -1643,6 +1457,7 @@ media_host_limit :: proc(host: Binary_Node) -> (u64, bool) {
 	if !present do return 0, true
 
 	length, valid := strconv.parse_u64(text, 10)
+
 	return length, valid && length > 0
 }
 
@@ -1655,10 +1470,7 @@ media_upload_url :: proc(
 	string,
 	Media_Error,
 ) {
-	if !media_hostname_valid(hostname) ||
-	   len(auth) == 0 ||
-	   len(auth) > 4096 ||
-	   !utf8.valid_string(auth) {
+	if !media_hostname_valid(hostname) || len(auth) == 0 || len(auth) > 4096 || !utf8.valid_string(auth) {
 		return "", {kind = .Invalid_Connection}
 	}
 
@@ -1678,18 +1490,11 @@ media_upload_url :: proc(
 		if c == '+' do c = '-'
 
 		if c == '/' do c = '_'
-
 	}
 	// encodeURIComponent's exact unescaped alphabet, as used by pinned Baileys.
 	scratch: [MAX_MEDIA_URL_SIZE]u8
 	at := 0
-	pieces := []string {
-		"https://",
-		hostname,
-		path,
-		cast(string)token[:43],
-		"?auth=",
-	}
+	pieces := []string{"https://", hostname, path, cast(string)token[:43], "?auth="}
 	for piece in pieces {
 		if len(piece) > len(scratch) - at {
 			return "", {kind = .Invalid_Connection}
@@ -1697,8 +1502,7 @@ media_upload_url :: proc(
 
 		at += copy(scratch[at:], transmute([]u8)piece)
 	}
-	if auth_error := media_upload_auth_encode(scratch[:], &at, auth);
-	   auth_error.kind != .None do return "", auth_error
+	if auth_error := media_upload_auth_encode(scratch[:], &at, auth); auth_error.kind != .None do return "", auth_error
 	if 7 + 43 > len(scratch) - at {
 		return "", {kind = .Invalid_Connection}
 	}
@@ -1709,54 +1513,58 @@ media_upload_url :: proc(
 		return "", {kind = .Destination_Undersized}
 	}
 
-	copy(dst, scratch[:at]); return cast(string)dst[:at], {}
+	copy(dst, scratch[:at])
+	return cast(string)dst[:at], {}
 }
 
 media_upload_auth_encode :: proc(scratch: []u8, at: ^int, auth: string) -> Media_Error {
 	hex_digits := "0123456789ABCDEF"
+
 	for c in transmute([]u8)auth {
 		unescaped := is_alphanumeric(c)
+
 		switch c {
 		case '-', '_', '.', '!', '~', '*', '\'', '(', ')':
 			unescaped = true
 		}
-		required := 3; if unescaped do required = 1
+
+		required := 3
+		if unescaped do required = 1
 
 		if required > len(scratch) - at^ {
 			return {kind = .Invalid_Connection}
 		}
 
 		if unescaped {
-			scratch[at^] = c; at^ += 1
+			scratch[at^] = c
+			at^ += 1
 		} else {
-			scratch[at^] = '%'; scratch[at^ + 1] = hex_digits[c >> 4]
-			scratch[at^ + 2] = hex_digits[c & 15]; at^ += 3
+			scratch[at^] = '%'
+			scratch[at^ + 1] = hex_digits[c >> 4]
+			scratch[at^ + 2] = hex_digits[c & 15]
+			at^ += 3
 		}
-
 	}
+
 	return {}
 }
 
 // Strict bounded JSON. Returned strings are copied into fixed owned storage.
-media_upload_response_decode :: proc(
-	src: []u8,
-) -> (
-	result: Media_Upload_Result,
-	err: Media_Error,
-) {
+media_upload_response_decode :: proc(src: []u8) -> (result: Media_Upload_Result, err: Media_Error) {
 	if len(src) > 16384 {
 		return {}, {kind = .Invalid_Upload_Response}
 	}
 
-	if depth_error := media_upload_json_depth_validate(src);
-	   depth_error.kind != .None do return {}, depth_error
+	if depth_error := media_upload_json_depth_validate(src); depth_error.kind != .None do return {}, depth_error
 	parser := json.make_parser(src, spec = .JSON)
 	value, e := json.parse_value(&parser)
+
 	if e != .None {
 		return {}, {kind = .Invalid_Upload_Response}
 	}
 
 	defer json.destroy_value(value)
+
 	if parser.curr_token.kind != .EOF {
 		return {}, {kind = .Invalid_Upload_Response}
 	}
@@ -1776,33 +1584,29 @@ media_upload_response_decode :: proc(
 	}
 
 	url_buffer: [MAX_MEDIA_URL_SIZE]u8
-	normalized, validation := media_download_url(
-		url_buffer[:],
-		{url = url, direct_path = path},
-	)
+	normalized, validation := media_download_url(url_buffer[:], {url = url, direct_path = path})
+
 	if validation.kind != .None || normalized != url {
 		return {}, {kind = .Invalid_Upload_Response}
 	}
 
-	_, validation = media_download_url(
-		url_buffer[:],
-		{direct_path = path},
-	)
+	_, validation = media_download_url(url_buffer[:], {direct_path = path})
+
 	if validation.kind != .None {
 		return {}, {kind = .Invalid_Upload_Response}
 	}
 
 	result.url_size = copy(result.url[:], transmute([]u8)url)
-	result.direct_path_size = copy(
-		result.direct_path[:],
-		transmute([]u8)path,
-	)
+	result.direct_path_size = copy(result.direct_path[:], transmute([]u8)path)
+
 	return result, {}
 }
 
 media_upload_json_depth_validate :: proc(src: []u8) -> Media_Error {
 	// Bound parser recursion before handing nested data to core:encoding/json.
-	depth := 0; quoted, escaped := false, false
+	depth := 0
+	quoted, escaped := false, false
+
 	for c in src {
 		if quoted {
 			if escaped {
@@ -1817,26 +1621,27 @@ media_upload_json_depth_validate :: proc(src: []u8) -> Media_Error {
 		}
 
 		if c == '"' {
-			quoted = true; continue
+			quoted = true
+			continue
 		}
 
 		if c == '{' || c == '[' {
 			depth += 1
+
 			if depth > 16 {
 				return {kind = .Invalid_Upload_Response}
 			}
-
 		}
 
 		if c == '}' || c == ']' {
 			depth -= 1
+
 			if depth < 0 {
 				return {kind = .Invalid_Upload_Response}
 			}
-
 		}
-
 	}
+
 	return {}
 }
 
@@ -1858,48 +1663,53 @@ media_upload :: proc(
 	exchange := execute
 	if exchange == nil do exchange = media_http_native
 
-	if error := media_upload_input_validate(encrypted, metadata, len(connection.hosts));
-	   error.kind != .None {return {}, error}
+	if error := media_upload_input_validate(encrypted, metadata, len(connection.hosts)); error.kind != .None {
+		return {}, error
+	}
 
-	settings := config; settings.max_redirects = 0
-	settings.max_body_size = 16384; settings.allow_http = false
+	settings := config
+	settings.max_redirects = 0
+	settings.max_body_size = 16384
+	settings.allow_http = false
 	if settings.timeout < 0 {
-		return {}, {kind = .HTTP_Failed, http = {kind = .Invalid_Config,
-			phase = .Configuration, write_effect = .Not_Sent}}
+		return {}, {
+			kind = .HTTP_Failed,
+			http = {kind = .Invalid_Config, phase = .Configuration, write_effect = .Not_Sent},
+		}
 	}
 	budget := settings.timeout
 	if budget == 0 do budget = 30 * time.Second
 	started := time.tick_now()
-	last := Media_Error{kind = .Invalid_Connection}
+	last := Media_Error {
+		kind = .Invalid_Connection,
+	}
 	effect: network_client.HTTP_Write_Effect = .Not_Sent
 	for host in connection.hosts {
-		if host.max_content_length != 0 &&
-		   cast(u64)len(encrypted) > host.max_content_length {
+		if host.max_content_length != 0 && cast(u64)len(encrypted) > host.max_content_length {
 			last = {
 				kind = .Media_Oversized,
 			}; continue
 		}
 
 		url_buffer: [MAX_MEDIA_URL_SIZE]u8
-		url, e := media_upload_url(
-			url_buffer[:],
-			host.hostname,
-			connection.auth,
-			kind,
-			metadata.file_enc_sha256,
-		)
+		url, e := media_upload_url(url_buffer[:], host.hostname, connection.auth, kind, metadata.file_enc_sha256)
 		if e.kind != .None do return {}, e
 
 		// A failed host consumes the same operation budget as its fallback.
 		// Monotonic elapsed time avoids extending it on wall-clock adjustments.
 		remaining := budget - time.tick_since(started)
+
 		if remaining <= 0 {
-			return {}, {kind = .HTTP_Failed, http = {kind = .Deadline_Failed,
-				phase = .Deadline, write_effect = effect}}
+			return {}, {
+				kind = .HTTP_Failed,
+				http = {kind = .Deadline_Failed, phase = .Deadline, write_effect = effect},
+			}
 		}
+
 		settings.timeout = remaining
 		result, exchange_error := media_upload_exchange(exchange, url, encrypted, settings)
 		if exchange_error.kind == .None do return result, {}
+
 		if exchange_error.kind == .HTTP_Failed {
 			if exchange_error.http.write_effect == .Unknown || effect == .Not_Sent {
 				effect = exchange_error.http.write_effect
@@ -1907,6 +1717,7 @@ media_upload :: proc(
 		} else if effect == .Not_Sent {
 			effect = .Response_Received
 		}
+
 		last = exchange_error
 	}
 	// A later dial failure cannot erase an earlier attempt's uncertain effect.
@@ -1916,15 +1727,12 @@ media_upload :: proc(
 
 // Reject malformed or oversized inputs before any upload can consume its budget.
 @(private)
-media_upload_input_validate :: proc(encrypted: []u8, metadata: Media_Metadata,
-	host_count: int) -> Media_Error {
-	if host_count == 0 ||
-	   host_count > MAX_MEDIA_HOSTS {
+media_upload_input_validate :: proc(encrypted: []u8, metadata: Media_Metadata, host_count: int) -> Media_Error {
+	if host_count == 0 || host_count > MAX_MEDIA_HOSTS {
 		return {kind = .Invalid_Connection}
 	}
 
-	if len(encrypted) < 26 ||
-	   len(encrypted) > MAX_MEDIA_SIZE_LIMIT + 26 {
+	if len(encrypted) < 26 || len(encrypted) > MAX_MEDIA_SIZE_LIMIT + 26 {
 		return {kind = .Invalid_Encrypted_Length}
 	}
 
@@ -1933,20 +1741,26 @@ media_upload_input_validate :: proc(encrypted: []u8, metadata: Media_Metadata,
 	}
 
 	if metadata.file_length > cast(u64)MAX_MEDIA_SIZE_LIMIT ||
-	   cast(u64)len(encrypted) !=
-		   (metadata.file_length / 16 + 1) * 16 + 10 {
+	   cast(u64)len(encrypted) != (metadata.file_length / 16 + 1) * 16 + 10 {
 		return {kind = .Invalid_Encrypted_Length}
 	}
 
 	if sha256(encrypted) != metadata.file_enc_sha256 {
 		return {kind = .Encrypted_Hash_Mismatch}
 	}
+
 	return {}
 }
 
 media_upload_exchange :: proc(
-	exchange: Media_HTTP_Execute, url: string, encrypted: []u8, settings: network_client.Config,
-) -> (Media_Upload_Result, Media_Error) {
+	exchange: Media_HTTP_Execute,
+	url: string,
+	encrypted: []u8,
+	settings: network_client.Config,
+) -> (
+	Media_Upload_Result,
+	Media_Error,
+) {
 	response, he := exchange(
 		{
 			method = .POST,
@@ -1960,10 +1774,7 @@ media_upload_exchange :: proc(
 		settings,
 	)
 	if he.kind != .None {
-		return {}, {
-			kind = .HTTP_Failed,
-			http = he,
-		}
+		return {}, {kind = .HTTP_Failed, http = he}
 	}
 
 	if response.status < 200 || response.status >= 300 {
@@ -1972,9 +1783,7 @@ media_upload_exchange :: proc(
 		return {}, {kind = .HTTP_Status, status = status}
 	}
 
-	result, parse_err := media_upload_response_decode(
-		response.body,
-	)
+	result, parse_err := media_upload_response_decode(response.body)
 	network_client.response_destroy(&response)
 	if parse_err.kind == .None do return result, {}
 
@@ -2009,9 +1818,7 @@ media_download :: proc(
 	}
 
 	if cast(u64)len(dst) < metadata.file_length {
-		return cast(int)metadata.file_length, {
-			kind = .Destination_Undersized,
-		}
+		return cast(int)metadata.file_length, {kind = .Destination_Undersized}
 	}
 
 	url_buffer: [MAX_MEDIA_URL_SIZE]u8
@@ -2022,13 +1829,7 @@ media_download :: proc(
 	if settings_error.kind != .None do return 0, settings_error
 
 	response, he := exchange(
-		{
-			method = .GET,
-			url = url,
-			headers = []http.Header {
-				{"Origin", "https://web.whatsapp.com"},
-			},
-		},
+		{method = .GET, url = url, headers = []http.Header{{"Origin", "https://web.whatsapp.com"}}},
 		settings,
 	)
 	if he.kind != .None {
@@ -2040,23 +1841,21 @@ media_download :: proc(
 		return 0, {kind = .HTTP_Status, status = response.status}
 	}
 
-	return media_decrypt(
-		dst,
-		response.body,
-		message.kind,
-		metadata,
-		max_size,
-	)
+	return media_decrypt(dst, response.body, message.kind, metadata, max_size)
 }
 
 media_download_settings :: proc(
-	config: network_client.Config, metadata: ^Media_Metadata,
-) -> (network_client.Config, Media_Error) {
-	settings := config; settings.max_redirects = 0
+	config: network_client.Config,
+	metadata: ^Media_Metadata,
+) -> (
+	network_client.Config,
+	Media_Error,
+) {
+	settings := config
+	settings.max_redirects = 0
 	settings.allow_http = false
 	// An empty file is still a complete CBC block and ten-byte MAC.
-	settings.max_body_size =
-		(cast(int)metadata.file_length / 16 + 1) * 16 + 10
+	settings.max_body_size = (cast(int)metadata.file_length / 16 + 1) * 16 + 10
 	// HTTP's body bound includes padding/MAC, unlike the crypto size bound.
 	if settings.max_body_size > http.MAX_BODY_SIZE {
 		return {}, {kind = .Media_Oversized}
@@ -2069,14 +1868,12 @@ media_request_id_valid :: proc(id: string) -> bool {
 	return len(id) > 0 && len(id) <= 128 && utf8.valid_string(id)
 }
 media_hostname_valid :: proc(host: string) -> bool {
-	if len(host) == 0 ||
-	   len(host) > 253 ||
-	   host[0] == '.' ||
-	   host[len(host) - 1] == '.' {
+	if len(host) == 0 || len(host) > 253 || host[0] == '.' || host[len(host) - 1] == '.' {
 		return false
 	}
 
 	label := 0
+
 	for c in transmute([]u8)host {
 		if c == '.' {
 			if label == 0 || label > 63 {
@@ -2091,6 +1888,7 @@ media_hostname_valid :: proc(host: string) -> bool {
 
 		label += 1
 	}
+
 	return label > 0 && label <= 63
 }
 
@@ -2102,14 +1900,10 @@ Media_Retry_Result :: enum {
 }
 // Decoded strings and message_secret borrow the authenticated caller buffer.
 Media_Retry_Notification :: struct {
-	stanza_id,
-	direct_path:                                         string,
+	stanza_id, direct_path:                                         string,
 	result:                                                         Media_Retry_Result,
 	message_secret:                                                 []u8,
-	has_stanza_id,
-	has_direct_path,
-	has_result,
-	has_message_secret: bool,
+	has_stanza_id, has_direct_path, has_result, has_message_secret: bool,
 }
 Media_Retry_Event :: struct {
 	key:            Message_Key,
@@ -2129,14 +1923,9 @@ media_retry_request_encode :: proc(
 	Media_Error,
 ) {
 	when !crypto.HAS_RAND_BYTES do return 0, {kind = .Entropy_Unavailable}
-	nonce: [12]u8; crypto.rand_bytes(nonce[:])
-	return media_retry_request_with_nonce(
-		dst,
-		key,
-		media_key,
-		me_jid,
-		nonce,
-	)
+	nonce: [12]u8
+	crypto.rand_bytes(nonce[:])
+	return media_retry_request_with_nonce(dst, key, media_key, me_jid, nonce)
 }
 
 // Explicit nonce entry point supports persisted uniqueness/deterministic tests.
@@ -2151,8 +1940,7 @@ media_retry_request_with_nonce :: proc(
 	int,
 	Media_Error,
 ) {
-	if validation_error := media_retry_request_validate(key, me_jid);
-	   validation_error.kind != .None do return 0, validation_error
+	if validation_error := media_retry_request_validate(key, me_jid); validation_error.kind != .None do return 0, validation_error
 
 	receipt: [256]u8
 	writer := Media_Writer {
@@ -2163,7 +1951,8 @@ media_retry_request_with_nonce :: proc(
 
 	retry_key := media_retry_key(media_key)
 	defer crypto.zero_explicit(&retry_key, 32)
-	ctx: aes.Context_GCM; aes.init_gcm(&ctx, retry_key[:])
+	ctx: aes.Context_GCM
+	aes.init_gcm(&ctx, retry_key[:])
 	defer crypto.zero_explicit(&ctx, size_of(ctx))
 	ciphertext: [272]u8
 	defer crypto.zero_explicit(&ciphertext, size_of(ciphertext))
@@ -2180,34 +1969,27 @@ media_retry_request_with_nonce :: proc(
 }
 
 media_retry_receipt_encode :: proc(
-	dst: []u8, key: Message_Key, me_jid: string, ciphertext, iv: []u8,
-) -> (int, Media_Error) {
-	from_me := "false"; if key.from_me do from_me = "true"
+	dst: []u8,
+	key: Message_Key,
+	me_jid: string,
+	ciphertext, iv: []u8,
+) -> (
+	int,
+	Media_Error,
+) {
+	from_me := "false"
+	if key.from_me do from_me = "true"
 
-	attrs := []Binary_Node_Attribute {
-		{"jid", key.remote_jid},
-		{"from_me", from_me},
-		{"participant", key.participant},
-	}
+	attrs := []Binary_Node_Attribute{{"jid", key.remote_jid}, {"from_me", from_me}, {"participant", key.participant}}
 	if len(key.participant) == 0 do attrs = attrs[:2]
 
 	node := Binary_Node {
 		tag     = "receipt",
-		attrs   = []Binary_Node_Attribute {
-			{"id", key.id},
-			{"to", me_jid},
-			{"type", "server-error"},
-		},
+		attrs   = []Binary_Node_Attribute{{"id", key.id}, {"to", me_jid}, {"type", "server-error"}},
 		content = []Binary_Node {
 			{
 				tag = "encrypt",
-				content = []Binary_Node {
-					{
-						tag = "enc_p",
-						content = ciphertext,
-					},
-					{tag = "enc_iv", content = iv},
-				},
+				content = []Binary_Node{{tag = "enc_p", content = ciphertext}, {tag = "enc_iv", content = iv}},
 			},
 			{tag = "rmr", attrs = attrs},
 		},
@@ -2240,23 +2022,19 @@ media_retry_request_validate :: proc(key: Message_Key, me_jid: string) -> Media_
 
 // Validate routing against the exact pending message key before accepting the
 // encrypted response. Node/document storage must outlive the returned slices.
-media_retry_event_decode :: proc(
-	node: Binary_Node,
-	expected: Message_Key,
-) -> (
-	Media_Retry_Event,
-	Media_Error,
-) {
+media_retry_event_decode :: proc(node: Binary_Node, expected: Message_Key) -> (Media_Retry_Event, Media_Error) {
 	error_count, route_error := media_retry_event_route_validate(node, expected)
 	if route_error.kind != .None do return {}, route_error
 
 	event := Media_Retry_Event {
 		key = expected,
 	}
+
 	if error_count == 1 {
 		child := node_child(node, "error")
 		text, _ := node_attr(child^, "code")
 		code, valid := strconv.parse_uint(text, 10)
+
 		if !valid || code > cast(uint)max(u32) {
 			return {}, {kind = .Invalid_Retry}
 		}
@@ -2267,6 +2045,7 @@ media_retry_event_decode :: proc(
 
 	encrypted := node_child(node, "encrypt")
 	parts, _ := encrypted.content.([]Binary_Node)
+
 	for part in parts {
 		if part.tag == "enc_p" {
 			if event.ciphertext != nil {
@@ -2283,29 +2062,24 @@ media_retry_event_decode :: proc(
 
 			event.iv, _ = part.content.([]u8)
 		}
-
 	}
-	if len(event.iv) != 12 ||
-	   len(event.ciphertext) < 16 ||
-	   len(event.ciphertext) > 8192 {
+
+	if len(event.iv) != 12 || len(event.ciphertext) < 16 || len(event.ciphertext) > 8192 {
 		return {}, {kind = .Invalid_Retry}
 	}
 
 	return event, {}
 }
 
-media_retry_event_route_validate :: proc(
-	node: Binary_Node, expected: Message_Key,
-) -> (int, Media_Error) {
+media_retry_event_route_validate :: proc(node: Binary_Node, expected: Message_Key) -> (int, Media_Error) {
 	if !media_request_id_valid(expected.id) {
 		return 0, {kind = .Invalid_Retry}
 	}
 
 	id, _ := node_attr(node, "id")
 	kind, _ := node_attr(node, "type")
-	if node.tag != "notification" ||
-	   kind != "mediaretry" ||
-	   id != expected.id {
+
+	if node.tag != "notification" || kind != "mediaretry" || id != expected.id {
 		return 0, {kind = .Unexpected_Response}
 	}
 
@@ -2324,18 +2098,16 @@ media_retry_event_route_validate :: proc(
 
 	children, _ := node.content.([]Binary_Node)
 	rmr_count, encrypt_count, error_count := 0, 0, 0
+
 	for child in children {
 		if child.tag == "rmr" do rmr_count += 1
 
 		if child.tag == "encrypt" do encrypt_count += 1
 
 		if child.tag == "error" do error_count += 1
-
 	}
-	if rmr_count != 1 ||
-	   encrypt_count > 1 ||
-	   error_count > 1 ||
-	   encrypt_count + error_count != 1 {
+
+	if rmr_count != 1 || encrypt_count > 1 || error_count > 1 || encrypt_count + error_count != 1 {
 		return 0, {kind = .Invalid_Retry}
 	}
 
@@ -2352,10 +2124,7 @@ media_retry_decrypt :: proc(
 	Media_Retry_Notification,
 	Media_Error,
 ) {
-	if !media_request_id_valid(expected_id) ||
-	   len(nonce) != 12 ||
-	   len(ciphertext) < 16 ||
-	   len(ciphertext) > 8192 {
+	if !media_request_id_valid(expected_id) || len(nonce) != 12 || len(ciphertext) < 16 || len(ciphertext) > 8192 {
 		return {}, {kind = .Invalid_Retry}
 	}
 
@@ -2374,16 +2143,10 @@ media_retry_decrypt :: proc(
 	defer crypto.zero_explicit(&scratch, size_of(scratch))
 	retry_key := media_retry_key(media_key)
 	defer crypto.zero_explicit(&retry_key, 32)
-	ctx: aes.Context_GCM; aes.init_gcm(&ctx, retry_key[:])
+	ctx: aes.Context_GCM
+	aes.init_gcm(&ctx, retry_key[:])
 	defer crypto.zero_explicit(&ctx, size_of(ctx))
-	valid := aes.open_gcm(
-		&ctx,
-		scratch[:n],
-		nonce,
-		transmute([]u8)expected_id,
-		ciphertext[:n],
-		ciphertext[n:],
-	)
+	valid := aes.open_gcm(&ctx, scratch[:n], nonce, transmute([]u8)expected_id, ciphertext[:n], ciphertext[n:])
 	if !valid do return {}, {kind = .Authentication_Failed}
 
 	notification, e := media_retry_notification_decode(scratch[:n])
@@ -2395,15 +2158,11 @@ media_retry_decrypt :: proc(
 
 	if notification.result == .Success {
 		buffer: [MAX_MEDIA_URL_SIZE]u8
-		_, validation := media_download_url(
-			buffer[:],
-			{direct_path = notification.direct_path},
-		)
-		if !notification.has_direct_path ||
-		   validation.kind != .None {
+		_, validation := media_download_url(buffer[:], {direct_path = notification.direct_path})
+
+		if !notification.has_direct_path || validation.kind != .None {
 			return {}, {kind = .Invalid_Retry}
 		}
-
 	}
 
 	copy(dst, scratch[:n])
@@ -2411,27 +2170,22 @@ media_retry_decrypt :: proc(
 }
 
 media_retry_key :: proc(media_key: [32]u8) -> [32]u8 {
-	key := media_key; defer crypto.zero_explicit(&key, 32)
-	result: [32]u8; salt: [32]u8
+	key := media_key
+	defer crypto.zero_explicit(&key, 32)
+	result: [32]u8
+	salt: [32]u8
 	info := "WhatsApp Media Retry Notification"
-	hkdf.extract_and_expand(
-		.SHA256,
-		salt[:],
-		key[:],
-		transmute([]u8)info,
-		result[:],
-	)
+	hkdf.extract_and_expand(.SHA256, salt[:], key[:], transmute([]u8)info, result[:])
+
 	return result
 }
-media_retry_notification_decode :: proc(
-	src: []u8,
-) -> (
-	notification: Media_Retry_Notification,
-	err: Media_Error,
-) {
-	at := 0; seen: u8
+media_retry_notification_decode :: proc(src: []u8) -> (notification: Media_Retry_Notification, err: Media_Error) {
+	at := 0
+	seen: u8
+
 	for at < len(src) {
 		field, e := protobuf_field_read(src, &at)
+
 		if e != .None {
 			return {}, {kind = .Invalid_Protobuf, protobuf = e}
 		}
@@ -2439,18 +2193,21 @@ media_retry_notification_decode :: proc(
 		if field.number < 1 || field.number > 4 do continue
 
 		bit := cast(u8)1 << field.number
+
 		if seen & bit != 0 {
 			return {}, {kind = .Duplicate_Field}
 		}
 
 		seen |= bit
+
 		if field.number == 3 {
 			if field.wire_type != 0 || field.value > 3 {
 				return {}, {kind = .Invalid_Retry}
 			}
 
 			notification.result = cast(Media_Retry_Result)field.value
-			notification.has_result = true; continue
+			notification.has_result = true
+			continue
 		}
 
 		if field.wire_type != 2 {
@@ -2463,10 +2220,12 @@ media_retry_notification_decode :: proc(
 			}
 
 			notification.message_secret = field.data
-			notification.has_message_secret = true; continue
+			notification.has_message_secret = true
+			continue
 		}
 
 		text := cast(string)field.data
+
 		if !utf8.valid_string(text) {
 			return {}, {kind = .Invalid_UTF8}
 		}
@@ -2478,8 +2237,8 @@ media_retry_notification_decode :: proc(
 			notification.direct_path = text
 			notification.has_direct_path = true
 		}
-
 	}
+
 	if !notification.has_stanza_id || !notification.has_result {
 		return {}, {kind = .Invalid_Retry}
 	}
@@ -2536,14 +2295,12 @@ socket_http_execute :: proc(
 	defer crypto.zero_explicit(&job, size_of(job))
 	e := socket_http_run(socket, &job)
 	if e.kind != .None {
-		network_client.response_destroy(&job.response); return {}, e
+		network_client.response_destroy(&job.response)
+		return {}, e
 	}
 
 	if job.http_error.kind != .None {
-		return {}, {
-			kind = .Media_Failed,
-			media = {kind = .HTTP_Failed, http = job.http_error},
-		}
+		return {}, {kind = .Media_Failed, media = {kind = .HTTP_Failed, http = job.http_error}}
 	}
 
 	return job.response, {}
@@ -2562,14 +2319,7 @@ socket_media_upload_http :: proc(
 	Socket_Error,
 ) {
 	if socket.config.http_execute != nil {
-		result, e := media_upload(
-			encrypted,
-			kind,
-			metadata,
-			connection,
-			config,
-			execute = socket.config.http_execute,
-		)
+		result, e := media_upload(encrypted, kind, metadata, connection, config, execute = socket.config.http_execute)
 		return result, e, {}
 	}
 
@@ -2600,12 +2350,7 @@ socket_media_download_http :: proc(
 	Socket_Error,
 ) {
 	if socket.config.http_execute != nil {
-		n, e := media_download(
-			dst,
-			message,
-			config,
-			execute = socket.config.http_execute,
-		)
+		n, e := media_download(dst, message, config, execute = socket.config.http_execute)
 		return n, e, {}
 	}
 
@@ -2619,9 +2364,7 @@ socket_media_download_http :: proc(
 	}
 
 	if metadata.file_length > cast(u64)len(dst) {
-		return cast(int)metadata.file_length, {
-			kind = .Destination_Undersized,
-		}, {}
+		return cast(int)metadata.file_length, {kind = .Destination_Undersized}, {}
 	}
 
 	url_storage: [MAX_MEDIA_URL_SIZE]u8
@@ -2663,20 +2406,19 @@ socket_http_worker :: proc(data: rawptr) {
 		socket_http_current_job = nil
 		sync.atomic_store(&job.done, true)
 	}
+
 	// A canceled multi-host upload does not begin another request. The active
 	// request retains Surf's total DNS/TCP/TLS/I/O budget. Upload fallback
 	// consumes one shared budget rather than restarting it for each host.
 	config := job.config
+
 	if config.timeout == 0 || config.timeout > 30 * time.Second {
 		config.timeout = 30 * time.Second
 	}
 
 	switch job.kind {
 	case .HTTP:
-		job.response, job.http_error = socket_http_worker_execute(
-			job.request,
-			config,
-		)
+		job.response, job.http_error = socket_http_worker_execute(job.request, config)
 	case .Upload:
 		job.result, job.media_error = media_upload(
 			job.encrypted,
@@ -2724,35 +2466,28 @@ socket_http_worker_execute :: proc(
 	return response, e
 }
 
-socket_http_run :: proc(
-	socket: ^Socket,
-	job: ^Socket_HTTP_Job,
-) -> Socket_Error {
+socket_http_run :: proc(socket: ^Socket, job: ^Socket_HTTP_Job) -> Socket_Error {
 	if socket == nil || socket.phase != .Online {
 		return {kind = .Invalid_State}
 	}
 
 	socket.query_depth += 1
 	defer socket.query_depth -= 1
-	worker := thread.create_and_start_with_data(
-		job,
-		socket_http_worker,
-	)
+	worker := thread.create_and_start_with_data(job, socket_http_worker)
 	if worker == nil do return {kind = .Allocation_Failed}
 
 	defer {
-		sync.atomic_store(&job.cancel, true); thread.join(worker)
+		sync.atomic_store(&job.cancel, true)
+		thread.join(worker)
 		thread.destroy(worker)
 	}
+
 	for !sync.atomic_load(&job.done) {
 		if _, e := socket_tick(socket, time.now()); e.kind != .None {
 			return e
 		}
 
-		ready, poll_error := socket_network_poll(
-			socket,
-			100 * time.Millisecond,
-		)
+		ready, poll_error := socket_network_poll(socket, 100 * time.Millisecond)
 		if poll_error.kind != .None do return poll_error
 
 		if sync.atomic_load(&job.done) do break
@@ -2766,9 +2501,9 @@ socket_http_run :: proc(
 			return {kind = .Invalid_State}
 		}
 
-		if event_error := socket_http_event_process(socket, event);
-		   event_error.kind != .None do return event_error
+		if event_error := socket_http_event_process(socket, event); event_error.kind != .None do return event_error
 	}
+
 	return {}
 }
 
@@ -2778,52 +2513,34 @@ socket_media_retry_enqueue :: proc(socket: ^Socket, event: Socket_Event) -> Sock
 	}
 
 	size, measure := binary_node_encode(nil, event.node)
-	if measure.kind != .Destination_Undersized ||
-	   size > 16384 {
-		return socket_fail(
-			socket,
-			{
-				kind = .Media_Failed,
-				media = {kind = .Invalid_Retry},
-			},
-		)
+
+	if measure.kind != .Destination_Undersized || size > 16384 {
+		return socket_fail(socket, {kind = .Media_Failed, media = {kind = .Invalid_Retry}})
 	}
 
 	storage, ae := make([]u8, size)
+
 	if ae != nil {
-		return socket_fail(
-			socket,
-			{kind = .Allocation_Failed, allocation = ae},
-		)
+		return socket_fail(socket, {kind = .Allocation_Failed, allocation = ae})
 	}
 
 	_, encoded := binary_node_encode(storage, event.node)
+
 	if encoded.kind != .None {
 		delete(storage)
-		return socket_fail(
-			socket,
-			{kind = .Binary_Failed, binary = encoded},
-		)
+		return socket_fail(socket, {kind = .Binary_Failed, binary = encoded})
 	}
 
 	document, decoded := binary_node_decode(storage)
 	delete(storage)
+
 	if decoded.kind != .None {
-		return socket_fail(
-			socket,
-			{kind = .Binary_Failed, binary = decoded},
-		)
+		return socket_fail(socket, {kind = .Binary_Failed, binary = decoded})
 	}
 
-	if _, append_err := append(
-		&socket.pending_media_retry,
-		document,
-	); append_err != nil {
+	if _, append_err := append(&socket.pending_media_retry, document); append_err != nil {
 		binary_document_destroy(&document)
-		return socket_fail(
-			socket,
-			{kind = .Allocation_Failed, allocation = append_err},
-		)
+		return socket_fail(socket, {kind = .Allocation_Failed, allocation = append_err})
 	}
 
 	return {}
@@ -2831,12 +2548,15 @@ socket_media_retry_enqueue :: proc(socket: ^Socket, event: Socket_Event) -> Sock
 
 socket_http_event_process :: proc(socket: ^Socket, event: Socket_Event) -> Socket_Error {
 	if event.kind == .Message do return socket_query_message_enqueue(socket, event)
+
 	if event.kind == .Node {
 		kind, _ := node_attr(event.node, "type")
+
 		if event.node.tag == "notification" && kind == "mediaretry" {
 			return socket_media_retry_enqueue(socket, event)
 		}
 	}
+
 	return {}
 }
 
@@ -2852,15 +2572,7 @@ socket_send_image :: proc(
 	string,
 	Socket_Error,
 ) {
-	return socket_send_media(
-		socket,
-		group,
-		plaintext,
-		.Image,
-		caption,
-		mime_type,
-		"",
-	)
+	return socket_send_media(socket, group, plaintext, .Image, caption, mime_type, "")
 }
 socket_send_document :: proc(
 	socket: ^Socket,
@@ -2874,26 +2586,10 @@ socket_send_document :: proc(
 	string,
 	Socket_Error,
 ) {
-	return socket_send_media(
-		socket,
-		group,
-		plaintext,
-		.Document,
-		caption,
-		mime_type,
-		file_name,
-		message_id,
-	)
+	return socket_send_media(socket, group, plaintext, .Document, caption, mime_type, file_name, message_id)
 }
 
-socket_send_reaction :: proc(
-	socket: ^Socket,
-	key: Message_Key,
-	text: string = "✅",
-) -> (
-	string,
-	Socket_Error,
-) {
+socket_send_reaction :: proc(socket: ^Socket, key: Message_Key, text: string = "✅") -> (string, Socket_Error) {
 	if socket == nil || socket.phase != .Online {
 		return "", {kind = .Invalid_State}
 	}
@@ -2913,11 +2609,11 @@ socket_send_reaction :: proc(
 			has_key = true,
 			text = text,
 			has_text = true,
-			sender_timestamp_ms = time.now()._nsec /
-			cast(i64)time.Millisecond,
+			sender_timestamp_ms = time.now()._nsec / cast(i64)time.Millisecond,
 			has_sender_timestamp_ms = true,
 		},
 	)
+
 	if e.kind != .None {
 		return "", {kind = .Media_Failed, media = e}
 	}
@@ -2936,13 +2632,20 @@ socket_send_media :: proc(
 	string,
 	Socket_Error,
 ) {
-	if validation_error := socket_media_send_validate(
-		socket, group, plaintext, kind, caption, mime_type, file_name,
-	); validation_error.kind != .None do return "", validation_error
+	if validation_error := socket_media_send_validate(socket, group, plaintext, kind, caption, mime_type, file_name); validation_error.kind != .None do return "", validation_error
 
 	if id, handled, error := socket_media_existing_send(
-		socket, group, plaintext, kind, caption, mime_type, file_name, message_id,
-	); handled {return id, error}
+		socket,
+		group,
+		plaintext,
+		kind,
+		caption,
+		mime_type,
+		file_name,
+		message_id,
+	); handled {
+		return id, error
+	}
 
 	key, ke := media_key_generate()
 	defer crypto.zero_explicit(&key, size_of(key))
@@ -2968,19 +2671,37 @@ socket_send_media :: proc(
 	uploaded, upload_error := socket_media_upload(socket, ciphertext[:n], kind, &metadata)
 	if upload_error.kind != .None do return "", upload_error
 	return socket_media_message_send(
-		socket, group, kind, caption, mime_type, file_name,
-		&uploaded, &metadata, message_id,
+		socket,
+		group,
+		kind,
+		caption,
+		mime_type,
+		file_name,
+		&uploaded,
+		&metadata,
+		message_id,
 	)
 }
 
 // Media encryption/upload is randomized. Match the original plaintext intent
 // first, then resend its retained protobuf rather than uploading a new object.
 socket_media_existing_send :: proc(
-	socket: ^Socket, group: string, plaintext: []u8, kind: Media_Kind,
+	socket: ^Socket,
+	group: string,
+	plaintext: []u8,
+	kind: Media_Kind,
 	caption, mime_type, file_name, id: string,
-) -> (string, bool, Socket_Error) {
-	if id == "" {return "", false, {}}
-	if !socket_inbox_id_valid(id) {return "", true, {kind = .Invalid_Config}}
+) -> (
+	string,
+	bool,
+	Socket_Error,
+) {
+	if id == "" {
+		return "", false, {}
+	}
+	if !socket_inbox_id_valid(id) {
+		return "", true, {kind = .Invalid_Config}
+	}
 	if socket.store == nil || !socket.store.initialized {
 		return "", true, {kind = .Invalid_State}
 	}
@@ -2989,17 +2710,24 @@ socket_media_existing_send :: proc(
 		if _, pending := state_store_get(socket.store, .Outbound_Message, id); pending {
 			return "", true, {kind = .Invalid_State}
 		}
+
 		return "", false, {}
 	}
 	document, decoded := binary_node_decode(content)
-	if decoded.kind != .None {return "", true, {kind = .Binary_Failed, binary = decoded}}
+	if decoded.kind != .None {
+		return "", true, {kind = .Binary_Failed, binary = decoded}
+	}
 	defer binary_document_destroy(&document)
 	stored_group, _ := node_attr(document.root, "to")
 	stored_type, _ := node_attr(document.root, "mediatype")
 	protobuf, valid := document.root.content.([]u8)
-	if document.root.tag != "saved" || !valid {return "", true, {kind = .Protocol_Error}}
+	if document.root.tag != "saved" || !valid {
+		return "", true, {kind = .Protocol_Error}
+	}
 	message, parsed := media_message_decode(protobuf)
-	if parsed.kind != .None {return "", true, {kind = .Media_Failed, media = parsed}}
+	if parsed.kind != .None {
+		return "", true, {kind = .Media_Failed, media = parsed}
+	}
 	metadata, metadata_error := media_metadata_from_message(message)
 	defer media_metadata_clear(&metadata)
 	if metadata_error.kind != .None {
@@ -3009,21 +2737,24 @@ socket_media_existing_send :: proc(
 	if stored_group != group || stored_type != expected_type || message.kind != kind {
 		return "", true, {kind = .Invalid_Config}
 	}
-	if message.caption != caption || message.mime_type != mime_type ||
-	   message.file_name != file_name {return "", true, {kind = .Invalid_Config}}
-	if metadata.file_length != u64(len(plaintext)) ||
-	   metadata.file_sha256 != sha256(plaintext) {return "", true, {kind = .Invalid_Config}}
+	if message.caption != caption || message.mime_type != mime_type || message.file_name != file_name {
+		return "", true, {kind = .Invalid_Config}
+	}
+	if metadata.file_length != u64(len(plaintext)) || metadata.file_sha256 != sha256(plaintext) {
+		return "", true, {kind = .Invalid_Config}
+	}
 	owned, error := socket_send_group(socket, group, protobuf, expected_type, id)
 	return owned, true, error
 }
 
 socket_media_send_validate :: proc(
-	socket: ^Socket, group: string, plaintext: []u8, kind: Media_Kind,
+	socket: ^Socket,
+	group: string,
+	plaintext: []u8,
+	kind: Media_Kind,
 	caption, mime_type, file_name: string,
 ) -> Socket_Error {
-	if socket == nil ||
-	   socket.phase != .Online ||
-	   socket.auth == nil {
+	if socket == nil || socket.phase != .Online || socket.auth == nil {
 		return {kind = .Invalid_State}
 	}
 
@@ -3041,30 +2772,32 @@ socket_media_send_validate :: proc(
 		case:
 			return {kind = .Invalid_Config}
 		}
-
 	} else if kind == .Document {
 		if mime_type != "application/pdf" || len(file_name) == 0 {
 			return {kind = .Invalid_Config}
 		}
-
 	} else {
 		return {kind = .Invalid_Config}
 	}
 
 	if len(plaintext) > DEFAULT_MAX_MEDIA_SIZE {
-		return {
-			kind = .Media_Failed,
-			media = {kind = .Media_Oversized},
-		}
+		return {kind = .Media_Failed, media = {kind = .Media_Oversized}}
 	}
 
 	return {}
 }
 
 socket_media_upload :: proc(
-	socket: ^Socket, ciphertext: []u8, kind: Media_Kind, metadata: ^Media_Metadata,
-) -> (Media_Upload_Result, Socket_Error) {
-	id_buffer: [128]u8; id := socket_next_id(socket, id_buffer[:])
+	socket: ^Socket,
+	ciphertext: []u8,
+	kind: Media_Kind,
+	metadata: ^Media_Metadata,
+) -> (
+	Media_Upload_Result,
+	Socket_Error,
+) {
+	id_buffer: [128]u8
+	id := socket_next_id(socket, id_buffer[:])
 	query_buffer: [512]u8
 	qn, qe := media_connection_query_encode(query_buffer[:], id)
 	if qe.kind != .None {
@@ -3082,11 +2815,7 @@ socket_media_upload :: proc(
 
 	defer binary_document_destroy(&response)
 	hosts: [MAX_MEDIA_HOSTS]Media_Host
-	connection, ce := media_connection_decode(
-		response.root,
-		id,
-		hosts[:],
-	)
+	connection, ce := media_connection_decode(response.root, id, hosts[:])
 	if ce.kind != .None {
 		return {}, {kind = .Media_Failed, media = ce}
 	}
@@ -3097,10 +2826,7 @@ socket_media_upload :: proc(
 		kind,
 		metadata^,
 		connection,
-		{
-			tls = socket.config.tls,
-			timeout = socket.config.query_timeout,
-		},
+		{tls = socket.config.tls, timeout = socket.config.query_timeout},
 	)
 	if pump_error.kind != .None do return {}, pump_error
 
@@ -3112,13 +2838,21 @@ socket_media_upload :: proc(
 }
 
 socket_media_message_send :: proc(
-	socket: ^Socket, group: string, kind: Media_Kind, caption, mime_type, file_name: string,
-	uploaded: ^Media_Upload_Result, metadata: ^Media_Metadata, message_id: string = "",
-) -> (string, Socket_Error) {
+	socket: ^Socket,
+	group: string,
+	kind: Media_Kind,
+	caption, mime_type, file_name: string,
+	uploaded: ^Media_Upload_Result,
+	metadata: ^Media_Metadata,
+	message_id: string = "",
+) -> (
+	string,
+	Socket_Error,
+) {
 	message := Media_Message {
 		kind                    = kind,
 		url                     = cast(string)uploaded.url[:uploaded.url_size],
-		direct_path = cast(string)uploaded.direct_path[:uploaded.direct_path_size],
+		direct_path             = cast(string)uploaded.direct_path[:uploaded.direct_path_size],
 		mime_type               = mime_type,
 		caption                 = caption,
 		file_name               = file_name,
@@ -3158,74 +2892,50 @@ socket_media_message_send :: proc(
 // Caller owns message/protobuf and destination. A404/410 CDN response triggers
 // one authenticated request to the primary phone and one fresh download. No
 // fallback removes integrity checks, changes the media key, or follows redirects.
-socket_download_media :: proc(
-	socket: ^Socket,
-	message: ^Socket_Message,
-	dst: []u8,
-) -> (
-	int,
-	Socket_Error,
-) {
-	if socket == nil ||
-	   socket.phase != .Online ||
-	   socket.auth == nil {
+socket_download_media :: proc(socket: ^Socket, message: ^Socket_Message, dst: []u8) -> (int, Socket_Error) {
+	if socket == nil || socket.phase != .Online || socket.auth == nil {
 		return 0, {kind = .Invalid_State}
 	}
 
-	if message == nil ||
-	   !group_jid_valid(message.group) ||
-	   !device_request_valid(message.id) {
+	if message == nil || !group_jid_valid(message.group) || !device_request_valid(message.id) {
 		return 0, {kind = .Invalid_Config}
 	}
 
 	media, e := media_message_decode(message.protobuf)
+
 	if e.kind != .None {
 		return 0, {kind = .Media_Failed, media = e}
 	}
 
 	if media.kind == .None {
-		return 0, {
-			kind = .Media_Failed,
-			media = {kind = .Invalid_Kind},
-		}
+		return 0, {kind = .Media_Failed, media = {kind = .Invalid_Kind}}
 	}
 
 	config := network_client.Config {
 		tls     = socket.config.tls,
 		timeout = socket.config.query_timeout,
 	}
-	n, download_err, pump_error := socket_media_download_http(
-		socket,
-		dst,
-		media,
-		config,
-	)
+
+	n, download_err, pump_error := socket_media_download_http(socket, dst, media, config)
 	if pump_error.kind != .None do return 0, pump_error
 
 	if download_err.kind == .None do return n, {}
 
-	if download_err.kind != .HTTP_Status ||
-	   (download_err.status != 404 && download_err.status != 410) {
+	if download_err.kind != .HTTP_Status || (download_err.status != 404 && download_err.status != 410) {
 		return n, {kind = .Media_Failed, media = download_err}
 	}
 
 	return socket_media_download_recover(socket, message, &media, dst, config)
 }
 
-socket_media_retry_send :: proc(
-	socket: ^Socket, key: Message_Key, metadata: ^Media_Metadata,
-) -> Socket_Error {
+socket_media_retry_send :: proc(socket: ^Socket, key: Message_Key, metadata: ^Media_Metadata) -> Socket_Error {
 	owner_buffer: [256]u8
 	owner, oe := socket_media_owner_jid(owner_buffer[:], socket.auth)
 	if oe.kind != .None do return oe
 
 	request: [2048]u8
-	rn, request_err := media_retry_request_encode(
-		request[:],
-		key,
-		metadata.media_key,
-		owner,
-	)
+	rn, request_err := media_retry_request_encode(request[:], key, metadata.media_key, owner)
+
 	if request_err.kind != .None {
 		return {kind = .Media_Failed, media = request_err}
 	}
@@ -3238,9 +2948,15 @@ socket_media_retry_send :: proc(
 }
 
 socket_media_download_recover :: proc(
-	socket: ^Socket, message: ^Socket_Message, media: ^Media_Message,
-	dst: []u8, config: network_client.Config,
-) -> (int, Socket_Error) {
+	socket: ^Socket,
+	message: ^Socket_Message,
+	media: ^Media_Message,
+	dst: []u8,
+	config: network_client.Config,
+) -> (
+	int,
+	Socket_Error,
+) {
 	metadata, me := media_metadata_from_message(media^)
 	defer media_metadata_clear(&metadata)
 	if me.kind != .None {
@@ -3253,26 +2969,14 @@ socket_media_download_recover :: proc(
 		participant = message.participant,
 		from_me     = message.from_me,
 	}
-	if request_error := socket_media_retry_send(socket, key, &metadata);
-	   request_error.kind != .None do return 0, request_error
+	if request_error := socket_media_retry_send(socket, key, &metadata); request_error.kind != .None do return 0, request_error
 	retry_buffer: [8192]u8
 	defer crypto.zero_explicit(&retry_buffer, size_of(retry_buffer))
-	notification, retry_err := socket_media_wait_retry(
-		socket,
-		key,
-		metadata.media_key,
-		retry_buffer[:],
-	)
+	notification, retry_err := socket_media_wait_retry(socket, key, metadata.media_key, retry_buffer[:])
 	if retry_err.kind != .None do return 0, retry_err
 
 	if notification.result != .Success {
-		return 0, {
-			kind = .Media_Failed,
-			media = {
-				kind = .Server_Error,
-				status = cast(int)notification.result,
-			},
-		}
+		return 0, {kind = .Media_Failed, media = {kind = .Server_Error, status = cast(int)notification.result}}
 	}
 
 	// Retry routing borrows the authenticated scratch buffer only for this call.
@@ -3280,8 +2984,7 @@ socket_media_download_recover :: proc(
 	retry_media := media^
 	retry_media.url = ""
 	retry_media.direct_path = notification.direct_path
-	final_n, final_err, final_pump_error :=
-		socket_media_download_http(socket, dst, retry_media, config)
+	final_n, final_err, final_pump_error := socket_media_download_http(socket, dst, retry_media, config)
 	if final_pump_error.kind != .None {
 		return 0, final_pump_error
 	}
@@ -3293,26 +2996,20 @@ socket_media_download_recover :: proc(
 	return final_n, {}
 }
 
-socket_media_owner_jid :: proc(
-	dst: []u8,
-	auth: ^Auth_State,
-) -> (
-	string,
-	Socket_Error,
-) {
-	if auth == nil ||
-	   auth.account.jid_size <= 0 ||
-	   auth.account.jid_size > len(auth.account.jid) {
+socket_media_owner_jid :: proc(dst: []u8, auth: ^Auth_State) -> (string, Socket_Error) {
+	if auth == nil || auth.account.jid_size <= 0 || auth.account.jid_size > len(auth.account.jid) {
 		return "", {kind = .Invalid_State}
 	}
 
 	jid := cast(string)auth.account.jid[:auth.account.jid_size]
 	at := strings.index_byte(jid, '@')
+
 	if at <= 0 || jid[at:] != "@s.whatsapp.net" {
 		return "", {kind = .Invalid_Config}
 	}
 
 	local := jid[:at]
+
 	if colon := strings.index_byte(local, ':'); colon >= 0 {
 		local = local[:colon]
 	}
@@ -3325,9 +3022,11 @@ socket_media_owner_jid :: proc(
 		return "", {kind = .Invalid_Config}
 	}
 
-	n := copy(dst, transmute([]u8)local); suffix := "@s.whatsapp.net"
+	n := copy(dst, transmute([]u8)local)
+	suffix := "@s.whatsapp.net"
 	n += copy(dst[n:], transmute([]u8)suffix)
 	owner := cast(string)dst[:n]
+
 	if !device_user_valid(owner, false) {
 		return "", {kind = .Invalid_Config}
 	}
@@ -3346,7 +3045,10 @@ socket_media_wait_retry :: proc(
 ) {
 	socket.query_depth += 1
 	socket.read_deadline_scopes += 1
-	defer {socket.query_depth -= 1; socket.read_deadline_scopes -= 1}
+	defer {
+		socket.query_depth -= 1
+		socket.read_deadline_scopes -= 1
+	}
 	timeout := socket.config.query_timeout
 	if timeout == 0 do timeout = 30 * time.Second
 
@@ -3359,23 +3061,19 @@ socket_media_wait_retry :: proc(
 			owned := document
 			ordered_remove(&socket.pending_media_retry, index)
 			defer binary_document_destroy(&owned)
-			return socket_media_notification_open(
-				owned.root,
-				key,
-				media_key,
-				plaintext,
-			)
+			return socket_media_notification_open(owned.root, key, media_key, plaintext)
 		}
+
 		event, ready, read_error := socket_media_retry_event_read(socket, deadline)
 		if read_error.kind != .None do return {}, read_error
 		if !ready do continue
+
 		if event.kind == .Restart_Required {
 			return {}, {kind = .Invalid_State}
 		}
 
 		if event.kind == .Message {
-			if queue_error := socket_query_message_enqueue(socket, event);
-			   queue_error.kind != .None do return {}, queue_error
+			if queue_error := socket_query_message_enqueue(socket, event); queue_error.kind != .None do return {}, queue_error
 			continue
 		}
 
@@ -3387,18 +3085,11 @@ socket_media_wait_retry :: proc(
 		id, _ := node_attr(event.node, "id")
 		if kind != "mediaretry" || id != key.id do continue
 
-		return socket_media_notification_open(
-			event.node,
-			key,
-			media_key,
-			plaintext,
-		)
+		return socket_media_notification_open(event.node, key, media_key, plaintext)
 	}
 }
 
-socket_media_retry_event_read :: proc(
-	socket: ^Socket, deadline: time.Time,
-) -> (Socket_Event, bool, Socket_Error) {
+socket_media_retry_event_read :: proc(socket: ^Socket, deadline: time.Time) -> (Socket_Event, bool, Socket_Error) {
 	if time.now()._nsec >= deadline._nsec {
 		return {}, false, socket_fail(socket, {kind = .Query_Timeout})
 	}
@@ -3407,24 +3098,19 @@ socket_media_retry_event_read :: proc(
 		return {}, false, e
 	}
 
-	ready, poll_err := socket_network_poll(
-		socket,
-		100 * time.Millisecond,
-	)
+	ready, poll_err := socket_network_poll(socket, 100 * time.Millisecond)
 	if poll_err.kind != .None do return {}, false, poll_err
 
 	if !ready do return {}, false, {}
 
-	if e := socket_read_deadline(socket, deadline);
-	   e.kind != .None {
+	if e := socket_read_deadline(socket, deadline); e.kind != .None {
 		return {}, false, e
 	}
 
 	event, e := socket_receive(socket)
 	if e.kind != .None do return {}, false, e
 
-	if reset := socket_read_deadline(socket, {});
-	   reset.kind != .None {
+	if reset := socket_read_deadline(socket, {}); reset.kind != .None {
 		if event.message != nil {
 			socket_message_destroy(event.message)
 		}
@@ -3449,13 +3135,7 @@ socket_media_notification_open :: proc(
 		return {}, {kind = .Media_Failed, media = decode_err}
 	}
 
-	notification, decrypt_err := media_retry_decrypt(
-		plaintext,
-		retry.ciphertext,
-		retry.iv,
-		media_key,
-		key.id,
-	)
+	notification, decrypt_err := media_retry_decrypt(plaintext, retry.ciphertext, retry.iv, media_key, key.id)
 	if decrypt_err.kind != .None {
 		return {}, {kind = .Media_Failed, media = decrypt_err}
 	}

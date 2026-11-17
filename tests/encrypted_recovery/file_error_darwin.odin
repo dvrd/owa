@@ -10,6 +10,8 @@ write_error_is_efbig :: proc(error: os.Error) -> bool {
 	if error == io.Error.Unknown {
 		return posix.errno() == .EFBIG
 	}
+
 	errno, ok := error.(os.Platform_Error)
+
 	return ok && errno == .EFBIG
 }

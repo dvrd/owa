@@ -1,6 +1,5 @@
 package whatsapp
 
-
 import "core:bytes"
 import "core:fmt"
 import "core:mem"
@@ -150,8 +149,7 @@ binary_node_decode :: proc(
 	}
 
 	document.allocator = allocator
-	if payload_error := binary_document_payload_copy(&document, src, allocator, max_payload);
-	   payload_error.kind != .None do return {}, payload_error
+	if payload_error := binary_document_payload_copy(&document, src, allocator, max_payload); payload_error.kind != .None do return {}, payload_error
 	if tree_error := binary_document_tree_decode(&document, allocator); tree_error.kind != .None {
 		binary_document_destroy(&document)
 		return {}, tree_error
@@ -160,42 +158,27 @@ binary_node_decode :: proc(
 }
 
 binary_document_decompress :: proc(
-	document: ^Binary_Document, src: []u8, allocator: mem.Allocator, max_payload: int,
+	document: ^Binary_Document,
+	src: []u8,
+	allocator: mem.Allocator,
+	max_payload: int,
 ) -> Binary_Node_Error {
-	data, allocation_err := make(
-		[]u8,
-		max_payload + 1,
-		allocator,
-	)
+	data, allocation_err := make([]u8, max_payload + 1, allocator)
 	if allocation_err != nil {
-		return {
-			kind = .Allocation_Failed,
-			allocation = allocation_err,
-		}
+		return {kind = .Allocation_Failed, allocation = allocation_err}
 	}
 
 	output_size := zlib.uLongf(len(data))
 	input_size := zlib.uLong(len(src) - 1)
-	status := zlib.uncompress2(
-		raw_data(data),
-		&output_size,
-		raw_data(src[1:]),
-		&input_size,
-	)
+	status := zlib.uncompress2(raw_data(data), &output_size, raw_data(src[1:]), &input_size)
 	if output_size > zlib.uLongf(max_payload) {
 		delete(data, allocator)
-		return {
-			kind = .Decompressed_Payload_Oversized,
-			zlib_status = status,
-		}
+		return {kind = .Decompressed_Payload_Oversized, zlib_status = status}
 	}
 
 	if status != zlib.OK {
 		delete(data, allocator)
-		return {
-			kind = .Decompression_Failed,
-			zlib_status = status,
-		}
+		return {kind = .Decompression_Failed, zlib_status = status}
 	}
 
 	if input_size != zlib.uLong(len(src) - 1) {
@@ -209,17 +192,18 @@ binary_document_decompress :: proc(
 }
 
 binary_document_payload_copy :: proc(
-	document: ^Binary_Document, src: []u8, allocator: mem.Allocator, max_payload: int,
+	document: ^Binary_Document,
+	src: []u8,
+	allocator: mem.Allocator,
+	max_payload: int,
 ) -> Binary_Node_Error {
 	if src[0] == 2 {
 		return binary_document_decompress(document, src, allocator, max_payload)
 	} else {
 		data, allocation_err := make([]u8, len(src) - 1, allocator)
+
 		if allocation_err != nil {
-			return {
-				kind = .Allocation_Failed,
-				allocation = allocation_err,
-			}
+			return {kind = .Allocation_Failed, allocation = allocation_err}
 		}
 
 		copy(data, src[1:])
@@ -230,22 +214,15 @@ binary_document_payload_copy :: proc(
 	return {}
 }
 
-binary_document_tree_decode :: proc(
-	document: ^Binary_Document, allocator: mem.Allocator,
-) -> Binary_Node_Error {
+binary_document_tree_decode :: proc(document: ^Binary_Document, allocator: mem.Allocator) -> Binary_Node_Error {
 	// Metadata/string expansion is bounded separately from the wire length.
 	// The arena is needed only during decoding; returned nodes hold plain
 	// slices, never an allocator pointing at this stack-local arena value.
-	storage_size := min(
-		MAX_BINARY_DOCUMENT_STORAGE,
-		max(4096, len(document.data) * 32),
-	)
+	storage_size := min(MAX_BINARY_DOCUMENT_STORAGE, max(4096, len(document.data) * 32))
 	storage, allocation_err := make([]u8, storage_size, allocator)
+
 	if allocation_err != nil {
-		return {
-			kind = .Allocation_Failed,
-			allocation = allocation_err,
-		}
+		return {kind = .Allocation_Failed, allocation = allocation_err}
 	}
 
 	document.storage = storage
@@ -255,7 +232,9 @@ binary_document_tree_decode :: proc(
 		src       = document.data,
 		allocator = mem.arena_allocator(&arena),
 	}
+
 	document.root = binary_read_node(&reader, 0)
+
 	if reader.err.kind == .None && reader.at != len(reader.src) {
 		reader.err = {
 			kind   = .Trailing_Data,
@@ -270,17 +249,11 @@ binary_document_tree_decode :: proc(
 	return {}
 }
 
-node_attr :: proc(
-	node: Binary_Node,
-	key: string,
-) -> (
-	value: string,
-	found: bool,
-) {
+node_attr :: proc(node: Binary_Node, key: string) -> (value: string, found: bool) {
 	for attr in node.attrs {
 		if attr.key == key do return attr.value, true
-
 	}
+
 	return "", false
 }
 
@@ -289,9 +262,9 @@ node_child :: proc(node: Binary_Node, tag: string) -> ^Binary_Node {
 	case []Binary_Node:
 		for &child in children {
 			if child.tag == tag do return &child
-
 		}
 	}
+
 	return nil
 }
 
@@ -309,6 +282,7 @@ binary_write_byte :: proc(writer: ^Binary_Writer, value: u8) {
 		writer.err = {
 			kind = .Payload_Oversized,
 		}
+
 		return
 	}
 
@@ -324,6 +298,7 @@ binary_write_bytes :: proc(writer: ^Binary_Writer, data: []u8) {
 		writer.err = {
 			kind = .Overlapping_Buffers,
 		}
+
 		return
 	}
 
@@ -331,6 +306,7 @@ binary_write_bytes :: proc(writer: ^Binary_Writer, data: []u8) {
 		writer.err = {
 			kind = .Payload_Oversized,
 		}
+
 		return
 	}
 
@@ -341,11 +317,7 @@ binary_write_bytes :: proc(writer: ^Binary_Writer, data: []u8) {
 	writer.used += len(data)
 }
 
-binary_write_integer :: proc(
-	writer: ^Binary_Writer,
-	value: u32,
-	bytes: int,
-) {
+binary_write_integer :: proc(writer: ^Binary_Writer, value: u32, bytes: int) {
 	for i := bytes - 1; i >= 0; i -= 1 {
 		binary_write_byte(writer, cast(u8)(value >> cast(uint)(i * 8)))
 	}
@@ -365,7 +337,6 @@ binary_write_list :: proc(writer: ^Binary_Writer, size: int) {
 			kind = .Invalid_List,
 		}
 	}
-
 }
 
 binary_write_length :: proc(writer: ^Binary_Writer, size: int) {
@@ -379,14 +350,9 @@ binary_write_length :: proc(writer: ^Binary_Writer, size: int) {
 		binary_write_byte(writer, cast(u8)Binary_Tag.BINARY_32)
 		binary_write_integer(writer, cast(u32)size, 4)
 	}
-
 }
 
-binary_write_node :: proc(
-	writer: ^Binary_Writer,
-	node: Binary_Node,
-	depth: int,
-) {
+binary_write_node :: proc(writer: ^Binary_Writer, node: Binary_Node, depth: int) {
 	if !binary_write_node_validate(writer, node, depth) do return
 
 	has_content := node.content != nil
@@ -395,10 +361,12 @@ binary_write_node :: proc(
 
 	binary_write_list(writer, list_size)
 	binary_write_string(writer, node.tag, 0)
+
 	for attr in node.attrs {
 		binary_write_string(writer, attr.key, 0)
 		binary_write_string(writer, attr.value, 0)
 	}
+
 	switch content in node.content {
 	case []u8:
 		binary_write_length(writer, len(content))
@@ -408,6 +376,7 @@ binary_write_node :: proc(
 			writer.err = {
 				kind = .Node_Limit,
 			}
+
 			return
 		}
 
@@ -416,24 +385,25 @@ binary_write_node :: proc(
 	}
 }
 
-binary_write_node_validate :: proc(
-	writer: ^Binary_Writer, node: Binary_Node, depth: int,
-) -> bool {
+binary_write_node_validate :: proc(writer: ^Binary_Writer, node: Binary_Node, depth: int) -> bool {
 	if writer.err.kind != .None do return false
 
 	if depth >= MAX_BINARY_NODE_DEPTH {
 		writer.err = {
 			kind = .Depth_Limit,
 		}
+
 		return false
 	}
 
 	writer.nodes += 1
 	writer.attrs += len(node.attrs)
+
 	if writer.nodes > MAX_BINARY_NODE_COUNT {
 		writer.err = {
 			kind = .Node_Limit,
 		}
+
 		return false
 	}
 
@@ -441,6 +411,7 @@ binary_write_node_validate :: proc(
 		writer.err = {
 			kind = .Attribute_Limit,
 		}
+
 		return false
 	}
 
@@ -448,6 +419,7 @@ binary_write_node_validate :: proc(
 		writer.err = {
 			kind = .Invalid_Node,
 		}
+
 		return false
 	}
 
@@ -457,25 +429,23 @@ binary_write_node_validate :: proc(
 				writer.err = {
 					kind = .Duplicate_Attribute,
 				}
+
 				return false
 			}
-
 		}
 	}
+
 	return true
 }
 
-binary_write_string :: proc(
-	writer: ^Binary_Writer,
-	value: string,
-	depth: int,
-) {
+binary_write_string :: proc(writer: ^Binary_Writer, value: string, depth: int) {
 	if writer.err.kind != .None do return
 
 	if bytes.alias(writer.target, transmute([]u8)value) {
 		writer.err = {
 			kind = .Overlapping_Buffers,
 		}
+
 		return
 	}
 
@@ -483,6 +453,7 @@ binary_write_string :: proc(
 		writer.err = {
 			kind = .Depth_Limit,
 		}
+
 		return
 	}
 
@@ -490,11 +461,13 @@ binary_write_string :: proc(
 		writer.err = {
 			kind = .Invalid_UTF8,
 		}
+
 		return
 	}
 
 	if binary_write_token(writer, value) do return
 	if binary_write_packed_string(writer, value) do return
+
 	if at := strings.index_byte(value, '@'); at >= 0 {
 		binary_write_jid(writer, value, at, depth)
 		return
@@ -510,42 +483,38 @@ binary_write_token :: proc(writer: ^Binary_Writer, value: string) -> bool {
 	for dictionary := 3; dictionary >= 0; dictionary -= 1 {
 		for index := 255; index >= 0; index -= 1 {
 			if DOUBLE_BYTE_TOKENS[dictionary][index] == value {
-				binary_write_byte(
-					writer,
-					cast(u8)Binary_Tag.DICTIONARY_0 +
-					cast(u8)dictionary,
-				)
+				binary_write_byte(writer, cast(u8)Binary_Tag.DICTIONARY_0 + cast(u8)dictionary)
 				binary_write_byte(writer, cast(u8)index)
 				return true
 			}
-
 		}
 	}
-	for index := len(SINGLE_BYTE_TOKENS) - 1;
-	    index >= 0;
-	    index -= 1 {
+
+	for index := len(SINGLE_BYTE_TOKENS) - 1; index >= 0; index -= 1 {
 		if SINGLE_BYTE_TOKENS[index] == value {
 			binary_write_byte(writer, cast(u8)index)
 			return true
 		}
-
 	}
+
 	return false
 }
 
 binary_write_packed_string :: proc(writer: ^Binary_Writer, value: string) -> bool {
 	packed_type: Binary_Tag
+
 	if len(value) > 0 && len(value) <= BINARY_PACKED_MAX {
 		nibble, hex := true, true
+
 		for c in value {
 			if !is_digit(c) && c != '-' && c != '.' do nibble = false
 
 			if !is_hex_upper(c) do hex = false
 		}
+
 		if nibble do packed_type = .NIBBLE_8
 
 		if !nibble && hex do packed_type = .HEX_8
-
 	}
 
 	if packed_type != .LIST_EMPTY {
@@ -554,15 +523,18 @@ binary_write_packed_string :: proc(writer: ^Binary_Writer, value: string) -> boo
 		if len(value) % 2 != 0 do length |= 128
 
 		binary_write_byte(writer, length)
+
 		for i := 0; i < len(value); i += 2 {
 			high := binary_pack_char(value[i])
 			low := cast(u8)15
+
 			if i + 1 < len(value) {
 				low = binary_pack_char(value[i + 1])
 			}
 
 			binary_write_byte(writer, high << 4 | low)
 		}
+
 		return true
 	}
 
@@ -573,19 +545,22 @@ binary_write_jid :: proc(writer: ^Binary_Writer, value: string, at, depth: int) 
 	user, server := value[:at], value[at + 1:]
 	device_present := false
 	device: u8
+
 	if colon := strings.index_byte(user, ':'); colon >= 0 {
 		device_text := user[colon + 1:]
-		if extra := strings.index_byte(device_text, ':');
-		   extra >= 0 {
+
+		if extra := strings.index_byte(device_text, ':'); extra >= 0 {
 			device_text = device_text[:extra]
 		}
 
 		if len(device_text) != 0 {
 			parsed, valid := strconv.parse_uint(device_text, 10)
+
 			if !valid || parsed > 255 {
 				writer.err = {
 					kind = .Invalid_JID,
 				}
+
 				return
 			}
 
@@ -595,8 +570,7 @@ binary_write_jid :: proc(writer: ^Binary_Writer, value: string, at, depth: int) 
 		user = user[:colon]
 	}
 
-	if underscore := strings.index_byte(user, '_');
-	   underscore >= 0 {
+	if underscore := strings.index_byte(user, '_'); underscore >= 0 {
 		user = user[:underscore]
 	}
 
@@ -634,10 +608,7 @@ Binary_Reader :: struct {
 	err:              Binary_Node_Error,
 }
 
-binary_read_bytes :: proc(
-	reader: ^Binary_Reader,
-	size: int,
-) -> []u8 {
+binary_read_bytes :: proc(reader: ^Binary_Reader, size: int) -> []u8 {
 	if reader.err.kind != .None do return nil
 
 	if size < 0 || size > len(reader.src) - reader.at {
@@ -645,11 +616,13 @@ binary_read_bytes :: proc(
 			kind   = .Truncated,
 			offset = reader.at,
 		}
+
 		return nil
 	}
 
 	data := reader.src[reader.at:][:size]
 	reader.at += size
+
 	return data
 }
 
@@ -660,13 +633,11 @@ binary_read_byte :: proc(reader: ^Binary_Reader) -> u8 {
 	return data[0]
 }
 
-binary_read_integer :: proc(
-	reader: ^Binary_Reader,
-	count: int,
-) -> u32 {
+binary_read_integer :: proc(reader: ^Binary_Reader, count: int) -> u32 {
 	data := binary_read_bytes(reader, count)
 	value: u32
 	for b in data do value = value << 8 | cast(u32)b
+
 	return value
 }
 
@@ -685,13 +656,11 @@ binary_read_length :: proc(reader: ^Binary_Reader, tag: u8) -> int {
 			token  = tag,
 		}
 	}
+
 	return 0
 }
 
-binary_read_list_size :: proc(
-	reader: ^Binary_Reader,
-	tag: u8,
-) -> int {
+binary_read_list_size :: proc(reader: ^Binary_Reader, tag: u8) -> int {
 	#partial switch cast(Binary_Tag)tag {
 	case .LIST_EMPTY:
 		return 0
@@ -706,15 +675,11 @@ binary_read_list_size :: proc(
 			token  = tag,
 		}
 	}
+
 	return 0
 }
 
-binary_read_node :: proc(
-	reader: ^Binary_Reader,
-	depth: int,
-) -> (
-	node: Binary_Node,
-) {
+binary_read_node :: proc(reader: ^Binary_Reader, depth: int) -> (node: Binary_Node) {
 	if reader.err.kind != .None do return
 
 	if depth >= MAX_BINARY_NODE_DEPTH {
@@ -722,15 +687,18 @@ binary_read_node :: proc(
 			kind   = .Depth_Limit,
 			offset = reader.at,
 		}
+
 		return
 	}
 
 	reader.nodes += 1
+
 	if reader.nodes > MAX_BINARY_NODE_COUNT {
 		reader.err = {
 			kind   = .Node_Limit,
 			offset = reader.at,
 		}
+
 		return
 	}
 
@@ -742,14 +710,11 @@ binary_read_node :: proc(
 			kind   = .Invalid_Node,
 			offset = reader.at,
 		}
+
 		return
 	}
 
-	node.tag = binary_read_string(
-		reader,
-		binary_read_byte(reader),
-		0,
-	)
+	node.tag = binary_read_string(reader, binary_read_byte(reader), 0)
 	if reader.err.kind != .None do return
 
 	if len(node.tag) == 0 {
@@ -757,85 +722,80 @@ binary_read_node :: proc(
 			kind   = .Invalid_Node,
 			offset = reader.at,
 		}
+
 		return
 	}
 
 	binary_read_attributes(reader, &node, size)
 	if reader.err.kind != .None do return
 	if size % 2 == 0 do binary_read_content(reader, &node, depth)
+
 	return
 }
 
-binary_read_attribute_keys_validate :: proc(
-	reader: ^Binary_Reader, node: ^Binary_Node, attrs: int,
-) {
+binary_read_attribute_keys_validate :: proc(reader: ^Binary_Reader, node: ^Binary_Node, attrs: int) {
 	if attrs > 1 {
 		keys, keys_err := make([]string, attrs, reader.allocator)
+
 		if keys_err != nil {
 			reader.err = {
 				kind       = .Document_Storage_Exhausted,
 				offset     = reader.at,
 				allocation = keys_err,
 			}
+
 			return
 		}
 
 		for attr, i in node.attrs do keys[i] = attr.key
 		sort.quick_sort(keys)
+
 		for i in 1 ..< len(keys) {
 			if keys[i] == keys[i - 1] {
 				reader.err = {
 					kind   = .Duplicate_Attribute,
 					offset = reader.at,
 				}
+
 				return
 			}
-
 		}
 	}
-
 }
 
 binary_read_attributes :: proc(reader: ^Binary_Reader, node: ^Binary_Node, size: int) {
 	attrs := (size - 1) / 2
+
 	if attrs > MAX_BINARY_NODE_ATTRIBUTES - reader.attrs {
 		reader.err = {
 			kind   = .Attribute_Limit,
 			offset = reader.at,
 		}
+
 		return
 	}
 
 	reader.attrs += attrs
-	attributes, allocation_err := make(
-		[]Binary_Node_Attribute,
-		attrs,
-		reader.allocator,
-	)
+	attributes, allocation_err := make([]Binary_Node_Attribute, attrs, reader.allocator)
+
 	if allocation_err != nil {
 		reader.err = {
 			kind       = .Document_Storage_Exhausted,
 			offset     = reader.at,
 			allocation = allocation_err,
 		}
+
 		return
 	}
 
 	node.attrs = attributes
-	for &attr in node.attrs {
-		attr.key = binary_read_string(
-			reader,
-			binary_read_byte(reader),
-			0,
-		)
-		attr.value = binary_read_string(
-			reader,
-			binary_read_byte(reader),
-			0,
-		)
-		if reader.err.kind != .None do return
 
+	for &attr in node.attrs {
+		attr.key = binary_read_string(reader, binary_read_byte(reader), 0)
+		attr.value = binary_read_string(reader, binary_read_byte(reader), 0)
+		if reader.err.kind != .None do return
 	}
+
 	binary_read_attribute_keys_validate(reader, node, attrs)
 }
 
@@ -843,37 +803,35 @@ binary_read_content :: proc(reader: ^Binary_Reader, node: ^Binary_Node, depth: i
 	tag := binary_read_byte(reader)
 	if reader.err.kind != .None do return
 
-	if tag == cast(u8)Binary_Tag.LIST_EMPTY ||
-	   tag == cast(u8)Binary_Tag.LIST_8 ||
-	   tag == cast(u8)Binary_Tag.LIST_16 {
+	if tag == cast(u8)Binary_Tag.LIST_EMPTY || tag == cast(u8)Binary_Tag.LIST_8 || tag == cast(u8)Binary_Tag.LIST_16 {
 		count := binary_read_list_size(reader, tag)
+
 		if count > MAX_BINARY_NODE_COUNT - reader.nodes {
 			reader.err = {
 				kind   = .Node_Limit,
 				offset = reader.at,
 			}
+
 			return
 		}
 
-		children, child_err := make(
-			[]Binary_Node,
-			count,
-			reader.allocator,
-		)
+		children, child_err := make([]Binary_Node, count, reader.allocator)
+
 		if child_err != nil {
 			reader.err = {
 				kind       = .Document_Storage_Exhausted,
 				offset     = reader.at,
 				allocation = child_err,
 			}
+
 			return
 		}
 
 		for &child in children {
 			child = binary_read_node(reader, depth + 1)
 			if reader.err.kind != .None do return
-
 		}
+
 		node.content = children
 	} else if tag == cast(u8)Binary_Tag.BINARY_8 ||
 	   tag == cast(u8)Binary_Tag.BINARY_20 ||
@@ -884,31 +842,24 @@ binary_read_content :: proc(reader: ^Binary_Reader, node: ^Binary_Node, depth: i
 		value := binary_read_string(reader, tag, 0)
 		if reader.err.kind != .None do return
 
-		content, content_err := make(
-			[]u8,
-			len(value),
-			reader.allocator,
-		)
+		content, content_err := make([]u8, len(value), reader.allocator)
+
 		if content_err != nil {
 			reader.err = {
 				kind       = .Document_Storage_Exhausted,
 				offset     = reader.at,
 				allocation = content_err,
 			}
+
 			return
 		}
 
 		copy(content, transmute([]u8)value)
 		node.content = content
 	}
-
 }
 
-binary_read_string :: proc(
-	reader: ^Binary_Reader,
-	tag: u8,
-	depth: int,
-) -> string {
+binary_read_string :: proc(reader: ^Binary_Reader, tag: u8, depth: int) -> string {
 	if reader.err.kind != .None do return ""
 
 	if depth >= MAX_BINARY_NODE_DEPTH {
@@ -916,6 +867,7 @@ binary_read_string :: proc(
 			kind   = .Depth_Limit,
 			offset = reader.at,
 		}
+
 		return ""
 	}
 
@@ -928,14 +880,9 @@ binary_read_string :: proc(
 		return ""
 	case .DICTIONARY_0, .DICTIONARY_1, .DICTIONARY_2, .DICTIONARY_3:
 		index := binary_read_byte(reader)
-		return(
-			DOUBLE_BYTE_TOKENS[cast(int)tag - cast(int)Binary_Tag.DICTIONARY_0][index] \
-		)
+		return DOUBLE_BYTE_TOKENS[cast(int)tag - cast(int)Binary_Tag.DICTIONARY_0][index]
 	case .BINARY_8, .BINARY_20, .BINARY_32:
-		value := cast(string)binary_read_bytes(
-			reader,
-			binary_read_length(reader, tag),
-		)
+		value := cast(string)binary_read_bytes(reader, binary_read_length(reader, tag))
 		if !utf8.valid_string(value) {
 			reader.err = {
 				kind   = .Invalid_UTF8,
@@ -963,18 +910,15 @@ binary_read_string :: proc(
 			token  = tag,
 		}
 	}
+
 	return ""
 }
 
 binary_read_device_jid :: proc(reader: ^Binary_Reader, depth: int) -> string {
-	domain, device :=
-		binary_read_byte(reader), binary_read_byte(reader)
-	user := binary_read_string(
-		reader,
-		binary_read_byte(reader),
-		depth + 1,
-	)
+	domain, device := binary_read_byte(reader), binary_read_byte(reader)
+	user := binary_read_string(reader, binary_read_byte(reader), depth + 1)
 	server := "lid"
+
 	if domain == 0 || domain == 128 {
 		server = "s.whatsapp.net"
 	}
@@ -987,10 +931,10 @@ binary_unpack_bytes :: proc(reader: ^Binary_Reader, tag: u8, packed, data: []u8)
 		for half in 0 ..< 2 {
 			nibble := value >> cast(uint)((1 - half) * 4) & 15
 			c: u8
+
 			if tag == cast(u8)Binary_Tag.HEX_8 {
 				c = '0' + nibble
 				if nibble >= 10 do c = 'A' + nibble - 10
-
 			} else if nibble <= 9 {
 				c = '0' + nibble
 			} else {
@@ -1006,6 +950,7 @@ binary_unpack_bytes :: proc(reader: ^Binary_Reader, tag: u8, packed, data: []u8)
 						kind   = .Invalid_Packed_String,
 						offset = reader.at,
 					}
+
 					return false
 				}
 			}
@@ -1013,6 +958,7 @@ binary_unpack_bytes :: proc(reader: ^Binary_Reader, tag: u8, packed, data: []u8)
 			data[i * 2 + half] = c
 		}
 	}
+
 	return true
 }
 
@@ -1026,41 +972,33 @@ binary_read_packed_string :: proc(reader: ^Binary_Reader, tag: u8) -> string {
 			kind   = .Invalid_Packed_String,
 			offset = reader.at,
 		}
+
 		return ""
 	}
 
 	count := len(packed) * 2
 	if length & 128 != 0 do count -= 1
 
-	data, allocation_err := make(
-		[]u8,
-		len(packed) * 2,
-		reader.allocator,
-	)
+	data, allocation_err := make([]u8, len(packed) * 2, reader.allocator)
+
 	if allocation_err != nil {
 		reader.err = {
 			kind       = .Document_Storage_Exhausted,
 			offset     = reader.at,
 			allocation = allocation_err,
 		}
+
 		return ""
 	}
 
 	if !binary_unpack_bytes(reader, tag, packed, data) do return ""
+
 	return cast(string)data[:count]
 }
 
 binary_read_jid_pair :: proc(reader: ^Binary_Reader, depth: int) -> string {
-	user := binary_read_string(
-		reader,
-		binary_read_byte(reader),
-		depth + 1,
-	)
-	server := binary_read_string(
-		reader,
-		binary_read_byte(reader),
-		depth + 1,
-	)
+	user := binary_read_string(reader, binary_read_byte(reader), depth + 1)
+	server := binary_read_string(reader, binary_read_byte(reader), depth + 1)
 	if reader.err.kind != .None do return ""
 
 	if len(server) == 0 {
@@ -1068,36 +1006,32 @@ binary_read_jid_pair :: proc(reader: ^Binary_Reader, depth: int) -> string {
 			kind   = .Invalid_JID,
 			offset = reader.at,
 		}
+
 		return ""
 	}
 
 	return binary_reader_join_jid(reader, user, server, 0)
 }
 
-binary_reader_join_jid :: proc(
-	reader: ^Binary_Reader,
-	user, server: string,
-	device: u8,
-) -> string {
+binary_reader_join_jid :: proc(reader: ^Binary_Reader, user, server: string, device: u8) -> string {
 	if reader.err.kind != .None do return ""
 
 	suffix: [4]u8
 	device_suffix := ""
+
 	if device != 0 {
 		device_suffix = fmt.bprintf(suffix[:], ":%d", device)
 	}
 
-	data, allocation_err := make(
-		[]u8,
-		len(user) + len(device_suffix) + 1 + len(server),
-		reader.allocator,
-	)
+	data, allocation_err := make([]u8, len(user) + len(device_suffix) + 1 + len(server), reader.allocator)
+
 	if allocation_err != nil {
 		reader.err = {
 			kind       = .Document_Storage_Exhausted,
 			offset     = reader.at,
 			allocation = allocation_err,
 		}
+
 		return ""
 	}
 
@@ -1105,5 +1039,6 @@ binary_reader_join_jid :: proc(
 	at += copy(data[at:], transmute([]u8)device_suffix)
 	data[at] = '@'
 	copy(data[at + 1:], transmute([]u8)server)
+
 	return cast(string)data
 }

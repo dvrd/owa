@@ -12,80 +12,112 @@ import "core:testing"
 ROOT :: #directory + "/../../.."
 fixture_blob :: proc(blobs, key: w.Value) -> []u8 {
 	record := w.get(blobs, w.str(key))
+
 	if v, ok := w.get(record, "base64").(j.String); ok {
-		bytes, error := base64.decode(string(v)); assert(error == nil); return bytes
+		bytes, error := base64.decode(string(v))
+		assert(error == nil)
+		return bytes
 	}
+
 	if repeat, ok := w.integer(w.get(record, "repeat")); ok {
-		n, _ := w.integer(w.get(record, "length")); data := make([]u8, int(n))
+		n, _ := w.integer(w.get(record, "length"))
+		data := make([]u8, int(n))
 		for &c in data {c = u8(repeat)}; return data
 	}
+
 	data := make([dynamic]u8)
+
 	for part in w.items(w.get(record, "parts")) {
 		if encoded, ok := w.get(part, "base64").(j.String); ok {
-			bytes, error := base64.decode(string(encoded)); assert(error == nil)
+			bytes, error := base64.decode(string(encoded))
+			assert(error == nil)
 			append(&data, ..bytes)
 		} else {
-			repeat, _ := w.integer(w.get(part, "repeat")); n, _ := w.integer(w.get(part, "length"))
-			for _ in 0 ..< int(n) {append(&data, u8(repeat))}
+			repeat, _ := w.integer(w.get(part, "repeat"))
+			n, _ := w.integer(w.get(part, "length"))
+
+			for _ in 0 ..< int(n) {
+				append(&data, u8(repeat))
+			}
 		}
 	}
+
 	return data[:]
 }
 triage_cases :: proc(t: ^testing.T, suffix: string) {
-	arena: mem.Dynamic_Arena; mem.dynamic_arena_init(&arena)
+	arena: mem.Dynamic_Arena
+	mem.dynamic_arena_init(&arena)
 	defer mem.dynamic_arena_destroy(&arena)
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	corpus, error := w.decode(#load("fixtures/triage.json"), 16 * 1024 * 1024)
+
 	if !testing.expect_value(t, error, "") {
 		return
 	}
-	blobs := w.get(corpus, "blobs"); executed := 0
+
+	blobs := w.get(corpus, "blobs")
+	executed := 0
+
 	for test in w.items(w.get(corpus, "cases")) {
 		if !strings.has_suffix(w.str(w.get(test, "test")), suffix) {
 			continue
 		}
+
 		root, create_error := os.make_directory_temp("", "owa-triage-*", context.allocator)
+
 		if !testing.expect_value(t, create_error, nil) {
 			return
 		}
-		defer {cleanup_error := os.remove_all(root); _ = cleanup_error}
+
+		defer {
+			cleanup_error := os.remove_all(root)
+			_ = cleanup_error
+		}
+
 		expected := w.get(test, "expected")
+
 		for relative, entry in w.get(test, "files").(j.Object) {
-			path := w.join(root, relative); slash := strings.last_index(path, "/")
+			path := w.join(root, relative)
+			slash := strings.last_index(path, "/")
 			mkdir_error := os.make_directory_all(path[:slash])
-			if !testing.expect(
-				t,
-				mkdir_error == nil || mkdir_error == os.Error(os.General_Error.Exist),
-			) {
+
+			if !testing.expect(t, mkdir_error == nil || mkdir_error == os.Error(os.General_Error.Exist)) {
 				return
 			}
+
 			if symlink, ok := w.get(entry, "symlink").(j.String); ok {
 				link_error := os.symlink(string(symlink), path)
+
 				if !testing.expect_value(t, link_error, nil) {
 					return
 				}
 			} else {
 				bytes := fixture_blob(blobs, w.get(entry, "blob"))
+
 				if canonical, is_canonical := w.get(entry, "canonical").(j.String); is_canonical {
-					loaded_bytes, read_error := os.read_entire_file(
-						w.join(ROOT, string(canonical)),
-						context.allocator,
-					); assert(read_error == nil)
+					loaded_bytes, read_error := os.read_entire_file(w.join(ROOT, string(canonical)), context.allocator)
+					assert(read_error == nil)
 					write_error := os.write_entire_file(path, loaded_bytes)
 					assert(write_error == nil)
+
 					for &target in w.items(w.get(expected, "local_targets")) {
 						if w.str(w.get(target, "path")) == relative {
 							w.put(&target, "sha256", w.text(w.sha256(loaded_bytes)))
 						}
 					}
+
 					continue
 				}
-				write_error := os.write_entire_file(path, bytes); assert(write_error == nil)
+
+				write_error := os.write_entire_file(path, bytes)
+				assert(write_error == nil)
 			}
 		}
+
 		if w.str(w.get(test, "operation")) == "assess" {
 			before, after := w.get(test, "before"), w.get(test, "after")
-			_, bp := before.(j.String); _, ap := after.(j.String)
+			_, bp := before.(j.String)
+			_, ap := after.(j.String)
 			actual := w.assess(
 				w.get(test, "source"),
 				w.str(w.get(test, "path")),
@@ -96,20 +128,21 @@ triage_cases :: proc(t: ^testing.T, suffix: string) {
 				root,
 				w.str(w.get(test, "approved_contract")),
 			)
+
 			if !w.equal(actual, expected) {
-				fmt.eprintf(
-					"PARITY %s\nEXPECTED %s\nACTUAL %s\n",
-					suffix,
-					w.encode(expected),
-					w.encode(actual),
-				); testing.expect(t, false)
+				fmt.eprintf("PARITY %s\nEXPECTED %s\nACTUAL %s\n", suffix, w.encode(expected), w.encode(actual))
+				testing.expect(t, false)
 			}
 		} else {
 			actual := w.validate_approved_contract(w.get(test, "assessment"), root)
 			testing.expect_value(t, actual, w.truth(expected))
 		}
-		removed := os.remove_all(root); testing.expect_value(t, removed, nil); executed += 1
+
+		removed := os.remove_all(root)
+		testing.expect_value(t, removed, nil)
+		executed += 1
 	}
+
 	testing.expect(t, executed > 0)
 }
 
@@ -209,9 +242,9 @@ triage_approved_contract_binding_path_symlink_and_weak_claims_fail_closed :: pro
 }
 
 @(test)
-triage_new_fix_proof_revalidation_detects_stale_owners_and_forged_metadata :: proc(
-	t: ^testing.T,
-) {triage_cases(t, ".test_new_fix_proof_revalidation_detects_stale_owners_and_forged_metadata")}
+triage_new_fix_proof_revalidation_detects_stale_owners_and_forged_metadata :: proc(t: ^testing.T) {
+	triage_cases(t, ".test_new_fix_proof_revalidation_detects_stale_owners_and_forged_metadata")
+}
 
 @(test)
 triage_table_sensitive_comment_change_is_not_a_fix :: proc(t: ^testing.T) {
@@ -220,16 +253,22 @@ triage_table_sensitive_comment_change_is_not_a_fix :: proc(t: ^testing.T) {
 
 @(test)
 triage_real_owned_dictionary :: proc(t: ^testing.T) {
-	arena: mem.Dynamic_Arena; mem.dynamic_arena_init(&arena)
+	arena: mem.Dynamic_Arena
+	mem.dynamic_arena_init(&arena)
 	defer mem.dynamic_arena_destroy(&arena)
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	bytes, error := w.read_file(w.join(ROOT, "binary_tokens.odin"))
+
 	if !testing.expect_value(t, error, "") {
 		return
 	}
-	tokens, lex_error := w.lex(bytes, "odin"); if !testing.expect_value(t, lex_error, "") {
+
+	tokens, lex_error := w.lex(bytes, "odin")
+
+	if !testing.expect_value(t, lex_error, "") {
 		return
 	}
+
 	values, _, table_error := w.table(tokens.tokens[:], "odin")
 	testing.expect_value(t, table_error, "")
 	testing.expect_value(t, len(values), 236)

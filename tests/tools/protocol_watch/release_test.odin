@@ -7,27 +7,31 @@ import "core:testing"
 
 receipt_inputs :: proc(root: string) -> (w.Value, w.Value) {
 	assert(os.write_entire_file(w.join(root, "runtime.odin"), "package synthetic\n") == nil)
-	digest, _, error := w.source_digest(root); assert(error == nil)
+	digest, _, error := w.source_digest(root)
+	assert(error == nil)
 	evidence := "synthetic executed-check fixture\n"
 	assert(os.write_entire_file(w.join(root, "evidence.txt"), evidence) == nil)
 	proof := w.object(
 		{"evidence_file", w.text("evidence.txt")},
 		{"evidence_sha256", w.text(w.sha256(transmute([]u8)evidence))},
 	); checks := w.object()
+
 	for name in w.REQUIRED {
-		check := w.clone(proof); w.put(&check, "status", w.text("PASS"))
-		w.put(&check, "candidate_source_digest", w.text(digest)); w.put(&checks, name, check)
+		check := w.clone(proof)
+		w.put(&check, "status", w.text("PASS"))
+		w.put(&check, "candidate_source_digest", w.text(digest))
+		w.put(&checks, name, check)
 	}
+
 	offline := w.object(
 		{"candidate_source_digest", w.text(digest)},
-		{
-			"compiler_sha256",
-			w.text("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"),
-		},
+		{"compiler_sha256", w.text("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")},
 		{"checks", checks},
 	)
-	live := w.clone(proof); w.put(&live, "candidate_source_digest", w.text(digest))
+	live := w.clone(proof)
+	w.put(&live, "candidate_source_digest", w.text(digest))
 	w.put(&live, "duplicates_reported", w.boolean(false))
+
 	for name in ([]string {
 			"isolated_group_verified",
 			"text_server_acked",
@@ -39,37 +43,43 @@ receipt_inputs :: proc(root: string) -> (w.Value, w.Value) {
 	return offline, live
 }
 gate_case :: proc(t: ^testing.T, mode: int) {
-	arena := setup_arena(); defer mem.dynamic_arena_destroy(&arena)
+	arena := setup_arena()
+	defer mem.dynamic_arena_destroy(&arena)
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	root, error := os.make_directory_temp("", "owa-gate-*", context.allocator)
-	assert(error == nil); defer os.remove_all(root); offline, live := receipt_inputs(root)
+	assert(error == nil)
+	defer os.remove_all(root)
+	offline, live := receipt_inputs(root)
+
 	if mode == 1 {
 		assert(os.write_entire_file(w.join(root, "runtime.odin"), "package changed\n") == nil)
 	}
+
 	if mode == 2 {
-		w.put(&live, "recipient_confirmed", w.boolean(false)); checks := w.get(offline, "checks")
-		unit := w.get(checks, "unit_asan"); w.put(&unit, "status", w.text("SKIPPED"))
-		w.put(&checks, "unit_asan", unit); w.put(&checks, "protocol_review", w.null())
+		w.put(&live, "recipient_confirmed", w.boolean(false))
+		checks := w.get(offline, "checks")
+		unit := w.get(checks, "unit_asan")
+		w.put(&unit, "status", w.text("SKIPPED"))
+		w.put(&checks, "unit_asan", unit)
+		w.put(&checks, "protocol_review", w.null())
 		w.put(&offline, "checks", checks)
 	}
+
 	if mode == 3 {
-		assert(
-			os.write_entire_file(w.join(root, "evidence.txt"), "changed after validation\n") ==
-			nil,
-		)
+		assert(os.write_entire_file(w.join(root, "evidence.txt"), "changed after validation\n") == nil)
 	}
-	result, failure := w.evaluate(root, offline, live, root); testing.expect(t, failure == nil)
-	testing.expect_value(
-		t,
-		w.str(w.get(result, "status")),
-		"ELIGIBLE_FOR_REVIEW" if mode == 0 else "BLOCKED",
-	)
+
+	result, failure := w.evaluate(root, offline, live, root)
+	testing.expect(t, failure == nil)
+	testing.expect_value(t, w.str(w.get(result, "status")), "ELIGIBLE_FOR_REVIEW" if mode == 0 else "BLOCKED")
 	testing.expect(
 		t,
 		w.truth(w.get(result, "deployment_authorized"), false) &&
 		w.truth(w.get(result, "state_rollback_authorized"), false),
 	)
-	failures := w.items(w.get(result, "failures")); if mode == 1 {
+	failures := w.items(w.get(result, "failures"))
+
+	if mode == 1 {
 		testing.expect(
 			t,
 			w.contains_string(array_strings(failures[:]), "OFFLINE_SOURCE_MISMATCH") &&
@@ -82,27 +92,41 @@ gate_case :: proc(t: ^testing.T, mode: int) {
 				"MISSING_OR_INVALID_PROTOCOL_REVIEW",
 			}) {testing.expect(t, w.contains_string(array_strings(failures[:]), expected))}
 	}; if mode == 3 {
-		testing.expect(
-			t,
-			w.contains_string(array_strings(failures[:]), "LIVE_EVIDENCE_MISSING_OR_CHANGED"),
-		)
+		testing.expect(t, w.contains_string(array_strings(failures[:]), "LIVE_EVIDENCE_MISSING_OR_CHANGED"))
 	}
 }
 array_strings :: proc(value: []w.Value) -> []string {
-	out := make([]string, len(value)); for item, i in value {out[i] = w.str(item)}; return out
+	out := make([]string, len(value))
+
+	for item, i in value {
+		out[i] = w.str(item)
+	}
+
+	return out
 }
 @(test)
-gate_never_authorizes_deployment :: proc(t: ^testing.T) {gate_case(t, 0)}
+gate_never_authorizes_deployment :: proc(t: ^testing.T) {
+	gate_case(t, 0)
+}
 @(test)
-gate_source_change_invalidates_receipts :: proc(t: ^testing.T) {gate_case(t, 1)}
+gate_source_change_invalidates_receipts :: proc(t: ^testing.T) {
+	gate_case(t, 1)
+}
 @(test)
-gate_ack_alone_and_skipped_checks_fail :: proc(t: ^testing.T) {gate_case(t, 2)}
+gate_ack_alone_and_skipped_checks_fail :: proc(t: ^testing.T) {
+	gate_case(t, 2)
+}
 @(test)
-gate_changed_evidence_rejected :: proc(t: ^testing.T) {gate_case(t, 3)}
+gate_changed_evidence_rejected :: proc(t: ^testing.T) {
+	gate_case(t, 3)
+}
 ci_scan :: proc(data: rawptr, state, approved_contract: string) -> (w.Value, w.Failure) {
-	mode := (cast(^int)data)^; if mode == 1 {
+	mode := (cast(^int)data)^
+
+	if mode == 1 {
 		return w.null(), "private-secret"
 	}
+
 	return w.object(
 			{"status", w.text("REVIEW_REQUIRED" if mode == 0 else "NO_MONITORED_DRIFT")},
 			{"observation", w.object({"sources", w.array()})},
@@ -110,9 +134,11 @@ ci_scan :: proc(data: rawptr, state, approved_contract: string) -> (w.Value, w.F
 		nil
 }
 ci_case :: proc(t: ^testing.T, mode: int) {
-	arena := setup_arena(); defer mem.dynamic_arena_destroy(&arena)
+	arena := setup_arena()
+	defer mem.dynamic_arena_destroy(&arena)
 	context.allocator = mem.dynamic_arena_allocator(&arena)
-	root, error := os.make_directory_temp("", "owa-ci-*", context.allocator); assert(error == nil)
+	root, error := os.make_directory_temp("", "owa-ci-*", context.allocator)
+	assert(error == nil)
 	defer os.remove_all(root); output := w.join(root, "out"); kind := mode
 	result, failure := w.ci_prepare(w.join(root, "state"), output, "", ci_scan, &kind)
 	testing.expect(t, failure == nil)
@@ -122,10 +148,8 @@ ci_case :: proc(t: ^testing.T, mode: int) {
 		"REVIEW_REQUIRED" if mode == 0 else "FAILED" if mode == 1 else "NO_MONITORED_DRIFT",
 	); testing.expect(t, w.truth(w.get(result, "compatibility_approved"), false))
 	testing.expect(t, w.truth(w.get(result, "report_ready"), mode != 1))
-	testing.expect(
-		t,
-		!os.exists(w.join(output, "prompt.txt")) && !os.exists(w.join(output, "schema.json")),
-	)
+	testing.expect(t, !os.exists(w.join(output, "prompt.txt")) && !os.exists(w.join(output, "schema.json")))
+
 	if mode == 1 {
 		bytes, _ := os.read_entire_file(w.join(output, "result.json"), context.allocator)
 		testing.expect(t, !strings.contains(string(bytes), "private-secret"))
@@ -134,8 +158,14 @@ ci_case :: proc(t: ^testing.T, mode: int) {
 	}
 }
 @(test)
-ci_prepares_public_drift_without_downgrading :: proc(t: ^testing.T) {ci_case(t, 0)}
+ci_prepares_public_drift_without_downgrading :: proc(t: ^testing.T) {
+	ci_case(t, 0)
+}
 @(test)
-ci_failure_redacts_raw_error :: proc(t: ^testing.T) {ci_case(t, 1)}
+ci_failure_redacts_raw_error :: proc(t: ^testing.T) {
+	ci_case(t, 1)
+}
 @(test)
-ci_clean_scan_never_approves :: proc(t: ^testing.T) {ci_case(t, 2)}
+ci_clean_scan_never_approves :: proc(t: ^testing.T) {
+	ci_case(t, 2)
+}

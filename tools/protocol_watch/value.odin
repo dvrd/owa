@@ -27,23 +27,43 @@ Pair :: struct {
 	value: Value,
 }
 
-text :: proc(s: string) -> Value {return j.String(s)}
-number :: proc(n: i64) -> Value {return j.Integer(n)}
-boolean :: proc(b: bool) -> Value {return j.Boolean(b)}
-null :: proc() -> Value {return j.Null(nil)}
+text :: proc(s: string) -> Value {
+	return j.String(s)
+}
+number :: proc(n: i64) -> Value {
+	return j.Integer(n)
+}
+boolean :: proc(b: bool) -> Value {
+	return j.Boolean(b)
+}
+null :: proc() -> Value {
+	return j.Null(nil)
+}
 object :: proc(pairs: ..Pair) -> Value {
 	result := make(j.Object, 64)
-	for pair in pairs {result[pair.key] = pair.value}
+
+	for pair in pairs {
+		result[pair.key] = pair.value
+	}
+
 	return result
 }
 array :: proc(values: ..Value) -> Value {
 	result := make(j.Array)
-	for value in values {append(&result, value)}
+
+	for value in values {
+		append(&result, value)
+	}
+
 	return result
 }
 string_array :: proc(values: []string) -> Value {
 	result := make(j.Array)
-	for value in values {append(&result, text(value))}
+
+	for value in values {
+		append(&result, text(value))
+	}
+
 	return result
 }
 get :: proc(value: Value, key: string) -> Value {
@@ -52,11 +72,13 @@ get :: proc(value: Value, key: string) -> Value {
 			return found
 		}
 	}
+
 	return null()
 }
 put :: proc(value: ^Value, key: string, next: Value) {
 	if obj, ok := value^.(j.Object); ok {
-		obj[key] = next; value^ = obj
+		obj[key] = next
+		value^ = obj
 	}
 }
 str :: proc(value: Value) -> string {
@@ -81,18 +103,28 @@ items :: proc(value: Value) -> j.Array {
 }
 keys :: proc(value: Value) -> []string {
 	result := make([dynamic]string)
+
 	if obj, ok := value.(j.Object); ok {
-		for key in obj {append(&result, key)}
+		for key in obj {
+			append(&result, key)
+		}
 	}
-	slice.sort(result[:]); return result[:]
+
+	slice.sort(result[:])
+
+	return result[:]
 }
 fields :: proc(value: Value, wanted: []string) -> bool {
 	actual := keys(value)
+
 	if len(actual) != len(wanted) {
 		return false
 	}
+
 	for key in wanted {
-		found := false; for s in actual {
+		found := false
+
+		for s in actual {
 			if key == s {
 				found = true
 			}
@@ -100,41 +132,48 @@ fields :: proc(value: Value, wanted: []string) -> bool {
 			return false
 		}
 	}
+
 	return true
 }
 hex_valid :: proc(s: string, n: int) -> bool {
 	if len(s) != n {
 		return false
 	}
+
 	for c in s {
 		if !is_hex_lower(c) {
 			return false
 		}
 	}
+
 	return true
 }
 path_valid :: proc(path: string) -> bool {
 	if len(path) == 0 || len(path) > 200 {
 		return false
 	}
+
 	for part in strings.split(path, "/") {
 		if part == "" || part == "." || part == ".." {
 			return false
 		}
+
 		for c in part {
-			if !(is_alphanumeric(c) ||
-				   c == '_' ||
-				   c == '.' ||
-				   c == '-') {
+			if !(is_alphanumeric(c) || c == '_' || c == '.' || c == '-') {
 				return false
 			}
 		}
 	}
+
 	return true
 }
 sha256 :: proc(data: []u8) -> string {
-	ctx: sha2.Context_256; sha2.init_256(&ctx); sha2.update(&ctx, data)
-	digest: [32]u8; sha2.final(&ctx, digest[:])
+	ctx: sha2.Context_256
+	sha2.init_256(&ctx)
+	sha2.update(&ctx, data)
+	digest: [32]u8
+	sha2.final(&ctx, digest[:])
+
 	return string(hex.encode(digest[:]))
 }
 digest :: proc(data: []u8, present: bool) -> Value {
@@ -146,6 +185,7 @@ digest :: proc(data: []u8, present: bool) -> Value {
 }
 quote :: proc(builder: ^strings.Builder, s: string) {
 	strings.write_byte(builder, '"')
+
 	for c in s {
 		switch c {
 		case '"':
@@ -168,25 +208,24 @@ quote :: proc(builder: ^strings.Builder, s: string) {
 					fmt.sbprintf(builder, "\\u%04x", u32(c))
 				} else {
 					n := u32(c) - 0x10000
-					fmt.sbprintf(
-						builder,
-						"\\u%04x\\u%04x",
-						0xd800 + (n >> 10),
-						0xdc00 + (n & 1023),
-					)
+					fmt.sbprintf(builder, "\\u%04x\\u%04x", 0xd800 + (n >> 10), 0xdc00 + (n & 1023))
 				}
 			} else {
 				strings.write_rune(builder, c)
 			}
 		}
 	}
+
 	strings.write_byte(builder, '"')
 }
 encode_value :: proc(builder: ^strings.Builder, value: Value, spaced: bool, depth: int) -> bool {
 	if depth > 64 {
 		return false
 	}
-	comma := ", " if spaced else ","; colon := ": " if spaced else ":"
+
+	comma := ", " if spaced else ","
+	colon := ": " if spaced else ":"
+
 	switch v in value {
 	case j.Null:
 		strings.write_string(builder, "null")
@@ -202,6 +241,7 @@ encode_value :: proc(builder: ^strings.Builder, value: Value, spaced: bool, dept
 		}; fmt.sbprintf(builder, "%v", f64(v))
 	case j.Array:
 		strings.write_byte(builder, '[')
+
 		for item, i in v {
 			if i > 0 {
 				strings.write_string(builder, comma)
@@ -209,9 +249,11 @@ encode_value :: proc(builder: ^strings.Builder, value: Value, spaced: bool, dept
 				return false
 			}
 		}
+
 		strings.write_byte(builder, ']')
 	case j.Object:
 		strings.write_byte(builder, '{')
+
 		for key, i in keys(value) {
 			if i > 0 {
 				strings.write_string(builder, comma)
@@ -220,89 +262,132 @@ encode_value :: proc(builder: ^strings.Builder, value: Value, spaced: bool, dept
 				return false
 			}
 		}
+
 		strings.write_byte(builder, '}')
 	case:
 		return false
 	}
+
 	return true
 }
 encode :: proc(value: Value, spaced := false) -> string {
 	builder: strings.Builder
+
 	if !encode_value(&builder, value, spaced, 0) {
 		return ""
 	}
+
 	return strings.to_string(builder)
 }
-equal :: proc(a, b: Value) -> bool {return encode(a) == encode(b)}
+equal :: proc(a, b: Value) -> bool {
+	return encode(a) == encode(b)
+}
 decode :: proc(data: []u8, maximum := MAX_REPORT) -> (Value, string) {
 	if len(data) > maximum || !utf8.valid_string(string(data)) || !j.is_valid(data, .JSON, true) {
 		return null(), "JSON_INVALID"
 	}
-	tokenizer := j.make_tokenizer(string(data), .JSON, true); previous: j.Token_Kind
-	depth, count := 0, 0; all := make([dynamic]j.Token)
+
+	tokenizer := j.make_tokenizer(string(data), .JSON, true)
+	previous: j.Token_Kind
+	depth, count := 0, 0
+	all := make([dynamic]j.Token)
+
 	for {
 		token, error := j.get_token(&tokenizer)
+
 		if token.kind == .EOF && (error == .None || error == .EOF) {
 			break
 		}
+
 		if error != .None {
 			return null(), "JSON_INVALID"
 		}
-		count += 1; if count > MAX_TOKENS {
+
+		count += 1
+
+		if count > MAX_TOKENS {
 			return null(), "JSON_INVALID"
 		}
+
 		if token.kind == .Open_Brace || token.kind == .Open_Bracket {
-			depth += 1; if depth > 64 {
+			depth += 1
+
+			if depth > 64 {
 				return null(), "JSON_INVALID"
 			}
 		}
+
 		if token.kind == .Close_Brace || token.kind == .Close_Bracket {
 			if previous == .Comma {
 				return null(), "JSON_INVALID"
 			}; depth -= 1
 		}
+
 		if token.kind == .Integer {
-			_, ok := strconv.parse_i64(token.text); if !ok {
+			_, ok := strconv.parse_i64(token.text)
+
+			if !ok {
 				return null(), "JSON_INVALID"
 			}
 		}
+
 		if token.kind == .Float {
-			n, ok := strconv.parse_f64(token.text); if !ok || math.is_nan(n) || math.is_inf(n) {
+			n, ok := strconv.parse_f64(token.text)
+
+			if !ok || math.is_nan(n) || math.is_inf(n) {
 				return null(), "JSON_INVALID"
 			}
 		}
-		previous = token.kind; append(&all, token)
+
+		previous = token.kind
+		append(&all, token)
 	}
-	index := 0; value, ok := parse_tokens(all[:], &index, 0)
+
+	index := 0
+	value, ok := parse_tokens(all[:], &index, 0)
+
 	if !ok || index != len(all) {
 		return null(), "JSON_INVALID"
 	}
+
 	return value, ""
 }
 read_file :: proc(path: string, maximum := MAX_BYTES) -> ([]u8, string) {
 	info, error := os.lstat(path, context.allocator)
+
 	if error != nil || info.type != .Regular || info.size > i64(maximum) {
 		return nil, "LOCAL_FILE_INVALID"
 	}
+
 	file, open_error := os.open(path, {.Read, .Non_Blocking})
+
 	if open_error != nil {
 		return nil, "LOCAL_FILE_INVALID"
 	}; defer os.close(file)
-	data := make([]u8, int(info.size) + 1); used := 0
+	data := make([]u8, int(info.size) + 1)
+	used := 0
+
 	for used < len(data) {
-		n, e := os.read(file, data[used:]); used += n; if n == 0 {
+		n, e := os.read(file, data[used:])
+		used += n
+
+		if n == 0 {
 			break
 		}; if e != nil {
 			return nil, "LOCAL_FILE_INVALID"
 		}
 	}
+
 	if used > maximum || used != int(info.size) {
 		return nil, "LOCAL_FILE_INVALID"
 	}
+
 	return data[:used], ""
 }
 replace :: proc(s, from, to: string) -> string {
-	value, _ := strings.replace_all(s, from, to); return value
+	value, _ := strings.replace_all(s, from, to)
+
+	return value
 }
 contains_string :: proc(values: []string, wanted: string) -> bool {
 	for value in values {
@@ -315,21 +400,27 @@ allowed_fields :: proc(value: Value, required, optional: []string) -> bool {
 	if _, ok := value.(j.Object); !ok {
 		return false
 	}
+
 	actual := keys(value)
+
 	for key in required {
 		if !contains_string(actual, key) {
 			return false
 		}
 	}
+
 	for key in actual {
 		if !contains_string(required, key) && !contains_string(optional, key) {
 			return false
 		}
 	}
+
 	return true
 }
 
-join :: proc(a, b: string) -> string {return fmt.aprintf("%s/%s", strings.trim_suffix(a, "/"), b)}
+join :: proc(a, b: string) -> string {
+	return fmt.aprintf("%s/%s", strings.trim_suffix(a, "/"), b)
+}
 Failure :: union {
 	string,
 }
@@ -337,37 +428,57 @@ clone :: proc(value: Value) -> Value {
 	#partial switch v in value {
 	case j.Object:
 		result := make(j.Object, max(64, len(v) + 16))
-		for key, item in v {result[key] = clone(item)}
+		for key, item in v {
+			result[key] = clone(item)
+		}
 		return result
 	case j.Array:
-		result := make(j.Array); for item in v {append(&result, clone(item))}; return result
+		result := make(j.Array)
+		for item in v {
+			append(&result, clone(item))
+		}
+		return result
 	case:
 		return value
 	}
 }
 text_limit :: proc(value: Value, minimum, maximum: int) -> bool {
-	s, ok := value.(j.String); if !ok {
+	s, ok := value.(j.String)
+
+	if !ok {
 		return false
 	}
-	length := 0; for _ in string(s) {length += 1}
+
+	length := 0
+
+	for _ in string(s) {
+		length += 1
+	}
+
 	return length >= minimum && length <= maximum
 }
 run_valid :: proc(run: string) -> bool {
 	prefix := "https://github.com/dvrd/owa/actions/runs/"
+
 	if !strings.has_prefix(run, prefix) || len(run) == len(prefix) {
 		return false
 	}
+
 	for c in run[len(prefix):] {
 		if !is_digit(c) {
 			return false
 		}
 	}
+
 	return true
 }
 stable_uuid :: proc(seed: string) -> string {
-	bytes := (transmute([]u8)sha256(transmute([]u8)seed))[:32]; bytes[12] = '4'
+	bytes := (transmute([]u8)sha256(transmute([]u8)seed))[:32]
+	bytes[12] = '4'
 	variant, _ := strconv.parse_u64(string(bytes[16:17]), 16)
-	alphabet: string = "0123456789abcdef"; bytes[16] = alphabet[(variant & 3) | 8]
+	alphabet: string = "0123456789abcdef"
+	bytes[16] = alphabet[(variant & 3) | 8]
+
 	return fmt.aprintf(
 		"%s-%s-%s-%s-%s",
 		string(bytes[:8]),
@@ -389,16 +500,23 @@ change_identity :: proc(repo, path: string, reference, current: Value) -> string
 		get(current, "present"),
 		get(current, "sha256"),
 	)
+
 	return sha256(transmute([]u8)encode(value))
 }
-sort_strings :: proc(values: []string) {slice.sort(values)}
+sort_strings :: proc(values: []string) {
+	slice.sort(values)
+}
 
-coverage_object :: proc() -> Value {return make(j.Object, MAX_REPORT / 64)}
+coverage_object :: proc() -> Value {
+	return make(j.Object, MAX_REPORT / 64)
+}
 parse_tokens :: proc(tokens: []j.Token, index: ^int, depth: int) -> (Value, bool) {
 	if depth > 64 || index^ >= len(tokens) {
 		return null(), false
 	}
-	token := tokens[index^]; index^ += 1
+
+	token := tokens[index^]
+	index^ += 1
 	#partial switch token.kind {
 	case .Null:
 		return null(), true
@@ -407,16 +525,20 @@ parse_tokens :: proc(tokens: []j.Token, index: ^int, depth: int) -> (Value, bool
 	case .False:
 		return boolean(false), true
 	case .Integer:
-		n, ok := strconv.parse_i64(token.text); return number(n), ok
+		n, ok := strconv.parse_i64(token.text)
+		return number(n), ok
 	case .Float:
 		n, ok := strconv.parse_f64(token.text)
 		return j.Float(n), ok && !math.is_nan(n) && !math.is_inf(n)
 	case .String:
-		value, error := j.parse(token.text, .JSON, true); return value, error == .None
+		value, error := j.parse(token.text, .JSON, true)
+		return value, error == .None
 	case .Open_Bracket:
 		values := make(j.Array)
 		for index^ < len(tokens) && tokens[index^].kind != .Close_Bracket {
-			value, ok := parse_tokens(tokens, index, depth + 1); if !ok {
+			value, ok := parse_tokens(tokens, index, depth + 1)
+
+			if !ok {
 				return null(), false
 			}; append(&values, value)
 			if index^ < len(tokens) && tokens[index^].kind == .Comma {
@@ -434,16 +556,25 @@ parse_tokens :: proc(tokens: []j.Token, index: ^int, depth: int) -> (Value, bool
 			if tokens[index^].kind != .String {
 				return null(), false
 			}
-			key, key_ok := parse_tokens(tokens, index, depth + 1); if !key_ok {
+
+			key, key_ok := parse_tokens(tokens, index, depth + 1)
+
+			if !key_ok {
 				return null(), false
 			}
+
 			if index^ >= len(tokens) || tokens[index^].kind != .Colon {
 				return null(), false
 			}; index^ += 1
-			value, ok := parse_tokens(tokens, index, depth + 1); if !ok {
+			value, ok := parse_tokens(tokens, index, depth + 1)
+
+			if !ok {
 				return null(), false
 			}
-			name := str(key); if name in values {
+
+			name := str(key)
+
+			if name in values {
 				return null(), false
 			}; values[name] = value
 			if index^ < len(tokens) && tokens[index^].kind == .Comma {
@@ -460,7 +591,9 @@ parse_tokens :: proc(tokens: []j.Token, index: ^int, depth: int) -> (Value, bool
 	}
 }
 prefix_runes :: proc(s: string, count: int) -> string {
-	n := 0; for _, index in s {
+	n := 0
+
+	for _, index in s {
 		if n == count {
 			return s[:index]
 		}; n += 1

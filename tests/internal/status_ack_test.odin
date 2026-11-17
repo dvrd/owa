@@ -13,8 +13,10 @@ status_ack_top_level_live_and_offline_preserves_transport_attributes :: proc(t: 
 	for phase in ([]Socket_Phase{.Online, .Provisioning}) {
 		for kind in ([]string{"media", "text"}) {
 			for offline in ([]string{"true", "false"}) {
-				f := negative_ack_fixture(); defer negative_ack_destroy(f)
-				before := negative_ack_disk(f); defer delete(before)
+				f := negative_ack_fixture()
+				defer negative_ack_destroy(f)
+				before := negative_ack_disk(f)
+				defer delete(before)
 				revision, durable := f.store.revision, f.store.durable_revision
 				wire: Send_Id_Wire
 				send_id_wire_connect(&f.socket, &wire)
@@ -39,19 +41,24 @@ status_ack_top_level_live_and_offline_preserves_transport_attributes :: proc(t: 
 				testing.expect_value(t, event.kind, .None)
 				testing.expect(t, event.message == nil)
 				testing.expect(t, wire.used > 0, "status must produce one transport ACK")
+
 				if wire.used == 0 {
 					continue
 				}
+
 				plain: [2048]u8
 				encoded := send_id_wire_plain(&wire, plain[:])
 				document, binary_error := binary_node_decode(transmute([]u8)encoded)
 				testing.expect_value(t, binary_error.kind, .None)
+
 				if binary_error.kind != .None {
 					continue
 				}
+
 				defer binary_document_destroy(&document)
 				testing.expect_value(t, document.root.tag, "ack")
 				testing.expect_value(t, len(document.root.attrs), 6)
+
 				for expected in ([]Binary_Node_Attribute {
 						{"id", "synthetic-status-id"},
 						{"to", "status@broadcast"},
@@ -63,18 +70,16 @@ status_ack_top_level_live_and_offline_preserves_transport_attributes :: proc(t: 
 					value, found := node_attr(document.root, expected.key)
 					testing.expect(t, found && value == expected.value)
 				}
+
 				_, nack := node_attr(document.root, "error")
 				_, offline_copied := node_attr(document.root, "offline")
 				testing.expect(t, !nack && !offline_copied)
 				testing.expect_value(t, f.socket.client.noise.write_counter, u64(1))
 				testing.expect_value(t, f.store.revision, revision)
 				testing.expect_value(t, f.store.durable_revision, durable)
-				after := negative_ack_disk(f); defer delete(after)
-				testing.expect(
-					t,
-					bytes.equal(before, after),
-					"status ACK must not mutate durable chat state",
-				)
+				after := negative_ack_disk(f)
+				defer delete(after)
+				testing.expect(t, bytes.equal(before, after), "status ACK must not mutate durable chat state")
 			}
 		}
 	}
@@ -86,10 +91,12 @@ Status_Ack_Stream :: struct {
 }
 status_ack_read :: proc(data: rawptr, dst: []u8) -> (int, network_client.WebSocket_Stream_Error) {
 	stream := cast(^Status_Ack_Stream)data
+
 	return negative_ack_stream_read(&stream.input, dst)
 }
 status_ack_write :: proc(data: rawptr, src: []u8) -> (int, network_client.WebSocket_Stream_Error) {
 	stream := cast(^Status_Ack_Stream)data
+
 	return send_id_wire_write(&stream.output, src)
 }
 
@@ -123,7 +130,8 @@ status_ack_encrypted_input :: proc(f: ^Negative_Ack_Fixture, stream: ^Status_Ack
 		{},
 		masked = false,
 	)
-	assert(websocket_error == .None); stream.input.size = frame_size
+	assert(websocket_error == .None)
+	stream.input.size = frame_size
 	send_id_wire_connect(&f.socket, &stream.output)
 	f.socket.websocket.stream = {
 		data  = stream,
@@ -131,6 +139,7 @@ status_ack_encrypted_input :: proc(f: ^Negative_Ack_Fixture, stream: ^Status_Ack
 		write = status_ack_write,
 		close = negative_ack_stream_close,
 	}
+
 	f.socket.session = {
 		phase  = .Login_Accepted,
 		client = &f.socket.client,
@@ -141,25 +150,25 @@ status_ack_encrypted_input :: proc(f: ^Negative_Ack_Fixture, stream: ^Status_Ack
 @(test)
 status_ack_encrypted_socket_read_handles_provisioning_offline_batch :: proc(t: ^testing.T) {
 	for phase in ([]Socket_Phase{.Online, .Provisioning}) {
-		f := negative_ack_fixture(); defer negative_ack_destroy(f)
+		f := negative_ack_fixture()
+		defer negative_ack_destroy(f)
 		stream: Status_Ack_Stream
 		status_ack_encrypted_input(f, &stream)
 		defer socket_close(&f.socket)
 		f.socket.phase = phase
-		before := negative_ack_disk(f); defer delete(before)
+		before := negative_ack_disk(f)
+		defer delete(before)
 		event, error := socket_read(&f.socket)
 		testing.expect_value(t, error.kind, .None)
 		testing.expect_value(t, event.kind, .None)
 		testing.expect_value(t, f.socket.phase, phase)
 		testing.expect_value(t, f.socket.client.noise.read_counter, u64(1))
-		testing.expect(
-			t,
-			stream.output.used > 0,
-			"offline status must reach the ACK handler before activation",
-		)
+		testing.expect(t, stream.output.used > 0, "offline status must reach the ACK handler before activation")
+
 		if stream.output.used == 0 {
 			continue
 		}
+
 		plain: [2048]u8
 		encoded := send_id_wire_plain(&stream.output, plain[:])
 		document, decode := binary_node_decode(transmute([]u8)encoded)
@@ -168,18 +177,23 @@ status_ack_encrypted_socket_read_handles_provisioning_offline_batch :: proc(t: ^
 		class, class_found := node_attr(document.root, "class")
 		testing.expect(t, document.root.tag == "ack" && class_found && class == "status")
 		testing.expect_value(t, f.socket.client.noise.write_counter, u64(1))
-		after := negative_ack_disk(f); defer delete(after)
+		after := negative_ack_disk(f)
+		defer delete(after)
 		testing.expect(t, bytes.equal(before, after))
 	}
 }
 
 @(test)
 status_ack_malformed_envelopes_fail_without_output_or_store_changes :: proc(t: ^testing.T) {
-	f := negative_ack_fixture(); defer negative_ack_destroy(f)
+	f := negative_ack_fixture()
+	defer negative_ack_destroy(f)
 	wire: Send_Id_Wire
-	send_id_wire_connect(&f.socket, &wire); defer frame_transport_clear(&f.socket.client.frames)
-	before := negative_ack_disk(f); defer delete(before)
+	send_id_wire_connect(&f.socket, &wire)
+	defer frame_transport_clear(&f.socket.client.frames)
+	before := negative_ack_disk(f)
+	defer delete(before)
 	revision, durable := f.store.revision, f.store.durable_revision
+
 	for attrs in ([]([]Binary_Node_Attribute) {
 			{{"from", "status@broadcast"}},
 			{{"id", "synthetic-id"}},
@@ -194,23 +208,20 @@ status_ack_malformed_envelopes_fail_without_output_or_store_changes :: proc(t: ^
 	}
 }
 
-status_ack_failed_write :: proc(
-	_: rawptr,
-	_: []u8,
-) -> (
-	int,
-	network_client.WebSocket_Stream_Error,
-) {
+status_ack_failed_write :: proc(_: rawptr, _: []u8) -> (int, network_client.WebSocket_Stream_Error) {
 	return 0, {kind = .No_Progress}
 }
 
 @(test)
 status_ack_write_failure_is_propagated_without_chat_state_commit :: proc(t: ^testing.T) {
-	f := negative_ack_fixture(); defer negative_ack_destroy(f)
+	f := negative_ack_fixture()
+	defer negative_ack_destroy(f)
 	wire: Send_Id_Wire
-	send_id_wire_connect(&f.socket, &wire); defer socket_close(&f.socket)
+	send_id_wire_connect(&f.socket, &wire)
+	defer socket_close(&f.socket)
 	f.socket.websocket.stream.write = status_ack_failed_write
-	before := negative_ack_disk(f); defer delete(before)
+	before := negative_ack_disk(f)
+	defer delete(before)
 	revision, durable := f.store.revision, f.store.durable_revision
 	event, error := socket_process_node(
 		&f.socket,
@@ -222,33 +233,31 @@ status_ack_write_failure_is_propagated_without_chat_state_commit :: proc(t: ^tes
 	testing.expect_value(t, f.socket.phase, .Failed)
 	testing.expect_value(t, f.store.revision, revision)
 	testing.expect_value(t, f.store.durable_revision, durable)
-	after := negative_ack_disk(f); defer delete(after)
+	after := negative_ack_disk(f)
+	defer delete(after)
 	testing.expect(t, bytes.equal(before, after))
 }
 
 @(test)
 status_ack_legacy_broadcast_message_remains_transport_only :: proc(t: ^testing.T) {
-	f := negative_ack_fixture(); defer negative_ack_destroy(f)
+	f := negative_ack_fixture()
+	defer negative_ack_destroy(f)
 	wire: Send_Id_Wire
-	send_id_wire_connect(&f.socket, &wire); defer frame_transport_clear(&f.socket.client.frames)
-	before := negative_ack_disk(f); defer delete(before)
+	send_id_wire_connect(&f.socket, &wire)
+	defer frame_transport_clear(&f.socket.client.frames)
+	before := negative_ack_disk(f)
+	defer delete(before)
 	revision, durable := f.store.revision, f.store.durable_revision
 	event, error := socket_process_node(
 		&f.socket,
-		{
-			tag = "message",
-			attrs = {
-				{"id", "synthetic-legacy-id"},
-				{"from", "status@broadcast"},
-				{"type", "media"},
-			},
-		},
+		{tag = "message", attrs = {{"id", "synthetic-legacy-id"}, {"from", "status@broadcast"}, {"type", "media"}}},
 	)
 	testing.expect_value(t, error.kind, .None)
 	testing.expect_value(t, event.kind, .None)
 	plain: [2048]u8
 	encoded := send_id_wire_plain(&wire, plain[:])
-	document, decode := binary_node_decode(transmute([]u8)encoded); assert(decode.kind == .None)
+	document, decode := binary_node_decode(transmute([]u8)encoded)
+	assert(decode.kind == .None)
 	defer binary_document_destroy(&document)
 	class, found := node_attr(document.root, "class")
 	testing.expect(t, document.root.tag == "ack" && found && class == "message")

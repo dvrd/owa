@@ -43,26 +43,18 @@ Credentials_Error :: enum {
 	Invalid_Adv_Secret,
 }
 
-device_credentials_generate :: proc(
-) -> (
-	credentials: Device_Credentials,
-	error: Credentials_Error,
-) {
+device_credentials_generate :: proc() -> (credentials: Device_Credentials, error: Credentials_Error) {
 	when !crypto.HAS_RAND_BYTES do return {}, .Entropy_Unavailable
 	device_private_generate(&credentials.noise_private)
 	device_private_generate(&credentials.pairing_ephemeral_private)
 	device_private_generate(&credentials.identity_private)
 	device_private_generate(&credentials.signed_prekey_private)
-	credentials.signed_prekey_public = signal_curve_public(
-		credentials.signed_prekey_private,
-	)
+	credentials.signed_prekey_public = signal_curve_public(credentials.signed_prekey_private)
 	message: [33]u8
 	message[0] = 5 // Signal public-key type prefix is part of the signed data.
 	copy(message[1:], credentials.signed_prekey_public[:])
-	signature, sign_err := signal_curve_sign(
-		credentials.identity_private,
-		message[:],
-	)
+	signature, sign_err := signal_curve_sign(credentials.identity_private, message[:])
+
 	if sign_err != .None {
 		device_credentials_clear(&credentials)
 		return {}, .Signing_Failed
@@ -71,28 +63,23 @@ device_credentials_generate :: proc(
 	credentials.signed_prekey_signature = signature
 	registration: [2]u8
 	crypto.rand_bytes(registration[:])
-	credentials.registration_id =
-		(cast(u32)registration[0] << 8 | cast(u32)registration[1]) &
-		0x3fff
+	credentials.registration_id = (cast(u32)registration[0] << 8 | cast(u32)registration[1]) & 0x3fff
 	crypto.rand_bytes(credentials.adv_secret[:])
 	credentials.signed_prekey_id = 1
 	credentials.next_prekey_id = 1
 	credentials.first_unuploaded_prekey_id = 1
+
 	return credentials, .None
 }
 
-device_credentials_validate :: proc(
-	credentials: ^Device_Credentials,
-) -> Credentials_Error {
+device_credentials_validate :: proc(credentials: ^Device_Credentials) -> Credentials_Error {
 	if credentials == nil do return .Nil_Credentials
 
 	if !device_private_valid(&credentials.noise_private) {
 		return .Invalid_Noise_Key
 	}
 
-	if !device_private_valid(
-		&credentials.pairing_ephemeral_private,
-	) {
+	if !device_private_valid(&credentials.pairing_ephemeral_private) {
 		return .Invalid_Pairing_Ephemeral_Key
 	}
 
@@ -105,16 +92,12 @@ device_credentials_validate :: proc(
 	}
 
 	public := signal_curve_public(credentials.signed_prekey_private)
-	if crypto.compare_constant_time(
-		   public[:],
-		   credentials.signed_prekey_public[:],
-	   ) !=
-	   1 {
+
+	if crypto.compare_constant_time(public[:], credentials.signed_prekey_public[:]) != 1 {
 		return .Invalid_Signed_Prekey
 	}
 
-	if credentials.signed_prekey_id == 0 ||
-	   credentials.signed_prekey_id > MAX_DEVICE_PREKEY_ID {
+	if credentials.signed_prekey_id == 0 || credentials.signed_prekey_id > MAX_DEVICE_PREKEY_ID {
 		return .Invalid_Signed_Prekey_ID
 	}
 
@@ -125,8 +108,7 @@ device_credentials_validate :: proc(
 	if credentials.next_prekey_id == 0 ||
 	   credentials.next_prekey_id > MAX_DEVICE_PREKEY_ID ||
 	   credentials.first_unuploaded_prekey_id == 0 ||
-	   credentials.first_unuploaded_prekey_id >
-		   credentials.next_prekey_id {
+	   credentials.first_unuploaded_prekey_id > credentials.next_prekey_id {
 		return .Invalid_Prekey_ID
 	}
 
@@ -137,15 +119,9 @@ device_credentials_validate :: proc(
 	message: [33]u8
 	message[0] = 5
 	copy(message[1:], credentials.signed_prekey_public[:])
-	identity_public := signal_curve_public(
-		credentials.identity_private,
-	)
-	if signal_curve_verify(
-		   identity_public,
-		   message[:],
-		   credentials.signed_prekey_signature[:],
-	   ) !=
-	   .None {
+	identity_public := signal_curve_public(credentials.identity_private)
+
+	if signal_curve_verify(identity_public, message[:], credentials.signed_prekey_signature[:]) != .None {
 		return .Invalid_Signed_Prekey_Signature
 	}
 
@@ -154,12 +130,8 @@ device_credentials_validate :: proc(
 
 device_credentials_clear :: proc(credentials: ^Device_Credentials) {
 	if credentials != nil {
-		crypto.zero_explicit(
-			credentials,
-			size_of(Device_Credentials),
-		)
+		crypto.zero_explicit(credentials, size_of(Device_Credentials))
 	}
-
 }
 
 device_private_generate :: proc(private: ^[32]u8) {
@@ -169,11 +141,7 @@ device_private_generate :: proc(private: ^[32]u8) {
 }
 
 device_private_valid :: proc(private: ^[32]u8) -> bool {
-	return(
-		private[0] & 7 == 0 &&
-		private[31] & 0xc0 == 0x40 &&
-		crypto.is_zero_constant_time(private[:]) != 1 \
-	)
+	return private[0] & 7 == 0 && private[31] & 0xc0 == 0x40 && crypto.is_zero_constant_time(private[:]) != 1
 }
 
 MAX_AUTH_STATE_SIZE :: 8192
@@ -215,14 +183,12 @@ auth_state_clear :: proc(state: ^Auth_State) {
 	if state != nil {
 		crypto.zero_explicit(state, size_of(Auth_State))
 	}
-
 }
 
 auth_state_validate :: proc(state: ^Auth_State) -> Auth_Store_Error {
 	if state == nil do return {kind = .Invalid_State}
 
-	if err := device_credentials_validate(&state.credentials);
-	   err != .None {
+	if err := device_credentials_validate(&state.credentials); err != .None {
 		return {kind = .Invalid_Credentials, credentials = err}
 	}
 
@@ -231,13 +197,9 @@ auth_state_validate :: proc(state: ^Auth_State) -> Auth_Store_Error {
 	}
 
 	if state.account.valid {
-		if err := paired_account_validate(
-			&state.account,
-			&state.credentials,
-		); err.kind != .None {
+		if err := paired_account_validate(&state.account, &state.credentials); err.kind != .None {
 			return {kind = .Invalid_Account, pairing = err}
 		}
-
 	}
 
 	return {}
@@ -248,18 +210,13 @@ auth_state_validate :: proc(state: ^Auth_State) -> Auth_Store_Error {
 // The checksum detects corruption, not malicious
 // modification. Secret bytes are stored unencrypted, matching the old auth
 // directory's persistence model; the file writer restricts mode to 0600.
-auth_state_encode :: proc(
-	dst: []u8,
-	state: ^Auth_State,
-) -> (
-	n: int,
-	error: Auth_Store_Error,
-) {
+auth_state_encode :: proc(dst: []u8, state: ^Auth_State) -> (n: int, error: Auth_Store_Error) {
 	if err := auth_state_validate(state); err.kind != .None {
 		return 0, err
 	}
 
 	required := 320
+
 	if state.account.valid {
 		required +=
 			174 +
@@ -273,10 +230,7 @@ auth_state_encode :: proc(
 		return required, {kind = .Destination_Undersized}
 	}
 
-	if bytes.alias(
-		dst[:required],
-		mem.slice_ptr(cast([^]u8)state, size_of(Auth_State)),
-	) {
+	if bytes.alias(dst[:required], mem.slice_ptr(cast([^]u8)state, size_of(Auth_State))) {
 		return 0, {kind = .Overlapping_Buffers}
 	}
 
@@ -299,6 +253,7 @@ auth_state_encode :: proc(
 		state.credentials.signed_prekey_signature[:],
 		state.credentials.adv_secret[:],
 	}
+
 	for secret in secrets do n += copy(dst[n:], secret)
 	dst[n] = state.account.valid ? 1 : 0
 	n += 1
@@ -307,6 +262,7 @@ auth_state_encode :: proc(
 	assert(n + 32 == required)
 	checksum := sha256(dst[:n])
 	n += copy(dst[n:], checksum[:])
+
 	return n, {}
 }
 
@@ -323,23 +279,20 @@ auth_account_encode :: proc(dst: []u8, state: ^Auth_State, at: ^int) {
 			state.account.platform[:state.account.platform_size],
 			state.account.details[:state.account.details_size],
 		}
+
 		for part in parts {
-			dst[at^], dst[at^ + 1] =
-				cast(u8)(len(part) >> 8), cast(u8)len(part)
+			dst[at^], dst[at^ + 1] = cast(u8)(len(part) >> 8), cast(u8)len(part)
 			at^ += 2
 			at^ += copy(dst[at^:], part)
 		}
+
 		at^ += copy(dst[at^:], state.account.account_signature_key[:])
 		at^ += copy(dst[at^:], state.account.account_signature[:])
 		at^ += copy(dst[at^:], state.account.device_signature[:])
 	}
-
 }
 
-auth_state_decode :: proc(
-	dst: ^Auth_State,
-	src: []u8,
-) -> Auth_Store_Error {
+auth_state_decode :: proc(dst: ^Auth_State, src: []u8) -> Auth_Store_Error {
 	if dst == nil do return {kind = .Invalid_State}
 
 	at, header_error := auth_state_header_validate(src)
@@ -364,14 +317,18 @@ auth_state_decode :: proc(
 		next.credentials.signed_prekey_signature[:],
 		next.credentials.adv_secret[:],
 	}
-	for key in keys {copy(key, src[at:][:len(key)]); at += len(key)}
+
+	for key in keys {
+		copy(key, src[at:][:len(key)])
+		at += len(key)
+	}
+
 	end := len(src) - 32
 	if src[at] > 1 do return {kind = .Invalid_Format}
 
 	next.account.valid = src[at] == 1
 	at += 1
-	if account_error := auth_account_decode(&next, src, &at, end, src[9]);
-	   account_error.kind != .None do return account_error
+	if account_error := auth_account_decode(&next, src, &at, end, src[9]); account_error.kind != .None do return account_error
 
 	if at != end do return {kind = .Invalid_Format}
 
@@ -381,6 +338,7 @@ auth_state_decode :: proc(
 
 	auth_state_clear(dst)
 	dst^ = next
+
 	return {}
 }
 
@@ -398,22 +356,21 @@ auth_state_header_validate :: proc(src: []u8) -> (int, Auth_Store_Error) {
 	}
 
 	at := 10
+
 	if cast(int)cast(u32)store_get(src, &at, 4) != len(src) - 46 {
 		return 0, {kind = .Invalid_Format}
 	}
 
 	hash := sha256(src[:len(src) - 32])
-	if crypto.compare_constant_time(hash[:], src[len(src) - 32:]) !=
-	   1 {
+
+	if crypto.compare_constant_time(hash[:], src[len(src) - 32:]) != 1 {
 		return 0, {kind = .Checksum_Mismatch}
 	}
 
 	return at, {}
 }
 
-auth_account_decode :: proc(
-	next: ^Auth_State, src: []u8, at: ^int, end: int, version: u8,
-) -> Auth_Store_Error {
+auth_account_decode :: proc(next: ^Auth_State, src: []u8, at: ^int, end: int, version: u8) -> Auth_Store_Error {
 	if next.account.valid {
 		if end - at^ < 5 do return {kind = .Invalid_Format}
 
@@ -424,25 +381,24 @@ auth_account_decode :: proc(
 		at^ += 1
 		// No domain guessing: old state always keeps its original signed contract.
 		next.account.signature_policy = .Legacy
+
 		if version == 2 {
 			if at^ >= end || src[at^] > u8(Pairing_Signature_Policy.Current) {
 				return {kind = .Invalid_Format}
 			}
+
 			next.account.signature_policy = Pairing_Signature_Policy(src[at^])
 			at^ += 1
 		}
-		slots := [?][]u8 {
-			next.account.jid[:],
-			next.account.name[:],
-			next.account.platform[:],
-			next.account.details[:],
-		}
+
+		slots := [?][]u8{next.account.jid[:], next.account.name[:], next.account.platform[:], next.account.details[:]}
 		sizes := [?]^int {
 			&next.account.jid_size,
 			&next.account.name_size,
 			&next.account.platform_size,
 			&next.account.details_size,
 		}
+
 		for slot, i in slots {
 			if end - at^ < 2 {
 				return {kind = .Invalid_Format}
@@ -450,6 +406,7 @@ auth_account_decode :: proc(
 
 			size := cast(int)src[at^] << 8 | cast(int)src[at^ + 1]
 			at^ += 2
+
 			if size > len(slot) || size > end - at^ {
 				return {kind = .Invalid_Format}
 			}
@@ -458,6 +415,7 @@ auth_account_decode :: proc(
 			sizes[i]^ = size
 			at^ += size
 		}
+
 		if end - at^ != 160 {
 			return {kind = .Invalid_Format}
 		}
@@ -473,10 +431,7 @@ auth_account_decode :: proc(
 	return {}
 }
 
-auth_state_save :: proc(
-	path: string,
-	state: ^Auth_State,
-) -> Auth_Store_Error {
+auth_state_save :: proc(path: string, state: ^Auth_State) -> Auth_Store_Error {
 	buffer: [MAX_AUTH_STATE_SIZE]u8
 	defer crypto.zero_explicit(&buffer, size_of(buffer))
 	size, encode_err := auth_state_encode(buffer[:], state)
@@ -493,16 +448,15 @@ auth_state_save :: proc(
 		.Rename    = .Rename_Failed,
 		.Directory = .Flush_Failed,
 	}
+
 	return {kind = kinds[step], io = io_err}
 }
 
-auth_state_load :: proc(
-	path: string,
-	state: ^Auth_State,
-) -> Auth_Store_Error {
+auth_state_load :: proc(path: string, state: ^Auth_State) -> Auth_Store_Error {
 	if state == nil do return {kind = .Invalid_State}
 
 	file, open_err := os.open(path)
+
 	if open_err != nil {
 		return {kind = .Read_Failed, io = open_err}
 	}
@@ -511,6 +465,7 @@ auth_state_load :: proc(
 	buffer: [MAX_AUTH_STATE_SIZE + 1]u8
 	defer crypto.zero_explicit(&buffer, size_of(buffer))
 	used, read_err := bounded_read(file, buffer[:])
+
 	if read_err != nil {
 		return {kind = .Read_Failed, io = read_err}
 	}
@@ -530,19 +485,7 @@ PREKEY_SERVER_JID :: "@s.whatsapp.net"
 MAX_PREKEY_REQUEST_ID_SIZE :: 128
 PREKEY_STORE_VERSION :: 1
 PREKEY_STORE_MAGIC :: cast(string)"ODWPREK\x00"
-MAX_PREKEY_STORE_SIZE ::
-	8 +
-	2 +
-	32 +
-	4 +
-	8 +
-	2 +
-	4 +
-	2 +
-	2 +
-	MAX_PREKEY_REQUEST_ID_SIZE +
-	MAX_STORED_PREKEYS * 69 +
-	32
+MAX_PREKEY_STORE_SIZE :: 8 + 2 + 32 + 4 + 8 + 2 + 4 + 2 + 2 + MAX_PREKEY_REQUEST_ID_SIZE + MAX_STORED_PREKEYS * 69 + 32
 
 Prekey_Status :: enum u8 {
 	Unpublished,
@@ -615,39 +558,30 @@ Prekey_Error :: struct {
 	server_code: u32,
 }
 
-prekey_store_init :: proc(
-	store: ^Prekey_Store,
-	credentials: ^Device_Credentials,
-) -> Prekey_Error {
+prekey_store_init :: proc(store: ^Prekey_Store, credentials: ^Device_Credentials) -> Prekey_Error {
 	if store == nil do return {kind = .Invalid_State}
 
 	if store.initialized {
 		return {kind = .Already_Initialized}
 	}
 
-	if err := device_credentials_validate(credentials);
-	   err != .None {
+	if err := device_credentials_validate(credentials); err != .None {
 		return {kind = .Invalid_Credentials, credentials = err}
 	}
 
 	// An auth counter describing generated but missing private keys cannot be
 	// repaired by silently regenerating a different key under the same ID.
-	if credentials.first_unuploaded_prekey_id !=
-	   credentials.next_prekey_id {
-		return {
-			kind = .Invalid_Credentials,
-			credentials = .Invalid_Prekey_ID,
-		}
+	if credentials.first_unuploaded_prekey_id != credentials.next_prekey_id {
+		return {kind = .Invalid_Credentials, credentials = .Invalid_Prekey_ID}
 	}
 
 	store^ = {
 		initialized     = true,
-		identity_public = signal_curve_public(
-			credentials.identity_private,
-		),
+		identity_public = signal_curve_public(credentials.identity_private),
 		next_id         = credentials.next_prekey_id,
 		revision        = 1,
 	}
+
 	return {}
 }
 
@@ -655,42 +589,32 @@ prekey_store_clear :: proc(store: ^Prekey_Store) {
 	if store != nil {
 		crypto.zero_explicit(store, size_of(Prekey_Store))
 	}
-
 }
 
-prekey_store_get :: proc(
-	store: ^Prekey_Store,
-	id: u32,
-) -> ^One_Time_Prekey {
-	if store == nil ||
-	   !store.initialized ||
-	   store.count < 0 ||
-	   store.count > MAX_STORED_PREKEYS {
+prekey_store_get :: proc(store: ^Prekey_Store, id: u32) -> ^One_Time_Prekey {
+	if store == nil || !store.initialized || store.count < 0 || store.count > MAX_STORED_PREKEYS {
 		return nil
 	}
 
 	for &key in store.keys[:store.count] {
 		if key.id == id do return &key
-
 	}
+
 	return nil
 }
 
-prekey_store_generate :: proc(
-	store: ^Prekey_Store,
-	count: int,
-) -> Prekey_Error {
+prekey_store_generate :: proc(store: ^Prekey_Store, count: int) -> Prekey_Error {
 	if err := prekey_store_validate(store); err.kind != .None {
 		return err
 	}
 
-	if err := prekey_generation_validate(store, count);
-	   err.kind != .None {
+	if err := prekey_generation_validate(store, count); err.kind != .None {
 		return err
 	}
 
 	prekey_generate_append(store, count)
 	store.revision += 1
+
 	return {}
 }
 
@@ -724,12 +648,10 @@ prekey_upload_prepare :: proc(
 	unpublished := 0
 	for key in store.keys[:store.count] {
 		if key.status == .Unpublished do unpublished += 1
-
 	}
 	needed := max(0, count - unpublished)
 	if needed > 0 {
-		if err := prekey_generation_validate(store, needed);
-		   err.kind != .None {
+		if err := prekey_generation_validate(store, needed); err.kind != .None {
 			return err
 		}
 
@@ -745,9 +667,7 @@ prekey_upload_prepare :: proc(
 			key.status = .Pending
 			store.pending_count += 1
 			if store.pending_count == count do break
-
 		}
-
 	}
 	prekey_set_request_id(store, request_id)
 	store.revision += 1
@@ -756,10 +676,7 @@ prekey_upload_prepare :: proc(
 
 // Lost responses/reconnections reuse the same private keys and IDs. Only the
 // IQ correlation ID changes; persist it before resending the upload.
-prekey_upload_retry :: proc(
-	store: ^Prekey_Store,
-	request_id: string,
-) -> Prekey_Error {
+prekey_upload_retry :: proc(store: ^Prekey_Store, request_id: string) -> Prekey_Error {
 	if err := prekey_store_validate(store); err.kind != .None {
 		return err
 	}
@@ -778,6 +695,7 @@ prekey_upload_retry :: proc(
 
 	prekey_set_request_id(store, request_id)
 	store.revision += 1
+
 	return {}
 }
 
@@ -791,8 +709,7 @@ prekey_upload_encode :: proc(
 	n: int,
 	error: Prekey_Error,
 ) {
-	if validation_error := prekey_upload_validate(store, credentials);
-	   validation_error.kind != .None do return 0, validation_error
+	if validation_error := prekey_upload_validate(store, credentials); validation_error.kind != .None do return 0, validation_error
 
 	registration: [4]u8
 	for i in 0 ..< 4 {
@@ -807,14 +724,8 @@ prekey_upload_encode :: proc(
 	signed_id := prekey_id_bytes(credentials.signed_prekey_id)
 	signed_fields := [?]Binary_Node {
 		{tag = "id", content = signed_id[:]},
-		{
-			tag = "value",
-			content = credentials.signed_prekey_public[:],
-		},
-		{
-			tag = "signature",
-			content = credentials.signed_prekey_signature[:],
-		},
+		{tag = "value", content = credentials.signed_prekey_public[:]},
+		{tag = "signature", content = credentials.signed_prekey_signature[:]},
 	}
 	content := [?]Binary_Node {
 		{tag = "registration", content = registration[:]},
@@ -827,17 +738,12 @@ prekey_upload_encode :: proc(
 		{"xmlns", "encrypt"},
 		{"type", "set"},
 		{"to", PREKEY_SERVER_JID},
-		{
-			"id",
-			cast(string)store.pending_request_id[:store.pending_request_id_size],
-		},
+		{"id", cast(string)store.pending_request_id[:store.pending_request_id_size]},
 	}
-	size, binary_err := binary_node_encode(
-		dst,
-		{tag = "iq", attrs = attrs[:], content = content[:]},
-	)
+	size, binary_err := binary_node_encode(dst, {tag = "iq", attrs = attrs[:], content = content[:]})
 	if binary_err.kind != .None {
 		kind: Prekey_Error_Kind = .Binary_Node_Failed
+
 		if binary_err.kind == .Destination_Undersized {
 			kind = .Destination_Undersized
 		}
@@ -849,8 +755,10 @@ prekey_upload_encode :: proc(
 }
 
 prekey_upload_nodes_prepare :: proc(
-	store: ^Prekey_Store, ids: [][3]u8,
-	key_fields: [][2]Binary_Node, key_nodes: []Binary_Node,
+	store: ^Prekey_Store,
+	ids: [][3]u8,
+	key_fields: [][2]Binary_Node,
+	key_nodes: []Binary_Node,
 ) -> int {
 	at := 0
 	for &key in store.keys[:store.count] {
@@ -861,24 +769,23 @@ prekey_upload_nodes_prepare :: proc(
 			Binary_Node{tag = "id", content = ids[at][:]},
 			Binary_Node{tag = "value", content = key.public[:]},
 		}
+
 		key_nodes[at] = {
 			tag     = "key",
 			content = key_fields[at][:],
 		}
+
 		at += 1
 	}
 	return at
 }
 
-prekey_upload_validate :: proc(
-	store: ^Prekey_Store, credentials: ^Device_Credentials,
-) -> Prekey_Error {
+prekey_upload_validate :: proc(store: ^Prekey_Store, credentials: ^Device_Credentials) -> Prekey_Error {
 	if err := prekey_store_validate(store); err.kind != .None {
 		return err
 	}
 
-	if err := prekey_owner_validate(store, credentials);
-	   err.kind != .None {
+	if err := prekey_owner_validate(store, credentials); err.kind != .None {
 		return err
 	}
 
@@ -896,10 +803,7 @@ prekey_upload_validate :: proc(
 // A matching successful IQ, not a socket send, confirms publication. All
 // private keys are retained. Save this revision before preparing another batch.
 // If the process dies before saving, the old Pending snapshot is safe to retry.
-prekey_upload_handle_response :: proc(
-	store: ^Prekey_Store,
-	response: Binary_Node,
-) -> Prekey_Error {
+prekey_upload_handle_response :: proc(store: ^Prekey_Store, response: Binary_Node) -> Prekey_Error {
 	if err := prekey_store_validate(store); err.kind != .None {
 		return err
 	}
@@ -913,8 +817,8 @@ prekey_upload_handle_response :: proc(
 	}
 
 	request_id := cast(string)store.pending_request_id[:store.pending_request_id_size]
-	if err := prekey_response_validate(response, request_id);
-	   err.kind != .None {
+
+	if err := prekey_response_validate(response, request_id); err.kind != .None {
 		return err
 	}
 
@@ -924,25 +828,17 @@ prekey_upload_handle_response :: proc(
 
 	for &key in store.keys[:store.count] {
 		if key.status == .Pending do key.status = .Published
-
 	}
+
 	store.pending_first_id, store.pending_count = 0, 0
-	crypto.zero_explicit(
-		&store.pending_request_id,
-		size_of(store.pending_request_id),
-	)
+	crypto.zero_explicit(&store.pending_request_id, size_of(store.pending_request_id))
 	store.pending_request_id_size = 0
 	store.revision += 1
+
 	return {}
 }
 
-prekey_count_query_encode :: proc(
-	dst: []u8,
-	request_id: string,
-) -> (
-	int,
-	Prekey_Error,
-) {
+prekey_count_query_encode :: proc(dst: []u8, request_id: string) -> (int, Prekey_Error) {
 	if !prekey_request_id_valid(request_id) {
 		return 0, {kind = .Invalid_Request_ID}
 	}
@@ -953,11 +849,10 @@ prekey_count_query_encode :: proc(
 		{"type", "get"},
 		{"to", PREKEY_SERVER_JID},
 	}
+
 	content := [?]Binary_Node{{tag = "count"}}
-	size, err := binary_node_encode(
-		dst,
-		{tag = "iq", attrs = attrs[:], content = content[:]},
-	)
+	size, err := binary_node_encode(dst, {tag = "iq", attrs = attrs[:], content = content[:]})
+
 	if err.kind != .None {
 		return size, {kind = .Binary_Node_Failed, binary = err}
 	}
@@ -965,15 +860,8 @@ prekey_count_query_encode :: proc(
 	return size, {}
 }
 
-prekey_count_response :: proc(
-	response: Binary_Node,
-	request_id: string,
-) -> (
-	int,
-	Prekey_Error,
-) {
-	if err := prekey_response_validate(response, request_id);
-	   err.kind != .None {
+prekey_count_response :: proc(response: Binary_Node, request_id: string) -> (int, Prekey_Error) {
+	if err := prekey_response_validate(response, request_id); err.kind != .None {
 		return 0, err
 	}
 
@@ -988,12 +876,13 @@ prekey_count_response :: proc(
 
 				count = &child
 			}
-
 		}
 	}
+
 	if count == nil do return 0, {kind = .Invalid_Response}
 
 	value, found := node_attr(count^, "value")
+
 	if !found || len(value) == 0 {
 		return 0, {kind = .Invalid_Response}
 	}
@@ -1002,9 +891,10 @@ prekey_count_response :: proc(
 		if !is_digit(c) {
 			return 0, {kind = .Invalid_Response}
 		}
-
 	}
+
 	parsed, valid := strconv.parse_uint(value, 10)
+
 	if !valid || parsed > cast(uint)MAX_DEVICE_PREKEY_ID {
 		return 0, {kind = .Invalid_Response}
 	}
@@ -1015,30 +905,13 @@ prekey_count_response :: proc(
 // Versioned checksum-protected plaintext snapshot (not encryption). Callers
 // must keep this private, as with auth state. Encoding alone does not satisfy
 // the durable-before-upload gate; only a successful save/load does.
-prekey_store_encode :: proc(
-	dst: []u8,
-	store: ^Prekey_Store,
-) -> (
-	int,
-	Prekey_Error,
-) {
+prekey_store_encode :: proc(dst: []u8, store: ^Prekey_Store) -> (int, Prekey_Error) {
 	if err := prekey_store_validate(store); err.kind != .None {
 		return 0, err
 	}
 
-	size :=
-		8 +
-		2 +
-		32 +
-		4 +
-		8 +
-		2 +
-		4 +
-		2 +
-		2 +
-		store.pending_request_id_size +
-		store.count * 69 +
-		32
+	size := 8 + 2 + 32 + 4 + 8 + 2 + 4 + 2 + 2 + store.pending_request_id_size + store.count * 69 + 32
+
 	if len(dst) < size {
 		return size, {kind = .Destination_Undersized}
 	}
@@ -1051,16 +924,9 @@ prekey_store_encode :: proc(
 	store_put(dst, &at, cast(u64)store.count, 2)
 	store_put(dst, &at, cast(u64)store.pending_first_id, 4)
 	store_put(dst, &at, cast(u64)store.pending_count, 2)
-	store_put(
-		dst,
-		&at,
-		cast(u64)store.pending_request_id_size,
-		2,
-	)
-	at += copy(
-		dst[at:],
-		store.pending_request_id[:store.pending_request_id_size],
-	)
+	store_put(dst, &at, cast(u64)store.pending_request_id_size, 2)
+	at += copy(dst[at:], store.pending_request_id[:store.pending_request_id_size])
+
 	for key in store.keys[:store.count] {
 		store_put(dst, &at, cast(u64)key.id, 4)
 		dst[at] = cast(u8)key.status
@@ -1070,22 +936,20 @@ prekey_store_encode :: proc(
 		for value, i in key.public do dst[at + i] = value
 		at += 32
 	}
+
 	hash := sha256(dst[:at])
 	copy(dst[at:], hash[:])
+
 	return size, {}
 }
 
-prekey_store_decode :: proc(
-	store: ^Prekey_Store,
-	src: []u8,
-	credentials: ^Device_Credentials,
-) -> Prekey_Error {
+prekey_store_decode :: proc(store: ^Prekey_Store, src: []u8, credentials: ^Device_Credentials) -> Prekey_Error {
 	if store == nil do return {kind = .Invalid_State}
 
-	if header_error := prekey_store_header_validate(src);
-	   header_error.kind != .None do return header_error
+	if header_error := prekey_store_header_validate(src); header_error.kind != .None do return header_error
 
 	at := 8
+
 	if store_get(src, &at, 2) != PREKEY_STORE_VERSION {
 		return {kind = .Unsupported_Version}
 	}
@@ -1099,26 +963,19 @@ prekey_store_decode :: proc(
 	next.count = cast(int)store_get(src, &at, 2)
 	next.pending_first_id = cast(u32)store_get(src, &at, 4)
 	next.pending_count = cast(int)store_get(src, &at, 2)
-	next.pending_request_id_size = cast(int)store_get(
-		src,
-		&at,
-		2,
-	)
+	next.pending_request_id_size = cast(int)store_get(src, &at, 2)
 	if next.count > MAX_STORED_PREKEYS ||
 	   next.pending_count > MAX_PREKEY_UPLOAD_COUNT ||
 	   next.pending_request_id_size > MAX_PREKEY_REQUEST_ID_SIZE {
 		return {kind = .Invalid_Format}
 	}
 
-	if at + next.pending_request_id_size + next.count * 69 + 32 !=
-	   len(src) {
+	if at + next.pending_request_id_size + next.count * 69 + 32 != len(src) {
 		return {kind = .Invalid_Format}
 	}
 
-	at += copy(
-		next.pending_request_id[:next.pending_request_id_size],
-		src[at:][:next.pending_request_id_size],
-	)
+	at += copy(next.pending_request_id[:next.pending_request_id_size], src[at:][:next.pending_request_id_size])
+
 	for &key in next.keys[:next.count] {
 		key.id = cast(u32)store_get(src, &at, 4)
 		key.status = cast(Prekey_Status)src[at]
@@ -1126,17 +983,18 @@ prekey_store_decode :: proc(
 		at += copy(key.private[:], src[at:][:32])
 		at += copy(key.public[:], src[at:][:32])
 	}
+
 	if err := prekey_store_validate(&next); err.kind != .None {
 		return err
 	}
 
-	if err := prekey_owner_validate(&next, credentials);
-	   err.kind != .None {
+	if err := prekey_owner_validate(&next, credentials); err.kind != .None {
 		return err
 	}
 
 	prekey_store_clear(store)
 	store^ = next
+
 	return {}
 }
 
@@ -1154,8 +1012,8 @@ prekey_store_header_validate :: proc(src: []u8) -> Prekey_Error {
 	}
 
 	hash := sha256(src[:len(src) - 32])
-	if crypto.compare_constant_time(hash[:], src[len(src) - 32:]) !=
-	   1 {
+
+	if crypto.compare_constant_time(hash[:], src[len(src) - 32:]) != 1 {
 		return {kind = .Checksum_Mismatch}
 	}
 
@@ -1163,10 +1021,7 @@ prekey_store_header_validate :: proc(src: []u8) -> Prekey_Error {
 }
 
 // A failed durability step never permits upload.
-prekey_store_save :: proc(
-	path: string,
-	store: ^Prekey_Store,
-) -> Prekey_Error {
+prekey_store_save :: proc(path: string, store: ^Prekey_Store) -> Prekey_Error {
 	buffer: [MAX_PREKEY_STORE_SIZE]u8
 	defer crypto.zero_explicit(&buffer, size_of(buffer))
 	size, encode_err := prekey_store_encode(buffer[:], store)
@@ -1174,6 +1029,7 @@ prekey_store_save :: proc(
 
 	when !crypto.HAS_RAND_BYTES do return {kind = .Entropy_Unavailable}
 	step, io_err := durable_write(path, buffer[:size])
+
 	if step != .None {
 		kinds := [Durable_Write_Step]Prekey_Error_Kind {
 			.None      = .None,
@@ -1183,21 +1039,20 @@ prekey_store_save :: proc(
 			.Rename    = .Rename_Failed,
 			.Directory = .Directory_Sync_Failed,
 		}
+
 		return {kind = kinds[step], io = io_err}
 	}
 
 	store.durable_revision = store.revision
+
 	return {}
 }
 
-prekey_store_load :: proc(
-	path: string,
-	store: ^Prekey_Store,
-	credentials: ^Device_Credentials,
-) -> Prekey_Error {
+prekey_store_load :: proc(path: string, store: ^Prekey_Store, credentials: ^Device_Credentials) -> Prekey_Error {
 	if store == nil do return {kind = .Invalid_State}
 
 	file, open_err := os.open(path)
+
 	if open_err != nil {
 		return {kind = .Read_Failed, io = open_err}
 	}
@@ -1206,6 +1061,7 @@ prekey_store_load :: proc(
 	buffer: [MAX_PREKEY_STORE_SIZE + 1]u8
 	defer crypto.zero_explicit(&buffer, size_of(buffer))
 	used, read_err := bounded_read(file, buffer[:])
+
 	if read_err != nil {
 		return {kind = .Read_Failed, io = read_err}
 	}
@@ -1214,12 +1070,12 @@ prekey_store_load :: proc(
 		return {kind = .State_Oversized}
 	}
 
-	if err := prekey_store_decode(store, buffer[:used], credentials);
-	   err.kind != .None {
+	if err := prekey_store_decode(store, buffer[:used], credentials); err.kind != .None {
 		return err
 	}
 
 	store.durable_revision = store.revision
+
 	return {}
 }
 
@@ -1249,25 +1105,19 @@ prekey_store_validate :: proc(store: ^Prekey_Store) -> Prekey_Error {
 	}
 
 	if store.pending_count == 0 {
-		if store.pending_first_id != 0 ||
-		   store.pending_request_id_size != 0 {
+		if store.pending_first_id != 0 || store.pending_request_id_size != 0 {
 			return {kind = .Invalid_State}
 		}
-
 	} else {
 		if store.pending_first_id == 0 ||
 		   store.pending_first_id > MAX_DEVICE_PREKEY_ID ||
-		   cast(u32)store.pending_count >
-			   MAX_DEVICE_PREKEY_ID - store.pending_first_id + 1 {
+		   cast(u32)store.pending_count > MAX_DEVICE_PREKEY_ID - store.pending_first_id + 1 {
 			return {kind = .Invalid_State}
 		}
 
-		if !prekey_request_id_valid(
-			cast(string)store.pending_request_id[:store.pending_request_id_size],
-		) {
+		if !prekey_request_id_valid(cast(string)store.pending_request_id[:store.pending_request_id_size]) {
 			return {kind = .Invalid_Request_ID}
 		}
-
 	}
 
 	return prekey_store_keys_validate(store)
@@ -1277,23 +1127,21 @@ prekey_store_keys_validate :: proc(store: ^Prekey_Store) -> Prekey_Error {
 	previous: u32
 	pending := 0
 	phase: Prekey_Status = .Published
+
 	for &key in store.keys[:store.count] {
-		if key.id == 0 ||
-		   key.id > MAX_DEVICE_PREKEY_ID ||
-		   key.id <= previous ||
-		   key.id >= store.next_id {
+		if key.id == 0 || key.id > MAX_DEVICE_PREKEY_ID || key.id <= previous || key.id >= store.next_id {
 			return {kind = .Invalid_Key}
 		}
 
 		previous = key.id
-		if key.private[0] & 7 != 0 ||
-		   key.private[31] & 0xc0 != 0x40 {
+
+		if key.private[0] & 7 != 0 || key.private[31] & 0xc0 != 0x40 {
 			return {kind = .Invalid_Key}
 		}
 
 		public := signal_curve_public(key.private)
-		if crypto.compare_constant_time(public[:], key.public[:]) !=
-		   1 {
+
+		if crypto.compare_constant_time(public[:], key.public[:]) != 1 {
 			return {kind = .Invalid_Key}
 		}
 
@@ -1320,6 +1168,7 @@ prekey_store_keys_validate :: proc(store: ^Prekey_Store) -> Prekey_Error {
 			return {kind = .Invalid_Status}
 		}
 	}
+
 	if pending != store.pending_count {
 		return {kind = .Invalid_Status}
 	}
@@ -1327,31 +1176,21 @@ prekey_store_keys_validate :: proc(store: ^Prekey_Store) -> Prekey_Error {
 	return {}
 }
 
-prekey_owner_validate :: proc(
-	store: ^Prekey_Store,
-	credentials: ^Device_Credentials,
-) -> Prekey_Error {
-	if err := device_credentials_validate(credentials);
-	   err != .None {
+prekey_owner_validate :: proc(store: ^Prekey_Store, credentials: ^Device_Credentials) -> Prekey_Error {
+	if err := device_credentials_validate(credentials); err != .None {
 		return {kind = .Invalid_Credentials, credentials = err}
 	}
 
 	identity := signal_curve_public(credentials.identity_private)
-	if crypto.compare_constant_time(
-		   identity[:],
-		   store.identity_public[:],
-	   ) !=
-	   1 {
+
+	if crypto.compare_constant_time(identity[:], store.identity_public[:]) != 1 {
 		return {kind = .Identity_Mismatch}
 	}
 
 	return {}
 }
 
-prekey_generation_validate :: proc(
-	store: ^Prekey_Store,
-	count: int,
-) -> Prekey_Error {
+prekey_generation_validate :: proc(store: ^Prekey_Store, count: int) -> Prekey_Error {
 	if count < 1 || count > MAX_PREKEY_UPLOAD_COUNT {
 		return {kind = .Invalid_Count}
 	}
@@ -1369,6 +1208,7 @@ prekey_generation_validate :: proc(
 	}
 
 	when !crypto.HAS_RAND_BYTES do return {kind = .Entropy_Unavailable}
+
 	return {}
 }
 
@@ -1393,61 +1233,52 @@ prekey_request_id_valid :: proc(id: string) -> bool {
 
 	for c in id {
 		if c < 33 || c > 126 || c == '@' do return false
-
 	}
+
 	return true
 }
 
-prekey_set_request_id :: proc(
-	store: ^Prekey_Store,
-	request_id: string,
-) {
+prekey_set_request_id :: proc(store: ^Prekey_Store, request_id: string) {
 	// Retry callers may borrow the current request ID directly from this store.
 	copy_of_id: [MAX_PREKEY_REQUEST_ID_SIZE]u8
 	size := copy(copy_of_id[:], transmute([]u8)request_id)
-	crypto.zero_explicit(
-		&store.pending_request_id,
-		size_of(store.pending_request_id),
-	)
-	store.pending_request_id_size = copy(
-		store.pending_request_id[:],
-		copy_of_id[:size],
-	)
+	crypto.zero_explicit(&store.pending_request_id, size_of(store.pending_request_id))
+	store.pending_request_id_size = copy(store.pending_request_id[:], copy_of_id[:size])
 }
 
-prekey_response_validate :: proc(
-	response: Binary_Node,
-	request_id: string,
-) -> Prekey_Error {
+prekey_response_validate :: proc(response: Binary_Node, request_id: string) -> Prekey_Error {
 	if !prekey_request_id_valid(request_id) {
 		return {kind = .Invalid_Request_ID}
 	}
 
 	id, has_id := node_attr(response, "id")
+
 	if response.tag != "iq" || !has_id || id != request_id {
 		return {kind = .Response_Mismatch}
 	}
 
 	from, has_from := node_attr(response, "from")
-	if has_from &&
-	   (from != "s.whatsapp.net" && from != PREKEY_SERVER_JID) {
+
+	if has_from && (from != "s.whatsapp.net" && from != PREKEY_SERVER_JID) {
 		return {kind = .Response_Mismatch}
 	}
 
 	type, has_type := node_attr(response, "type")
 	error_child := node_child(response, "error")
+
 	if type == "error" || error_child != nil {
 		code: u32
+
 		if error_child != nil {
 			text, found := node_attr(error_child^, "code")
+
 			if found {
 				parsed, valid := strconv.parse_uint(text, 10)
+
 				if valid && parsed <= cast(uint)max(u32) {
 					code = cast(u32)parsed
 				}
-
 			}
-
 		}
 
 		return {kind = .Server_Rejected, server_code = code}
@@ -1466,10 +1297,7 @@ prekey_id_bytes :: proc(id: u32) -> [3]u8 {
 
 // Invoke only after an independently durable Signal-session/consumption
 // transaction. Pending upload batches retain their contiguous IDs until ACK.
-prekey_store_remove_consumed :: proc(
-	store: ^Prekey_Store,
-	id: u32,
-) -> Prekey_Error {
+prekey_store_remove_consumed :: proc(store: ^Prekey_Store, id: u32) -> Prekey_Error {
 	if e := prekey_store_validate(store); e.kind != .None {
 		return e
 	}
@@ -1485,18 +1313,13 @@ prekey_store_remove_consumed :: proc(
 			return {kind = .Revision_Exhausted}
 		}
 
-		crypto.zero_explicit(
-			&store.keys[i],
-			size_of(One_Time_Prekey),
-		)
+		crypto.zero_explicit(&store.keys[i], size_of(One_Time_Prekey))
 		for j in i ..< store.count - 1 do store.keys[j] = store.keys[j + 1]
 		store.count -= 1
-		crypto.zero_explicit(
-			&store.keys[store.count],
-			size_of(One_Time_Prekey),
-		)
+		crypto.zero_explicit(&store.keys[store.count], size_of(One_Time_Prekey))
 		store.revision += 1
 		return {}
 	}
+
 	return {}
 }

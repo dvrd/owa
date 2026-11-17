@@ -50,31 +50,49 @@ api_call :: proc(api: ^API, query: string, variables: Value) -> (value: Value, f
 	if time.tick_diff(api.started, time.tick_now()) >= 120 * time.Second {
 		return null(), "LINEAR_SCAN_BUDGET"
 	}
-	api.calls += 1; if api.calls > (api.max_calls if api.max_calls > 0 else 64) {
+
+	api.calls += 1
+
+	if api.calls > (api.max_calls if api.max_calls > 0 else 64) {
 		return null(), "LINEAR_SCAN_BOUND"
 	}
+
 	value = api.call(api.data, query, variables) or_return
-	encoded := encode(value, true); if encoded == "" {
+	encoded := encode(value, true)
+
+	if encoded == "" {
 		return null(), "LINEAR_RESPONSE_INVALID"
 	}
-	api.bytes += len(encoded); if api.bytes > MAX_REPORT {
+
+	api.bytes += len(encoded)
+
+	if api.bytes > MAX_REPORT {
 		return null(), "LINEAR_SCAN_BOUND"
 	}
+
 	return
 }
 manifest_read :: proc(bytes: []u8) -> (manifest: Value, failure: Failure) {
 	value, error := decode(bytes)
+
 	if error != "" {
 		return null(), "MANIFEST_INVALID"
 	}
-	schema, schema_ok := integer(get(value, "schema")); sources := items(get(value, "sources"))
+
+	schema, schema_ok := integer(get(value, "schema"))
+	sources := items(get(value, "sources"))
+
 	if !schema_ok || schema != 1 || len(sources) < 1 || len(sources) > 2 {
 		return null(), "MANIFEST_INVALID"
 	}
+
 	seen := make(map[string]bool)
+
 	for source in sources {
-		name := str(get(source, "name")); repo := str(get(source, "repository"))
-		branch := str(get(source, "branch")); paths := items(get(source, "paths"))
+		name := str(get(source, "name"))
+		repo := str(get(source, "repository"))
+		branch := str(get(source, "branch"))
+		paths := items(get(source, "paths"))
 		if !path_valid(name) ||
 		   strings.contains(name, "/") ||
 		   seen[name] ||
@@ -86,27 +104,40 @@ manifest_read :: proc(bytes: []u8) -> (manifest: Value, failure: Failure) {
 		   len(paths) > 16 {
 			return null(), "MANIFEST_INVALID"
 		}
-		seen[name] = true; paths_seen := make(map[string]bool)
+
+		seen[name] = true
+		paths_seen := make(map[string]bool)
+
 		for path_value in paths {
-			path := str(path_value); if !path_valid(path) || paths_seen[path] {
+			path := str(path_value)
+
+			if !path_valid(path) || paths_seen[path] {
 				return null(), "MANIFEST_INVALID"
 			}; paths_seen[path] = true
 		}
 	}
+
 	return value, nil
 }
 default_manifest :: proc() -> Value {
-	value, error := manifest_read(#load("sources.json")); assert(error == nil); return value
+	value, error := manifest_read(#load("sources.json"))
+	assert(error == nil)
+
+	return value
 }
 validate_digest :: proc(value: Value) -> Failure {
 	if !fields(value, []string{"present", "bytes", "sha256"}) {
 		return "REPORT_DIGEST_INVALID"
 	}
+
 	present, present_ok := get(value, "present").(j.Boolean)
-	size, size_ok := integer(get(value, "bytes")); hash := get(value, "sha256")
+	size, size_ok := integer(get(value, "bytes"))
+	hash := get(value, "sha256")
+
 	if !present_ok || !size_ok || size < 0 || size > MAX_BYTES {
 		return "REPORT_DIGEST_INVALID"
 	}
+
 	if bool(present) {
 		if !hex_valid(str(hash), 64) {
 			return "REPORT_DIGEST_INVALID"
@@ -116,64 +147,70 @@ validate_digest :: proc(value: Value) -> Failure {
 			return "REPORT_DIGEST_INVALID"
 		}
 	}
+
 	return nil
 }
-snapshot :: proc(
-	report: Value,
-) -> (
-	fingerprint: string,
-	changed: [dynamic]Item,
-	failure: Failure,
-) {
+snapshot :: proc(report: Value) -> (fingerprint: string, changed: [dynamic]Item, failure: Failure) {
 	expected := items(get(default_manifest(), "sources"))
 	sources := items(get(get(report, "observation"), "sources"))
+
 	if len(sources) != len(expected) {
 		return "", nil, "REPORT_SOURCES_INVALID"
 	}
+
 	canonical := make(j.Array)
+
 	for source, i in sources {
 		for key in ([]string{"name", "repository", "reference_commit"}) {
 			if !equal(get(source, key), get(expected[i], key)) {
 				return "", nil, "REPORT_SOURCE_INVALID"
 			}
 		}
+
 		if !hex_valid(str(get(source, "head_commit")), 40) {
 			return "", nil, "REPORT_HEAD_INVALID"
 		}
-		files := items(get(source, "files")); paths := items(get(expected[i], "paths"))
+
+		files := items(get(source, "files"))
+		paths := items(get(expected[i], "paths"))
+
 		if len(files) != len(paths) {
 			return "", nil, "REPORT_PATHS_INVALID"
 		}
+
 		entries := make(j.Array)
+
 		for file, index in files {
 			if !equal(get(file, "path"), paths[index]) {
 				return "", nil, "REPORT_PATHS_INVALID"
 			}
+
 			reference, current := get(file, "reference"), get(file, "current")
-			validate_digest(reference) or_return; validate_digest(current) or_return
+			validate_digest(reference) or_return
+			validate_digest(current) or_return
+
 			if !truth(get(reference, "present")) && !truth(get(current, "present")) {
 				return "", nil, "REPORT_PATH_MISSING"
 			}
+
 			if equal(get(reference, "sha256"), get(current, "sha256")) &&
 			   !equal(get(reference, "bytes"), get(current, "bytes")) {
 				return "", nil, "REPORT_DIGEST_INVALID"
 			}
+
 			differs := !equal(reference, current)
+
 			if !truth(get(file, "changed_from_reference"), differs) {
 				return "", nil, "REPORT_CHANGE_INVALID"
 			}
-			append(
-				&entries,
-				object(
-					{"path", get(file, "path")},
-					{"reference", reference},
-					{"current", current},
-				),
-			)
+
+			append(&entries, object({"path", get(file, "path")}, {"reference", reference}, {"current", current}))
+
 			if differs {
 				append(&changed, Item{source, file})
 			}
 		}
+
 		append(
 			&canonical,
 			object(
@@ -184,19 +221,24 @@ snapshot :: proc(
 			),
 		)
 	}
-	if !truth(get(report, "compatibility_approved"), false) ||
-	   !truth(get(report, "runtime_version_changed"), false) {
+
+	if !truth(get(report, "compatibility_approved"), false) || !truth(get(report, "runtime_version_changed"), false) {
 		return "", nil, "REPORT_POLICY_INVALID"
 	}
+
 	if str(get(report, "status")) == "NO_MONITORED_DRIFT" && len(changed) > 0 {
 		return "", nil, "REPORT_STATUS_INVALID"
 	}
+
 	return sha256(transmute([]u8)encode(canonical)), changed, nil
 }
 bounded_strings :: proc(value: Value, maximum_count, maximum_length: int) -> bool {
-	values, ok := value.(j.Array); if !ok || len(values) > maximum_count {
+	values, ok := value.(j.Array)
+
+	if !ok || len(values) > maximum_count {
 		return false
 	}
+
 	for item in values {
 		if !text_limit(item, 1, maximum_length) {
 			return false
@@ -223,25 +265,13 @@ validate_assessment :: proc(
 					{"reason", text("ASSESSMENT_MISSING")},
 					{
 						"summary",
-						text(
-							"Does this changed reference affect the local implementation? Impact is unassessed.",
-						),
+						text("Does this changed reference affect the local implementation? Impact is unassessed."),
 					},
 					{"source", get(source, "name")},
 					{"path", get(file, "path")},
 					{"local_targets", array()},
-					{
-						"checks",
-						array(
-							text("Establish the affected contract and inspect local ownership."),
-						),
-					},
-					{
-						"acceptance",
-						array(
-							text("Record evidence for no action or a bounded implementation fix."),
-						),
-					},
+					{"checks", array(text("Establish the affected contract and inspect local ownership."))},
+					{"acceptance", array(text("Record evidence for no action or a bounded implementation fix."))},
 					{
 						"evidence",
 						object(
@@ -280,12 +310,10 @@ validate_assessment :: proc(
 	   !text_limit(get(value, "summary"), 1, 2000) {
 		return null(), "ASSESSMENT_INVALID"
 	}
-	if !equal(get(value, "source"), get(source, "name")) ||
-	   !equal(get(value, "path"), get(file, "path")) {
+	if !equal(get(value, "source"), get(source, "name")) || !equal(get(value, "path"), get(file, "path")) {
 		return null(), "ASSESSMENT_BINDING_INVALID"
 	}
-	if !bounded_strings(get(value, "checks"), 32, 1000) ||
-	   !bounded_strings(get(value, "acceptance"), 32, 1000) {
+	if !bounded_strings(get(value, "checks"), 32, 1000) || !bounded_strings(get(value, "acceptance"), 32, 1000) {
 		return null(), "ASSESSMENT_INVALID"
 	}
 	targets, target_ok := get(value, "local_targets").(j.Array)
@@ -307,9 +335,7 @@ validate_assessment :: proc(
 		return null(), "ASSESSMENT_EVIDENCE_INVALID"
 	}
 	if kind == "FIX" &&
-	   (len(targets) == 0 ||
-			   len(items(get(value, "checks"))) == 0 ||
-			   len(items(get(value, "acceptance"))) == 0) {
+	   (len(targets) == 0 || len(items(get(value, "checks"))) == 0 || len(items(get(value, "acceptance"))) == 0) {
 		return null(), "FIX_PROOF_REQUIRED"
 	}
 	for target in targets {
@@ -318,12 +344,7 @@ validate_assessment :: proc(
 		}
 	}
 	harmless := contains_string(
-		[]string {
-			"BYTE_IDENTICAL",
-			"LEXICALLY_EQUIVALENT",
-			"JSON_NORMALIZED_EQUIVALENT",
-			"ALREADY_IMPLEMENTED",
-		},
+		[]string{"BYTE_IDENTICAL", "LEXICALLY_EQUIVALENT", "JSON_NORMALIZED_EQUIVALENT", "ALREADY_IMPLEMENTED"},
 		reason,
 	)
 	if (kind == "NO_ACTION") != harmless ||
@@ -335,6 +356,7 @@ validate_assessment :: proc(
 		if len(targets) != len(owner.targets) {
 			return null(), "ASSESSMENT_TARGET_INVALID"
 		}
+
 		for target, i in targets {
 			if str(get(target, "path")) != owner.targets[i] {
 				return null(), "ASSESSMENT_TARGET_INVALID"
@@ -368,14 +390,20 @@ validate_assessment :: proc(
 		   i64(len(indices)) != count {
 			return null(), "FIX_PROOF_REQUIRED"
 		}
+
 		last: i64 = -1
+
 		for index in indices {
-			n, index_ok := integer(index); if !index_ok || n < 0 || n >= 236 || n <= last {
+			n, index_ok := integer(index)
+
+			if !index_ok || n < 0 || n >= 236 || n <= last {
 				return null(), "FIX_PROOF_REQUIRED"
 			}; last = n
 		}
+
 		for change, i in changes {
-			n, index_ok := integer(get(change, "index")); wanted, _ := integer(indices[i])
+			n, index_ok := integer(get(change, "index"))
+			wanted, _ := integer(indices[i])
 			if !fields(change, []string{"index", "old", "new", "old_sha256", "new_sha256"}) ||
 			   !index_ok ||
 			   n != wanted ||
@@ -392,46 +420,39 @@ validate_assessment :: proc(
 		proof := get(evidence, "approved_contract")
 		if !allowed_fields(
 			   proof,
-			   []string {
-				   "path",
-				   "sha256",
-				   "target_table_sha256",
-				   "requirement",
-				   "basis",
-				   "trust_limit",
-			   },
+			   []string{"path", "sha256", "target_table_sha256", "requirement", "basis", "trust_limit"},
 			   []string{"fixture"},
 		   ) ||
-		   str(get(proof, "basis")) !=
-			   "explicit_reviewed_requirement_and_owned_indexed_comparison" ||
+		   str(get(proof, "basis")) != "explicit_reviewed_requirement_and_owned_indexed_comparison" ||
 		   !text_limit(get(proof, "trust_limit"), 1, 500) ||
 		   str(get(evidence, "static_regression")) != "indexed_table_comparison" {
 			return null(), "FIX_CONTRACT_REQUIRED"
 		}
-		for key in ([]string {
-				"reference_table_sha256",
-				"target_table_sha256",
-				"local_table_sha256",
-			}) {
+
+		for key in ([]string{"reference_table_sha256", "target_table_sha256", "local_table_sha256"}) {
 			if !hex_valid(str(get(evidence, key)), 64) {
 				return null(), "FIX_CONTRACT_REQUIRED"
 			}
 		}
+
 		if !equal(get(proof, "target_table_sha256"), get(evidence, "target_table_sha256")) ||
 		   !equal(get(evidence, "local_table_sha256"), get(evidence, "reference_table_sha256")) ||
 		   equal(get(evidence, "target_table_sha256"), get(evidence, "reference_table_sha256")) {
 			return null(), "FIX_CONTRACT_REQUIRED"
 		}
+
 		records := make([dynamic]Value, 0, 3)
 		suffixes := make([dynamic]string, 0, 3)
 		append(&records, proof, get(proof, "requirement"))
 		append(&suffixes, ".json", ".md")
+
 		if p, proof_ok := proof.(j.Object); proof_ok {
 			if fixture, present := p["fixture"]; present {
 				append(&records, fixture)
 				append(&suffixes, "")
 			}
 		}
+
 		for record, i in records {
 			prefix := "tools/protocol_watch/contracts/" if i < 2 else "tests/"
 			path := str(get(record, "path"))
@@ -442,6 +463,7 @@ validate_assessment :: proc(
 				return null(), "FIX_CONTRACT_REQUIRED"
 			}
 		}
+
 		if verify_contract && !validate_approved_contract(value, root) {
 			return null(), "FIX_CONTRACT_INVALID"
 		}
@@ -455,9 +477,13 @@ validate_assessment :: proc(
 	return
 }
 findings :: proc(report: Value, root: string) -> (result: j.Array, failure: Failure) {
-	changed: [dynamic]Item; _, changed, failure = snapshot(report); if failure != nil {
+	changed: [dynamic]Item
+	_, changed, failure = snapshot(report)
+
+	if failure != nil {
 		return nil, failure
 	}
+
 	for source in items(get(get(report, "observation"), "sources")) {
 		for file in items(get(source, "files")) {
 			if obj, ok := file.(j.Object); ok {
@@ -467,12 +493,16 @@ findings :: proc(report: Value, root: string) -> (result: j.Array, failure: Fail
 			}
 		}
 	}
+
 	result = make(j.Array)
+
 	for item in changed {
 		assessment := validate_assessment(item.source, item.file, root) or_return
+
 		if str(get(assessment, "kind")) == "NO_ACTION" {
 			continue
 		}
+
 		repo, path := str(get(item.source, "repository")), str(get(item.file, "path"))
 		reference, current := get(item.file, "reference"), get(item.file, "current")
 		append(
@@ -490,9 +520,12 @@ findings :: proc(report: Value, root: string) -> (result: j.Array, failure: Fail
 			),
 		)
 	}
+
 	return
 }
-cat :: proc(parts: ..string) -> string {return strings.concatenate(parts)}
+cat :: proc(parts: ..string) -> string {
+	return strings.concatenate(parts)
+}
 source_for :: proc(repo, path: string) -> (Value, bool) {
 	for source in items(get(default_manifest(), "sources")) {
 		if str(get(source, "repository")) == repo {
@@ -503,29 +536,32 @@ source_for :: proc(repo, path: string) -> (Value, bool) {
 			}
 		}
 	}
+
 	return null(), false
 }
 machine_section :: proc(findings: j.Array, run: string) -> (body: string, failure: Failure) {
 	markers := make(j.Array)
+
 	for item in findings {
 		append(&markers, text(cat("owa-protocol-change:v2:", str(get(item, "id")))))
 	}
-	value := object(
-		{"schema", number(2)},
-		{"run", text(run)},
-		{"findings", findings},
-		{"markers", markers},
-	)
+
+	value := object({"schema", number(2)}, {"run", text(run)}, {"findings", findings}, {"markers", markers})
 	body = cat(BEGIN, "\n\n```json\n", encode(value), "\n```\n\n", END)
+
 	if len(body) > MAX_REPORT {
 		return "", "MACHINE_SECTION_TOO_LARGE"
 	}; return
 }
 v2_coverage :: proc(body: string, root: string) -> (result: Value, failure: Failure) {
-	result = coverage_object(); if len(body) > MAX_REPORT {
+	result = coverage_object()
+
+	if len(body) > MAX_REPORT {
 		return
 	}
+
 	starts, ends := 0, 0
+
 	for line in strings.split(body, "\n") {
 		if line == BEGIN {
 			starts += 1
@@ -533,15 +569,24 @@ v2_coverage :: proc(body: string, root: string) -> (result: Value, failure: Fail
 			ends += 1
 		}
 	}
+
 	parsed, cursor := 0, 0; prefix := BEGIN + "\n\n```json\n"; suffix := "\n```\n\n" + END
+
 	for cursor < len(body) {
-		found := strings.index(body[cursor:], prefix); if found < 0 {
+		found := strings.index(body[cursor:], prefix)
+
+		if found < 0 {
 			break
 		}; begin := cursor + found + len(prefix)
-		ending := strings.index(body[begin:], suffix); if ending < 0 {
+		ending := strings.index(body[begin:], suffix)
+
+		if ending < 0 {
 			return object(), "LINEAR_V2_INVALID"
 		}
-		encoded := body[begin:begin + ending]; cursor = begin + ending + len(suffix); parsed += 1
+
+		encoded := body[begin:begin + ending]
+		cursor = begin + ending + len(suffix)
+		parsed += 1
 		value, parse_error := decode(transmute([]u8)encoded)
 		schema, schema_ok := integer(get(value, "schema"))
 		entries, entries_ok := get(value, "findings").(j.Array)
@@ -555,7 +600,10 @@ v2_coverage :: proc(body: string, root: string) -> (result: Value, failure: Fail
 		   len(entries) > 32 {
 			return object(), "LINEAR_V2_INVALID"
 		}
-		markers := make(j.Array); seen := make(map[string]bool)
+
+		markers := make(j.Array)
+		seen := make(map[string]bool)
+
 		for item in entries {
 			if !fields(
 				item,
@@ -573,6 +621,7 @@ v2_coverage :: proc(body: string, root: string) -> (result: Value, failure: Fail
 			) {
 				return object(), "LINEAR_V2_INVALID"
 			}
+
 			source, bound := source_for(str(get(item, "repository")), str(get(item, "path")))
 			if !bound ||
 			   !equal(get(item, "source"), get(source, "name")) ||
@@ -580,119 +629,148 @@ v2_coverage :: proc(body: string, root: string) -> (result: Value, failure: Fail
 			   !hex_valid(str(get(item, "head_commit")), 40) {
 				return object(), "LINEAR_V2_INVALID"
 			}
+
 			reference, current := get(item, "reference"), get(item, "current")
-			if validate_digest(reference) != nil ||
-			   validate_digest(current) != nil ||
-			   equal(reference, current) {
+
+			if validate_digest(reference) != nil || validate_digest(current) != nil || equal(reference, current) {
 				return object(), "LINEAR_V2_INVALID"
 			}
+
 			identity := str(get(item, "id"))
-			if identity !=
-				   change_identity(
-					   str(get(item, "repository")),
-					   str(get(item, "path")),
-					   reference,
-					   current,
-				   ) ||
+			if identity != change_identity(str(get(item, "repository")), str(get(item, "path")), reference, current) ||
 			   seen[identity] {
 				return object(), "LINEAR_V2_INVALID"
 			}
+
 			assessment, assessment_error := validate_assessment(source, item, root, false)
+
 			if assessment_error != nil || str(get(assessment, "kind")) == "NO_ACTION" {
 				return object(), "LINEAR_V2_INVALID"
 			}
-			seen[identity] = true; put(&result, identity, item)
+
+			seen[identity] = true
+			put(&result, identity, item)
 			append(&markers, text(cat("owa-protocol-change:v2:", identity)))
 		}
+
 		if !equal(markers, get(value, "markers")) {
 			return object(), "LINEAR_V2_INVALID"
 		}
 	}
+
 	if starts != parsed || ends != parsed {
 		return object(), "LINEAR_V2_INVALID"
 	}; return
 }
 legacy_coverage :: proc(issue: Value) -> Value {
-	body := str(get(issue, "description")); lines := strings.split(body, "\n")
+	body := str(get(issue, "description"))
+	lines := strings.split(body, "\n")
 	normalized := make([dynamic]string)
+
 	for line in lines {
 		clean := line
+
 		if strings.has_prefix(line, "* ") {
 			clean = cat("- ", line[2:])
 		} else if strings.has_prefix(line, "  * ") {
 			clean = cat("  - ", line[4:])
 		}
+
 		if strings.contains(clean, "(<https://github.com/") {
-			clean = replace(
-				replace(clean, "(<https://github.com/", "(https://github.com/"),
-				">)",
-				")",
-			)
+			clean = replace(replace(clean, "(<https://github.com/", "(https://github.com/"), ">)", ")")
 		}
+
 		if strings.has_prefix(clean, "Evidence: [https://github.com/dvrd/owa/actions/runs/") {
 			closing := strings.index(clean, "](")
+
 			if closing > 10 {
 				url := clean[len("Evidence: ["):closing]
+
 				if run_valid(url) && clean[closing:] == cat("](", url, ")") {
 					clean = cat("Evidence: ", url)
 				}
 			}
 		}
+
 		append(&normalized, clean)
 	}
-	body = strings.join(normalized[:], "\n"); marker := "owa-protocol-drift:v1:"
-	fingerprint := ""; marker_count, prose, evidence_count, snapshot_count := 0, 0, 0, 0
+
+	body = strings.join(normalized[:], "\n")
+	marker := "owa-protocol-drift:v1:"
+	fingerprint := ""
+	marker_count, prose, evidence_count, snapshot_count := 0, 0, 0, 0
+
 	for line in normalized {
 		if strings.has_prefix(line, marker) && hex_valid(line[len(marker):], 64) {
-			fingerprint = line[len(marker):]; marker_count += 1
+			fingerprint = line[len(marker):]
+			marker_count += 1
 		}
-		if line ==
-		   "Review public upstream protocol changes detected by OWA. No automated agent or fix was run." {
+
+		if line == "Review public upstream protocol changes detected by OWA. No automated agent or fix was run." {
 			prose += 1
 		}
+
 		if strings.has_prefix(line, "Evidence: ") && run_valid(line[len("Evidence: "):]) {
 			evidence_count += 1
 		}
 	}
+
 	if marker_count != 1 ||
 	   prose != 1 ||
 	   evidence_count != 1 ||
-	   str(get(issue, "id")) !=
-		   stable_uuid(cat(PROJECT, "/owa-protocol-review/v1/", fingerprint)) {
+	   str(get(issue, "id")) != stable_uuid(cat(PROJECT, "/owa-protocol-review/v1/", fingerprint)) {
 		return object()
 	}
+
 	for line in normalized {
 		if line == cat("Snapshot fingerprint: `", fingerprint, "`") {
 			snapshot_count += 1
 		}
 	}
+
 	if snapshot_count != 1 {
 		return object()
 	}
-	heading := "## Monitored differences from reference\n\n"; start := strings.index(body, heading)
+
+	heading := "## Monitored differences from reference\n\n"
+	start := strings.index(body, heading)
+
 	if start < 0 {
 		return object()
 	}; tail := body[start + len(heading):]
 	end := strings.index(tail, "\n## Human review and follow-up")
+
 	if end < 0 {
 		return object()
 	}; tail = strings.trim_space(tail[:end])
-	result := coverage_object(); heads := make(map[string]string); last := -1
+	result := coverage_object()
+	heads := make(map[string]string)
+	last := -1
+
 	for len(tail) > 0 {
-		entries := strings.split(tail, "\n"); if len(entries) < 3 {
+		entries := strings.split(tail, "\n")
+
+		if len(entries) < 3 {
 			return object()
 		}
+
 		first, links, hashes := entries[0], entries[1], entries[2]
+
 		if !strings.has_prefix(first, "- ") || !strings.has_suffix(first, "`") {
 			return object()
 		}
+
 		separator := strings.index(first, ": `"); if separator < 2 {
 			return object()
 		}
+
 		name, path := first[2:separator], first[separator + 3:len(first) - 1]
-		_, bound := owner_for(name, path); if !bound {
+		_, bound := owner_for(name, path)
+
+		if !bound {
 			return object()
 		}
+
 		repo, reference := repository(name), reference_commit(name)
 		reference_link := cat(
 			"  - [reference](https://github.com/",
@@ -705,26 +783,33 @@ legacy_coverage :: proc(issue: Value) -> Value {
 			repo,
 			"/blob/",
 		)
+
 		if !strings.has_prefix(links, reference_link) || len(links) < len(reference_link) + 42 {
 			return object()
 		}
-		remainder := links[len(reference_link):]; head := remainder[:40]
-		if !hex_valid(head, 40) ||
-		   remainder[40:] != cat("/", path, ")") ||
-		   heads[repo] != "" && heads[repo] != head {
+
+		remainder := links[len(reference_link):]
+		head := remainder[:40]
+
+		if !hex_valid(head, 40) || remainder[40:] != cat("/", path, ")") || heads[repo] != "" && heads[repo] != head {
 			return object()
 		}
-		index := -1; for owner, i in OWNERS {
+
+		index := -1
+
+		for owner, i in OWNERS {
 			if owner.source == name && owner.path == path {
 				index = i
 			}
 		}
+
 		if index <= last {
 			return object()
 		}; last = index; heads[repo] = head
 		if !strings.has_prefix(hashes, "  - SHA256: `") || !strings.has_suffix(hashes, "`") {
 			return object()
 		}
+
 		parts := strings.split(hashes[len("  - SHA256: `"):len(hashes) - 1], "` → `")
 		if len(parts) != 2 ||
 		   parts[0] != "None" && !hex_valid(parts[0], 64) ||
@@ -732,6 +817,7 @@ legacy_coverage :: proc(issue: Value) -> Value {
 		   parts[0] == parts[1] {
 			return object()
 		}
+
 		ref := object(
 			{"present", boolean(parts[0] != "None")},
 			{"sha256", text(parts[0]) if parts[0] != "None" else null()},
@@ -741,9 +827,11 @@ legacy_coverage :: proc(issue: Value) -> Value {
 			{"sha256", text(parts[1]) if parts[1] != "None" else null()},
 		)
 		identity := change_identity(repo, path, ref, cur)
+
 		if contains_string(keys(result), identity) {
 			return object()
 		}
+
 		put(
 			&result,
 			identity,
@@ -761,13 +849,11 @@ legacy_coverage :: proc(issue: Value) -> Value {
 		consumed := len(first) + len(links) + len(hashes) + 2
 		tail = strings.trim_space(tail[consumed:])
 	}
+
 	return result
 }
 terminal :: proc(issue: Value) -> bool {
-	return contains_string(
-		[]string{"completed", "canceled", "duplicate"},
-		str(get(get(issue, "state"), "type")),
-	)
+	return contains_string([]string{"completed", "canceled", "duplicate"}, str(get(get(issue, "state"), "type")))
 }
 validate_issue :: proc(issue: Value) -> Failure {
 	if !equal(get(get(issue, "project"), "id"), text(PROJECT)) ||
@@ -776,37 +862,37 @@ validate_issue :: proc(issue: Value) -> Failure {
 	   !text_limit(get(issue, "title"), 0, MAX_REPORT) ||
 	   !contains_string(keys(issue), "archivedAt") ||
 	   !contains_string(
-			   []string {
-				   "triage",
-				   "backlog",
-				   "unstarted",
-				   "started",
-				   "completed",
-				   "canceled",
-				   "duplicate",
-			   },
+			   []string{"triage", "backlog", "unstarted", "started", "completed", "canceled", "duplicate"},
 			   str(get(get(issue, "state"), "type")),
 		   ) {
 		return "LINEAR_ISSUE_INVALID"
 	}
+
 	id := str(get(issue, "id")); digits := replace(id, "-", "")
+
 	if !hex_valid(strings.to_lower(digits), 32) {
 		return "LINEAR_ISSUE_INVALID"
 	}
+
 	identifier := str(get(issue, "identifier")); prefix := "OKAMI-"
+
 	if !strings.has_prefix(identifier, prefix) || len(identifier) == len(prefix) {
 		return "LINEAR_ISSUE_INVALID"
 	}
+
 	for c in identifier[len(prefix):] {
 		if !is_digit(c) {
 			return "LINEAR_ISSUE_INVALID"
 		}
 	}
+
 	url := str(get(issue, "url"))
 	url_prefix := cat("https://linear.app/devoured/issue/", identifier)
+
 	if !strings.has_prefix(url, url_prefix) {
 		return "LINEAR_ISSUE_INVALID"
 	}
+
 	if len(url) > len(url_prefix) {
 		suffix := url[len(url_prefix):]
 		if !strings.has_prefix(suffix, "/") ||
@@ -816,6 +902,7 @@ validate_issue :: proc(issue: Value) -> Failure {
 			return "LINEAR_ISSUE_INVALID"
 		}
 	}
+
 	return nil
 }
 merge_coverage :: proc(target: ^Value, incoming: Value) {
@@ -831,25 +918,33 @@ issue_coverage :: proc(issue: Value, root: string) -> (result: Value, failure: F
 	result = legacy_coverage(issue)
 	current := v2_coverage(str(get(issue, "description")), root) or_return
 	current_keys := keys(current)
+
 	if len(current_keys) > 0 {
 		kinds := make(map[string]bool); ids := make(j.Array)
+
 		for id in current_keys {
 			kinds[str(get(get(get(current, id), "assessment"), "kind"))] = true
 			append(&ids, text(id))
 		}
+
 		if len(kinds) != 1 {
 			return null(), "LINEAR_V2_BINDING_MISMATCH"
 		}
+
 		kind := ""; for k in kinds {kind = k}
+
 		if stable_id("owa-protocol-review/v2", array(text(kind), ids)) != str(get(issue, "id")) {
 			return null(), "LINEAR_V2_BINDING_MISMATCH"
 		}
+
 		merge_coverage(&result, current)
 	}
+
 	return
 }
 comment_identity :: proc(issue_id: string, entries: j.Array) -> string {
 	rows := make([dynamic]string)
+
 	for item in entries {
 		append(
 			&rows,
@@ -863,8 +958,10 @@ comment_identity :: proc(issue_id: string, entries: j.Array) -> string {
 			),
 		)
 	}
+
 	sort_strings(rows[:]); values := make(j.Array)
 	for row in rows {v, _ := decode(transmute([]u8)row); append(&values, v)}
+
 	return stable_id("owa-protocol-review-comment/v2", array(text(issue_id), values))
 }
 page :: proc(
@@ -883,9 +980,11 @@ page :: proc(
 	response := api_call(api, query, variables) or_return; data := get(response, "issues")
 	if issue_id != "" {
 		issue := get(response, "issue")
+
 		if str(get(issue, "id")) != issue_id || str(get(get(issue, "project"), "id")) != PROJECT {
 			return nil, null(), "LINEAR_BINDING_MISMATCH"
 		}
+
 		data = get(issue, "comments")
 	}
 	parsed, nodes_ok := get(data, "nodes").(j.Array); info = get(data, "pageInfo")
@@ -894,68 +993,77 @@ page :: proc(
 		return nil, null(), "LINEAR_PAGINATION_INVALID"
 	}; return parsed, info, nil
 }
-advance :: proc(
-	info: Value,
-	cursor: ^Value,
-	seen: ^map[string]bool,
-) -> (
-	more: bool,
-	failure: Failure,
-) {
+advance :: proc(info: Value, cursor: ^Value, seen: ^map[string]bool) -> (more: bool, failure: Failure) {
 	if !truth(get(info, "hasNextPage")) {
 		return false, nil
 	}
+
 	next := str(get(info, "endCursor"))
+
 	if next == "" || len(next) > 512 || seen^[next] {
 		return false, "LINEAR_PAGINATION_INVALID"
 	}
+
 	seen^[next] = true; cursor^ = text(next); return true, nil
 }
 comments :: proc(api: ^API, issue: ^Value, root: string) -> (result: Value, failure: Failure) {
 	result = coverage_object(); scopes := make(map[string]bool, 64)
 	seen := make(map[string]bool, 4096); cursors := make(map[string]bool, 64); cursor := null()
+
 	for {
 		entries, info := page(api, COMMENTS, cursor, str(get(issue^, "id"))) or_return
+
 		for comment in entries {
 			id := str(get(comment, "id"))
+
 			if id == "" || seen[id] || !text_limit(get(comment, "body"), 0, MAX_REPORT) {
 				return null(), "LINEAR_COMMENTS_INVALID"
 			}; seen[id] = true
 			for line in strings.split(str(get(comment, "body")), "\n") {
 				if strings.has_prefix(line, SCOPE_PREFIX) {
 					scope := line[len(SCOPE_PREFIX):]
+
 					if scope != "baileys" && scope != "whatsmeow" {
 						return null(), "LINEAR_REVIEW_SCOPE_INVALID"
 					}; scopes[scope] = true
 				}
 			}
+
 			if len(scopes) > 1 {
 				return null(), "LINEAR_REVIEW_SCOPE_CONFLICT"
 			}
+
 			found := v2_coverage(str(get(comment, "body")), root) or_return
 			found_values := make(j.Array)
 			for key in keys(found) {append(&found_values, get(found, key))}
-			if len(found_values) > 0 &&
-			   id != comment_identity(str(get(issue^, "id")), found_values) {
+
+			if len(found_values) > 0 && id != comment_identity(str(get(issue^, "id")), found_values) {
 				return null(), "LINEAR_V2_BINDING_MISMATCH"
 			}
+
 			merge_coverage(&result, found)
 		}
+
 		more := advance(info, &cursor, &cursors) or_return; if !more {
 			break
 		}
 	}
+
 	scope := null(); for key in scopes {scope = text(key)}; put(issue, "_review_scope", scope)
+
 	return
 }
 scan :: proc(api: ^API, root: string) -> (issues: j.Array, covered: Value, failure: Failure) {
 	issues = make(j.Array); covered = coverage_object(); seen := make(map[string]bool, 256)
 	cursors := make(map[string]bool, 64); cursor := null()
+
 	for {
 		nodes, info := page(api, SCAN, cursor) or_return
+
 		for raw in nodes {
 			validate_issue(raw) or_return
 			issue := clone(raw); id := str(get(issue, "id"))
+
 			if seen[id] || len(issues) >= 200 {
 				return nil, null(), "LINEAR_SCAN_BOUND"
 			}; seen[id] = true
@@ -964,10 +1072,12 @@ scan :: proc(api: ^API, root: string) -> (issues: j.Array, covered: Value, failu
 			merge_coverage(&own, additional); put(&issue, "_coverage", own)
 			merge_coverage(&covered, own); append(&issues, issue)
 		}
+
 		more := advance(info, &cursor, &cursors) or_return; if !more {
 			break
 		}
 	}
+
 	return
 }
 fresh_issue :: proc(api: ^API, id: string) -> (value: Value, failure: Failure) {
@@ -975,9 +1085,11 @@ fresh_issue :: proc(api: ^API, id: string) -> (value: Value, failure: Failure) {
 	nodes := items(get(get(response, "issues"), "nodes")); if len(nodes) == 0 {
 		return null(), nil
 	}
+
 	if len(nodes) != 1 || str(get(nodes[0], "id")) != id {
 		return null(), "LINEAR_LOOKUP_INVALID"
 	}
+
 	validate_issue(nodes[0]) or_return; return clone(nodes[0]), nil
 }
 public_issue :: proc(issue: Value) -> Value {
@@ -985,28 +1097,25 @@ public_issue :: proc(issue: Value) -> Value {
 }
 readable_findings :: proc(entries: j.Array) -> []string {
 	lines := make([dynamic]string)
+
 	for item in entries {
 		a := get(item, "assessment")
 		append(
 			&lines,
-			fmt.aprintf(
-				"- %s: `%s` — %s",
-				str(get(item, "source")),
-				str(get(item, "path")),
-				str(get(a, "summary")),
-			),
+			fmt.aprintf("- %s: `%s` — %s", str(get(item, "source")), str(get(item, "path")), str(get(a, "summary"))),
 		)
 		evidence := get(a, "evidence"); question := str(get(evidence, "question"))
+
 		if question != "" {
 			append(&lines, cat("  - Question: ", question))
 		}
+
 		for check in items(get(a, "checks")) {append(&lines, cat("  - Check: ", str(check)))}
-		for accept in items(
-			get(a, "acceptance"),
-		) {append(&lines, cat("  - Accept: ", str(accept)))}
+		for accept in items(get(a, "acceptance")) {append(&lines, cat("  - Accept: ", str(accept)))}
 		for target in items(
 			get(a, "local_targets"),
 		) {append(&lines, cat("  - Local target: `", str(get(target, "path")), "` SHA256 `", str(get(target, "sha256")), "`"))}
+
 		if e, ok := evidence.(j.Object); ok {
 			if _, present := e["changed_indices"]; present {
 				n, _ := integer(get(evidence, "changed_count"))
@@ -1027,6 +1136,7 @@ readable_findings :: proc(entries: j.Array) -> []string {
 				)
 			}
 		}
+
 		append(
 			&lines,
 			cat(
@@ -1050,6 +1160,7 @@ readable_findings :: proc(entries: j.Array) -> []string {
 			),
 		)
 	}
+
 	return lines[:]
 }
 payload_for :: proc(entries: j.Array, run: string) -> (result: Value, failure: Failure) {
@@ -1073,10 +1184,7 @@ payload_for :: proc(entries: j.Array, run: string) -> (result: Value, failure: F
 		&lines,
 		summary,
 		"",
-		cat(
-			"## ",
-			"Implementation evidence" if kind == "FIX" else "Question and investigation checklist",
-		),
+		cat("## ", "Implementation evidence" if kind == "FIX" else "Question and investigation checklist"),
 		"",
 	)
 	append(&lines, ..readable_findings(entries))
@@ -1097,28 +1205,27 @@ payload_for :: proc(entries: j.Array, run: string) -> (result: Value, failure: F
 		{"stateId", text(READY if kind == "FIX" else BACKLOG)},
 		{"priority", number(2 if kind == "FIX" else 3)},
 	)
+
 	if len(encode(result)) > MAX_REPORT {
 		return null(), "LINEAR_PAYLOAD_BOUND"
 	}; return
 }
-lookup_comment :: proc(
-	api: ^API,
-	comment_id, issue_id, body, root: string,
-) -> (
-	found: bool,
-	failure: Failure,
-) {
+lookup_comment :: proc(api: ^API, comment_id, issue_id, body, root: string) -> (found: bool, failure: Failure) {
 	expected := v2_coverage(body, root) or_return
+
 	if len(keys(expected)) == 0 || len(body) > MAX_REPORT {
 		return false, "LINEAR_COMMENT_BINDING_MISMATCH"
 	}
+
 	response := api_call(api, COMMENT_LOOKUP, object({"id", text(comment_id)})) or_return
 	nodes := items(get(get(response, "comments"), "nodes")); if len(nodes) == 0 {
 		return false, nil
 	}
+
 	if len(nodes) != 1 {
 		return false, "LINEAR_COMMENT_BINDING_MISMATCH"
 	}
+
 	value := nodes[0]; actual, parse_error := v2_coverage(str(get(value, "body")), root)
 	if parse_error != nil ||
 	   str(get(value, "id")) != comment_id ||
@@ -1127,6 +1234,7 @@ lookup_comment :: proc(
 	   !equal(expected, actual) {
 		return false, "LINEAR_COMMENT_BINDING_MISMATCH"
 	}
+
 	return true, nil
 }
 append_findings :: proc(
@@ -1140,8 +1248,7 @@ append_findings :: proc(
 	failure: Failure,
 ) {
 	current := fresh_issue(api, str(get(issue, "id"))) or_return
-	if _, is_null := current.(j.Null);
-	   is_null || !equal(get(current, "archivedAt"), null()) || terminal(current) {
+	if _, is_null := current.(j.Null); is_null || !equal(get(current, "archivedAt"), null()) || terminal(current) {
 		return null(), nil
 	}
 	covered := issue_coverage(current, root) or_return
@@ -1206,41 +1313,44 @@ append_findings :: proc(
 	}
 	put(&result, "ready_findings", ready); return
 }
-create_findings :: proc(
-	api: ^API,
-	entries: j.Array,
-	run, root: string,
-) -> (
-	result: Value,
-	failure: Failure,
-) {
+create_findings :: proc(api: ^API, entries: j.Array, run, root: string) -> (result: Value, failure: Failure) {
 	payload := payload_for(entries, run) or_return; id := str(get(payload, "id"))
 	current := fresh_issue(api, id) or_return
+
 	if _, missing := current.(j.Null); !missing {
 		coverage := v2_coverage(str(get(current, "description")), root) or_return
+
 		for item in entries {
 			if !contains_string(keys(coverage), str(get(item, "id"))) {
 				return null(), "LINEAR_BINDING_MISMATCH"
 			}
 		}
+
 		result = public_issue(current); put(&result, "status", text("EXISTING")); return
 	}
+
 	response, mutation_error := api_call(api, CREATE, object({"input", payload}))
+
 	if mutation_error == nil && !truth(get(get(response, "issueCreate"), "success")) {
 		mutation_error = "LINEAR_CREATE_UNCONFIRMED"
 	}
+
 	current = fresh_issue(api, id) or_return
+
 	if _, missing := current.(j.Null); missing {
 		if mutation_error == Failure("LINEAR_API_REJECTED") {
 			return null(), mutation_error
 		}; return null(), "LINEAR_CREATE_OUTCOME_UNKNOWN"
 	}
+
 	coverage := v2_coverage(str(get(current, "description")), root) or_return
+
 	for item in entries {
 		if !contains_string(keys(coverage), str(get(item, "id"))) {
 			return null(), "LINEAR_BINDING_MISMATCH"
 		}
 	}
+
 	result = public_issue(current)
 	put(&result, "status", text("CREATED" if mutation_error == nil else "EXISTING")); return
 }
@@ -1253,138 +1363,147 @@ sort_by_id :: proc(values: j.Array) {
 }
 track :: proc(report: Value, run, root: string, api: ^API) -> (result: Value, failure: Failure) {
 	status := str(get(report, "status"))
+
 	if status != "REVIEW_REQUIRED" && status != "NO_MONITORED_DRIFT" {
 		return null(), "SCAN_NOT_SUCCESSFUL"
 	}
+
 	if !run_valid(run) {
 		return null(), "RUN_URL_INVALID"
 	}
+
 	entries := findings(report, root) or_return
+
 	if status == "NO_MONITORED_DRIFT" || len(entries) == 0 {
-		return object(
-				{"status", text("NO_REVIEW_NEEDED")},
-				{"compatibility_approved", boolean(false)},
-			),
-			nil
+		return object({"status", text("NO_REVIEW_NEEDED")}, {"compatibility_approved", boolean(false)}), nil
 	}
+
 	if api.started == (time.Tick{}) {
 		api.started = time.tick_now()
 	}
+
 	issues, covered := scan(api, root) or_return
 	results, pending := make(j.Array), make(j.Array)
+
 	for item in entries {
 		identity := str(get(item, "id")); old := get(covered, identity)
+
 		if _, missing := old.(j.Null); missing {
 			append(&pending, item); continue
 		}
-		if str(get(get(item, "assessment"), "kind")) != "FIX" ||
-		   str(get(get(old, "assessment"), "kind")) == "FIX" {
+
+		if str(get(get(item, "assessment"), "kind")) != "FIX" || str(get(get(old, "assessment"), "kind")) == "FIX" {
 			continue
 		}
+
 		owners := make(j.Array); closed := false
+
 		for issue in issues {
 			if !contains_string(keys(get(issue, "_coverage")), identity) {
 				continue
 			}
+
 			append(&owners, issue)
+
 			if terminal(issue) || !equal(get(issue, "archivedAt"), null()) {
 				closed = true
 			}
 		}
+
 		if closed || len(owners) == 0 {
 			continue
 		}; sort_by_id(owners)
-		updated := append_findings(
-			api,
-			owners[0],
-			array(item).(j.Array),
-			run,
-			root,
-			true,
-		) or_return
+		updated := append_findings(api, owners[0], array(item).(j.Array), run, root, true) or_return
+
 		if _, missing := updated.(j.Null); !missing {
 			append(&results, updated)
 		}
 	}
+
 	if len(pending) == 0 && len(results) == 0 {
-		return object({"status", text("EXISTING")}, {"compatibility_approved", boolean(false)}),
-			nil
+		return object({"status", text("EXISTING")}, {"compatibility_approved", boolean(false)}), nil
 	}
+
 	groups := make(map[string]j.Array)
+
 	for item in pending {
 		kind := str(get(get(item, "assessment"), "kind"))
-		key := cat(
-			kind,
-			"/",
-			str(get(item, "source")) if kind == "SPIKE" else str(get(item, "id")),
-		)
+		key := cat(kind, "/", str(get(item, "source")) if kind == "SPIKE" else str(get(item, "id")))
 		group := groups[key]; append(&group, item); groups[key] = group
 	}
+
 	group_keys := make([dynamic]string); for key in groups {append(&group_keys, key)}
 	sort_strings(group_keys[:])
+
 	for key in group_keys {
 		group := groups[key]; kind := str(get(get(group[0], "assessment"), "kind"))
 		source := str(get(group[0], "source")); related := make(j.Array)
+
 		for issue in issues {
 			if terminal(issue) || !equal(get(issue, "archivedAt"), null()) {
 				continue
 			}
+
 			scope := str(get(issue, "_review_scope")); if scope != "" && scope != source {
 				continue
 			}
+
 			for identity in keys(get(issue, "_coverage")) {
 				finding := get(get(issue, "_coverage"), identity)
-				if str(get(finding, "source")) == source &&
-				   str(get(get(finding, "assessment"), "kind")) != "FIX" {
+
+				if str(get(finding, "source")) == source && str(get(get(finding, "assessment"), "kind")) != "FIX" {
 					append(&related, issue); break
 				}
 			}
 		}
+
 		result_item := null()
+
 		if kind == "SPIKE" && len(related) > 0 {
 			sort_by_id(related)
 			result_item = append_findings(api, related[0], group, run, root) or_return
 		}
+
 		if _, missing := result_item.(j.Null); missing {
 			result_item = create_findings(api, group, run, root) or_return
 		}
+
 		append(&results, result_item)
 	}
+
 	overall := "EXISTING"
+
 	for item in results {
 		if str(get(item, "status")) == "CREATED" {
 			overall = "CREATED"
 		}
 	}
+
 	for item in results {
 		if str(get(item, "status")) == "UPDATED" {
 			overall = "UPDATED"
 		}
 	}
+
 	result = public_issue(results[0]); put(&result, "status", text(overall))
 	put(&result, "issues", results); put(&result, "compatibility_approved", boolean(false))
+
 	if len(encode(result)) > MAX_REPORT {
 		return null(), "TRACKING_OUTPUT_BOUND"
 	}; return
 }
-ticket :: proc(
-	report: Value,
-	run, root: string,
-) -> (
-	id, marker: string,
-	payload: Value,
-	failure: Failure,
-) {
+ticket :: proc(report: Value, run, root: string) -> (id, marker: string, payload: Value, failure: Failure) {
 	if !run_valid(run) {
 		return "", "", null(), "RUN_URL_INVALID"
 	}
+
 	entries := findings(report, root) or_return
+
 	if len(entries) == 0 {
 		return "", "", null(), "NO_FINDINGS"
 	}
+
 	payload = payload_for(entries, run) or_return
-	return str(get(payload, "id")),
-		cat("owa-protocol-change:v2:", str(get(entries[0], "id"))),
-		payload,
-		nil
+
+	return str(get(payload, "id")), cat("owa-protocol-change:v2:", str(get(entries[0], "id"))), payload, nil
 }

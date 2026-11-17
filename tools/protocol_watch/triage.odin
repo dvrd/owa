@@ -211,6 +211,7 @@ owner_for :: proc(source, path: string) -> (Owner, bool) {
 			return owner, true
 		}
 	}
+
 	return {}, false
 }
 repository :: proc(source: string) -> string {
@@ -224,17 +225,22 @@ reference_commit :: proc(source: string) -> string {
 	if source == "baileys" {
 		return "e05b16b4aa0d7d3eb2594677e015454af1225b75"
 	}
+
 	if source == "whatsmeow" {
 		return "c88388f983b4bc43dfd0bcc2b46969fcde82d61f"
 	}
+
 	return ""
 }
 identifier_start :: proc(c: u8) -> bool {
 	return is_alpha(c) || c == '_' || c == '$'
 }
-identifier_part :: proc(c: u8) -> bool {return identifier_start(c) || is_digit(c)}
+identifier_part :: proc(c: u8) -> bool {
+	return identifier_start(c) || is_digit(c)
+}
 sensitive_comment :: proc(comment: string) -> bool {
 	lower := strings.to_lower(comment)
+
 	for marker in ([]string {
 			"copyright",
 			"license",
@@ -255,27 +261,19 @@ sensitive_comment :: proc(comment: string) -> bool {
 			return true
 		}
 	}
+
 	for c in comment {
 		if c == '@' || c == '#' || c == '!' {
 			return true
 		}
 	}
-	for word in ([]string {
-			"lint",
-			"c8",
-			"mit",
-			"bsd",
-			"apache",
-			"gpl",
-			"mpl",
-			"isc",
-			"unlicense",
-			"export",
-		}) {
+
+	for word in ([]string{"lint", "c8", "mit", "bsd", "apache", "gpl", "mpl", "isc", "unlicense", "export"}) {
 		for start := 0; start < len(lower); start += 1 {
 			if !strings.has_prefix(lower[start:], word) {
 				continue
 			}
+
 			end := start + len(word)
 			if (start == 0 || !identifier_part(lower[start - 1])) &&
 			   (end == len(lower) || !identifier_part(lower[end])) {
@@ -283,7 +281,9 @@ sensitive_comment :: proc(comment: string) -> bool {
 			}
 		}
 	}
+
 	compact := strings.trim_space(strings.trim_prefix(lower, "//"))
+
 	return(
 		strings.has_prefix(compact, "line ") ||
 		strings.has_prefix(compact, "line\t") ||
@@ -301,7 +301,9 @@ number_end :: proc(s: string, at: int) -> int {
 			   s[i + 1] == 'B' ||
 			   s[i + 1] == 'o' ||
 			   s[i + 1] == 'O') {
-		radix := s[i + 1]; i += 2; start := i
+		radix := s[i + 1]
+		i += 2
+		start := i
 		for i < len(s) {
 			c := s[i]
 			if c == '_' ||
@@ -319,158 +321,218 @@ number_end :: proc(s: string, at: int) -> int {
 		}
 		return i
 	}
-	for i < len(s) && (is_digit(s[i]) || s[i] == '_') {i += 1}
-	if i < len(s) && s[i] == '.' {
-		i += 1; for i < len(s) && (is_digit(s[i]) || s[i] == '_') {i += 1}
+
+	for i < len(s) && (is_digit(s[i]) || s[i] == '_') {
+		i += 1
 	}
+
+	if i < len(s) && s[i] == '.' {
+		i += 1
+
+		for i < len(s) && (is_digit(s[i]) || s[i] == '_') {
+			i += 1
+		}
+	}
+
 	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
-		end := i + 1; if end < len(s) && (s[end] == '+' || s[end] == '-') {
+		end := i + 1
+
+		if end < len(s) && (s[end] == '+' || s[end] == '-') {
 			end += 1
 		}; start := end
-		for end < len(s) && (is_digit(s[end]) || s[end] == '_') {end += 1}
+		for end < len(s) && (is_digit(s[end]) || s[end] == '_') {
+			end += 1
+		}
+
 		if end > start {
 			i = end
 		}
 	}
+
 	if i < len(s) && s[i] == 'n' {
 		i += 1
 	}
+
 	return i
 }
 lex :: proc(data: []u8, language: string) -> (Lexed, string) {
-	result: Lexed; s := string(data)
+	result: Lexed
+	s := string(data)
+
 	if len(data) > MAX_BYTES || !utf8.valid_string(s) {
 		return {}, "INPUT_LIMIT"
 	}
-	if strings.contains(s, "\u2028") ||
-	   strings.contains(s, "\u2029") ||
-	   strings.contains(s, "\x00") {
+
+	if strings.contains(s, "\u2028") || strings.contains(s, "\u2029") || strings.contains(s, "\x00") {
 		return {}, "UNSUPPORTED_LINE_CHARACTER"
 	}
+
 	if language == "go" {
 		clean := replace(s, "\r\n", "")
-		if strings.contains(clean, "\r") ||
-		   strings.contains(s, "\v") ||
-		   strings.contains(s, "\f") {
+
+		if strings.contains(clean, "\r") || strings.contains(s, "\v") || strings.contains(s, "\f") {
 			return {}, "GO_WHITESPACE_AMBIGUITY"
 		}
 	}
-	stack := make([dynamic]u8); i := 0
+
+	stack := make([dynamic]u8)
+	i := 0
+
 	for i < len(s) {
 		if len(result.tokens) >= MAX_TOKENS {
 			return {}, "TOKEN_LIMIT"
 		}
+
 		c := s[i]
+
 		if c == ' ' || c == '\t' || c == '\v' || c == '\f' {
-			i += 1; continue
+			i += 1
+			continue
 		}
+
 		if c == '\r' || c == '\n' {
 			i += 2 if strings.has_prefix(s[i:], "\r\n") else 1
-			append(&result.tokens, Token{"newline", "\n"}); continue
+			append(&result.tokens, Token{"newline", "\n"})
+			continue
 		}
+
 		if strings.has_prefix(s[i:], "//") || strings.has_prefix(s[i:], "/*") {
 			start := i
+
 			if s[i + 1] == '/' {
-				for i < len(s) && s[i] != '\r' && s[i] != '\n' {i += 1}
+				for i < len(s) && s[i] != '\r' && s[i] != '\n' {
+					i += 1
+				}
 			} else {
-				at := strings.index(s[i + 2:], "*/"); if at < 0 {
+				at := strings.index(s[i + 2:], "*/")
+
+				if at < 0 {
 					return {}, "UNCLOSED_COMMENT"
 				}; i += at + 4
 			}
+
 			comment := s[start:i]
+
 			if sensitive_comment(comment) {
 				if len(result.sensitive) >= 64 {
 					return {}, "DIRECTIVE_LIMIT"
 				}
+
 				column := start
+
 				for before := start - 1; before >= 0; before -= 1 {
 					if s[before] == '\r' || s[before] == '\n' {
-						column = start - before - 1; break
+						column = start - before - 1
+						break
 					}
 				}
+
 				append(&result.sensitive, Comment{len(result.tokens), column, comment})
 			}
+
 			normalized := replace(replace(comment, "\r\n", "\n"), "\r", "\n")
+
 			for byte in normalized {
 				if byte == '\n' {
 					append(&result.tokens, Token{"newline", "\n"})
 				}
 			}
+
 			if len(result.tokens) > MAX_TOKENS {
 				return {}, "TOKEN_LIMIT"
 			}; continue
 		}
+
 		if c == '\'' || c == '"' || c == '`' {
 			start, quote := i, c; i += 1; closed := false
+
 			for i < len(s) {
 				if s[i] == quote {
 					i += 1; closed = true; break
 				}
+
 				if quote != '`' && (s[i] == '\r' || s[i] == '\n') {
 					return {}, "STRING_NEWLINE"
 				}
+
 				i += 2 if s[i] == '\\' && (quote != '`' || language == "ts") else 1
 			}
+
 			if !closed {
 				return {}, "UNCLOSED_STRING"
 			}
+
 			literal := s[start:i]
+
 			if quote == '`' && language == "ts" && strings.contains(literal, "${") {
 				return {}, "TEMPLATE_EXPRESSION"
 			}
+
 			append(&result.tokens, Token{"raw" if quote == '`' else "string", literal}); continue
 		}
+
 		if identifier_start(c) {
 			start := i; i += 1; for i < len(s) && identifier_part(s[i]) {i += 1}
 			append(&result.tokens, Token{"identifier", s[start:i]}); continue
 		}
-		if is_digit(c) ||
-		   c == '.' && i + 1 < len(s) && is_digit(s[i + 1]) {
+
+		if is_digit(c) || c == '.' && i + 1 < len(s) && is_digit(s[i + 1]) {
 			start := i; i = number_end(s, i)
+
 			if i < len(s) && identifier_part(s[i]) {
 				return {}, "NUMBER_BOUNDARY"
 			}
+
 			append(&result.tokens, Token{"number", s[start:i]}); continue
 		}
-		if language == "ts" &&
-		   (c == '/' || strings.has_prefix(s[i:], "<!--") || strings.has_prefix(s[i:], "-->")) {
+
+		if language == "ts" && (c == '/' || strings.has_prefix(s[i:], "<!--") || strings.has_prefix(s[i:], "-->")) {
 			return {}, "SLASH_OR_HTML_AMBIGUITY"
 		}
-		if language == "ts" &&
-		   strings.has_prefix(s[i:], "?.") &&
-		   i + 2 < len(s) &&
-		   is_digit(s[i + 2]) {
+
+		if language == "ts" && strings.has_prefix(s[i:], "?.") && i + 2 < len(s) && is_digit(s[i + 2]) {
 			return {}, "OPTIONAL_CHAIN_DECIMAL_AMBIGUITY"
 		}
+
 		matched := false
+
 		for op in OPERATORS {
 			if strings.has_prefix(s[i:], op) {
 				append(&result.tokens, Token{"operator", op}); i += len(op); matched = true; break
 			}
 		}
+
 		if matched {
 			continue
 		}
+
 		if !strings.contains_rune("{}[]();,.:?~!+-*%&|^<>=/@", rune(c)) {
 			return {}, "UNSUPPORTED_CHARACTER"
 		}
+
 		if c == '(' || c == '[' || c == '{' {
 			append(&stack, c)
 		}
+
 		if c == ')' || c == ']' || c == '}' {
 			if len(stack) == 0 {
 				return {}, "DELIMITER_AMBIGUITY"
 			}
+
 			want := u8('(' if c == ')' else '[' if c == ']' else '{')
+
 			if pop(&stack) != want {
 				return {}, "DELIMITER_AMBIGUITY"
 			}
 		}
+
 		append(&result.tokens, Token{"punctuation", s[i:i + 1]}); i += 1
 	}
+
 	if len(stack) != 0 {
 		return {}, "UNCLOSED_DELIMITER"
 	}
+
 	if language == "go" {
 		for token in result.tokens {
 			if token == (Token{"raw", "`C`"}) {
@@ -483,25 +545,33 @@ lex :: proc(data: []u8, language: string) -> (Lexed, string) {
 			}
 		}
 	}
+
 	return result, ""
 }
 literal_string :: proc(token: Token) -> (string, string) {
 	s := token.text; if token.kind != "string" || len(s) < 2 {
 		return "", "STRING_LITERAL_REQUIRED"
 	}
+
 	b: strings.Builder; i := 1
+
 	for i < len(s) - 1 {
 		c := s[i]; i += 1
+
 		if c < 32 {
 			return "", "STRING_CONTROL"
 		}
+
 		if c != '\\' {
 			strings.write_byte(&b, c); continue
 		}
+
 		if i >= len(s) - 1 {
 			return "", "STRING_ESCAPE"
 		}
+
 		c = s[i]; i += 1
+
 		switch c {
 		case 'n':
 			strings.write_byte(&b, '\n')
@@ -519,6 +589,7 @@ literal_string :: proc(token: Token) -> (string, string) {
 			if i + 4 > len(s) - 1 {
 				return "", "STRING_ESCAPE"
 			}
+
 			n, ok := strconv.parse_u64(s[i:i + 4], 16); if !ok {
 				return "", "STRING_ESCAPE"
 			}; i += 4
@@ -526,90 +597,116 @@ literal_string :: proc(token: Token) -> (string, string) {
 				if i + 6 > len(s) - 1 || s[i:i + 2] != "\\u" {
 					return "", "STRING_ESCAPE"
 				}
+
 				low, low_ok := strconv.parse_u64(s[i + 2:i + 6], 16)
+
 				if !low_ok || low < 0xdc00 || low > 0xdfff {
 					return "", "STRING_ESCAPE"
 				}
+
 				i += 6; n = 0x10000 + ((n - 0xd800) << 10) + (low - 0xdc00)
 			} else if n >= 0xdc00 && n <= 0xdfff {
 				return "", "STRING_ESCAPE"
 			}
+
 			strings.write_rune(&b, rune(n))
 		case:
 			return "", "STRING_ESCAPE"
 		}
 	}
+
 	result := strings.to_string(b); if len(result) > 1024 || !utf8.valid_string(result) {
 		return "", "TABLE_STRING_LIMIT"
 	}; return result, ""
 }
 table :: proc(tokens: []Token, language: string) -> ([]string, []Token, string) {
 	significant := make([dynamic]int)
+
 	for t, i in tokens {
 		if t.kind != "newline" {
 			append(&significant, i)
 		}
 	}
+
 	values := make([dynamic]string); outside := make([dynamic]Token); found, depth := 0, 0
+
 	for index, at in significant {
 		token := tokens[index]
+
 		if token.text == "(" || token.text == "[" || token.text == "{" {
 			depth += 1
 		}
+
 		if token.text == ")" || token.text == "]" || token.text == "}" {
 			depth -= 1
 		}
+
 		if token != (Token{"identifier", "SINGLE_BYTE_TOKENS"}) {
 			continue
 		}
-		if language == "ts" &&
-		   (at < 1 || tokens[significant[at - 1]] != (Token{"identifier", "const"})) {
+
+		if language == "ts" && (at < 1 || tokens[significant[at - 1]] != (Token{"identifier", "const"})) {
 			continue
 		}
+
 		if depth != 0 {
 			return nil, nil, "NESTED_TABLE"
 		}
+
 		pattern := []string{"=", "["}; close := "]"
+
 		if language != "ts" {
 			pattern = []string{":=", "[", "236", "]", "string", "{"}; close = "}"
 		}
+
 		if at + len(pattern) >= len(significant) {
 			return nil, nil, "TABLE_DECLARATION"
 		}
+
 		for expected, j in pattern {
 			if tokens[significant[at + 1 + j]].text != expected {
 				return nil, nil, "TABLE_DECLARATION"
 			}
 		}
+
 		start := at + len(pattern); cursor := start + 1
+
 		for cursor < len(significant) && tokens[significant[cursor]].text != close {
 			element := tokens[significant[cursor]]
+
 			if language == "odin" && !strings.has_prefix(element.text, "\"") {
 				return nil, nil, "ODIN_STRING_LITERAL_REQUIRED"
 			}
+
 			value, error := literal_string(element); if error != "" {
 				return nil, nil, error
 			}; append(&values, value); cursor += 1
 			if len(values) > TABLE_COUNT {
 				return nil, nil, "TABLE_COUNT"
 			}
+
 			if cursor >= len(significant) {
 				return nil, nil, "TABLE_END"
 			}
+
 			if tokens[significant[cursor]].text == close {
 				break
 			}
+
 			if tokens[significant[cursor]].text != "," {
 				return nil, nil, "TABLE_EXPRESSION"
 			}; cursor += 1
 		}
+
 		if cursor >= len(significant) || len(values) != TABLE_COUNT {
 			return nil, nil, "TABLE_COUNT"
 		}
+
 		append(&outside, ..tokens[:significant[start]])
 		append(&outside, Token{"table", "SINGLE_BYTE_TOKENS"})
 		append(&outside, ..tokens[significant[cursor] + 1:]); found += 1
 	}
+
 	if found != 1 {
 		return nil, nil, "TABLE_DECLARATION_COUNT"
 	}; return values[:], outside[:], ""
@@ -621,31 +718,41 @@ owned_bytes :: proc(root, relative, prefix, suffix: string) -> ([]u8, string) {
 	   suffix != "" && !strings.has_suffix(relative, suffix) {
 		return nil, "CONTRACT_PATH"
 	}
+
 	target := root
+
 	for part in strings.split(relative, "/") {
 		target = join(target, part)
 		info, error := os.lstat(target, context.allocator)
+
 		if error != nil {
 			return nil, "CONTRACT_FILE"
 		}
+
 		if info.type == .Symlink {
 			return nil, "CONTRACT_SYMLINK"
 		}
 	}
+
 	data, error := read_file(target, 256 * 1024)
+
 	if error != "" {
 		return nil, "CONTRACT_FILE"
 	}
+
 	return data, ""
 }
 record_bound :: proc(root: string, record: Value, prefix, suffix: string) -> string {
 	if !fields(record, []string{"path", "sha256"}) || !hex_valid(str(get(record, "sha256")), 64) {
 		return "CONTRACT_RECORD"
 	}
+
 	data, error := owned_bytes(root, str(get(record, "path")), prefix, suffix)
+
 	if error != "" {
 		return error
 	}
+
 	if sha256(data) != str(get(record, "sha256")) {
 		return "CONTRACT_STALE"
 	}; return ""
@@ -685,12 +792,15 @@ finish :: proc(input: Value, kind, reason, summary: string) -> Value {
 }
 approved_metadata :: proc(assessment: Value, root, path: string) -> (Value, string) {
 	raw, error := owned_bytes(root, path, "tools/protocol_watch/contracts/", ".json")
+
 	if error != "" {
 		return null(), error
 	}
+
 	contract, parse_error := decode(raw); if parse_error != "" {
 		return null(), parse_error
 	}
+
 	if !allowed_fields(
 		contract,
 		[]string{"schema", "source", "path", "target_table_sha256", "requirement"},
@@ -698,6 +808,7 @@ approved_metadata :: proc(assessment: Value, root, path: string) -> (Value, stri
 	) {
 		return null(), "CONTRACT_BINDING"
 	}
+
 	schema, ok := integer(get(contract, "schema"))
 	if !ok ||
 	   schema != 1 ||
@@ -707,6 +818,7 @@ approved_metadata :: proc(assessment: Value, root, path: string) -> (Value, stri
 	   str(get(assessment, "path")) != "src/WABinary/constants.ts" {
 		return null(), "CONTRACT_BINDING"
 	}
+
 	evidence := get(assessment, "evidence"); expected := str(get(contract, "target_table_sha256"))
 	count, _ := integer(get(evidence, "table_count"))
 	if !hex_valid(expected, 64) ||
@@ -719,49 +831,62 @@ approved_metadata :: proc(assessment: Value, root, path: string) -> (Value, stri
 	   !truth(get(evidence, "outside_tokens_equal")) {
 		return null(), "CONTRACT_COUNTEREXAMPLE"
 	}
+
 	indices := items(get(evidence, "changed_indices"))
 	changed, _ := integer(get(evidence, "changed_count"))
+
 	if len(indices) == 0 || i64(len(indices)) != changed {
 		return null(), "CONTRACT_INDICES"
 	}
+
 	last: i64 = -1
+
 	for index in indices {
 		n, index_ok := integer(index); if !index_ok || n < 0 || n >= 236 || n <= last {
 			return null(), "CONTRACT_INDICES"
 		}; last = n
 	}
+
 	owner, _ := owner_for("baileys", "src/WABinary/constants.ts")
 	targets := items(get(assessment, "local_targets"))
+
 	if len(targets) != len(owner.targets) {
 		return null(), "CONTRACT_OWNERS"
 	}
+
 	for target, i in targets {
 		owner_path := str(get(target, "path")); if owner_path != owner.targets[i] {
 			return null(), "CONTRACT_OWNERS"
 		}
+
 		bytes, owner_error := owned_bytes(root, owner_path, "", ".odin"); if owner_error != "" {
 			return null(), owner_error
 		}
+
 		if sha256(bytes) != str(get(target, "sha256")) {
 			return null(), "CONTRACT_OWNER_STALE"
 		}
+
 		if owner_path == "binary_tokens.odin" {
 			local, lex_error := lex(bytes, "odin"); if lex_error != "" {
 				return null(), lex_error
 			}
+
 			values, _, table_error := table(local.tokens[:], "odin")
 			if table_error != "" ||
-			   sha256(transmute([]u8)encode(value_strings(values))) !=
-				   str(get(evidence, "reference_table_sha256")) {
+			   sha256(transmute([]u8)encode(value_strings(values))) != str(get(evidence, "reference_table_sha256")) {
 				return null(), "CONTRACT_LOCAL_TABLE"
 			}
 		}
 	}
+
 	requirement := get(contract, "requirement")
 	error = record_bound(root, requirement, "tools/protocol_watch/contracts/", ".md")
+
 	if error != "" {
 		return null(), error
 	}
+
 	result := object(
 		{"path", text(path)},
 		{"sha256", text(sha256(raw))},
@@ -775,6 +900,7 @@ approved_metadata :: proc(assessment: Value, root, path: string) -> (Value, stri
 			),
 		},
 	)
+
 	if fixture, has_fixture := get(contract, "fixture").(j.Object); has_fixture {
 		error = record_bound(root, fixture, "tests/", ""); if error != "" {
 			return null(), error
@@ -784,6 +910,7 @@ approved_metadata :: proc(assessment: Value, root, path: string) -> (Value, stri
 			return null(), "CONTRACT_RECORD"
 		}
 	}
+
 	return result, ""
 }
 validate_approved_contract :: proc(assessment: Value, root: string) -> bool {
@@ -794,8 +921,10 @@ validate_approved_contract :: proc(assessment: Value, root: string) -> bool {
 	   str(get(assessment, "reason")) != "APPROVED_DICTIONARY_CONTRACT_GAP" {
 		return false
 	}
+
 	actual := get(get(assessment, "evidence"), "approved_contract")
 	expected, error := approved_metadata(assessment, root, str(get(actual, "path")))
+
 	return error == "" && equal(actual, expected)
 }
 assess :: proc(
@@ -816,8 +945,7 @@ assess :: proc(
 		bound =
 			bound &&
 			str(get(source, "repository")) == repository(name) &&
-			(!contains_string(keys(source), "reference_commit") ||
-					provided == reference_commit(name))
+			(!contains_string(keys(source), "reference_commit") || provided == reference_commit(name))
 	}
 	evidence := object(
 		{"reference", digest(before, before_present)},
@@ -837,11 +965,8 @@ assess :: proc(
 		{"evidence", evidence},
 	)
 	if !bound {
-		put(
-			&evidence,
-			"question",
-			text("Which allowlisted source and monitored path does this observation describe?"),
-		); return result
+		put(&evidence, "question", text("Which allowlisted source and monitored path does this observation describe?"))
+		return result
 	}
 	put(&evidence, "question", text(owner.question))
 	put(&result, "checks", value_strings(owner.checks))
@@ -860,6 +985,7 @@ assess :: proc(
 	targets := make(j.Array)
 	for owner_path in owner.targets {
 		bytes, error := read_file(join(root, owner_path))
+
 		if error != "" {
 			put(&result, "local_targets", targets)
 			return finish(
@@ -869,6 +995,7 @@ assess :: proc(
 				"The local Odin owner cannot be safely read and source-bound.",
 			)
 		}
+
 		append(&targets, object({"path", text(owner_path)}, {"sha256", text(sha256(bytes))}))
 	}
 	put(&result, "local_targets", targets)
@@ -890,6 +1017,7 @@ assess :: proc(
 	}
 	if strings.has_suffix(path, ".json") {
 		a, ae := decode(before, MAX_BYTES); b, be := decode(after, MAX_BYTES)
+
 		if ae != "" || be != "" {
 			return finish(
 				result,
@@ -898,6 +1026,7 @@ assess :: proc(
 				"JSON normalization failed; duplicate keys and unsupported values require investigation.",
 			)
 		}
+
 		if equal(a, b) {
 			return finish(
 				result,
@@ -906,6 +1035,7 @@ assess :: proc(
 				"Unique-key finite JSON values are unchanged after normalization.",
 			)
 		}
+
 		return finish(
 			result,
 			"SPIKE",
@@ -913,10 +1043,7 @@ assess :: proc(
 			"The advertised JSON value changed; qualify the specific local payload decision.",
 		)
 	}
-	language :=
-		"ts" if \
-			strings.has_suffix(path, ".ts") else \
-			"go" if strings.has_suffix(path, ".go") else "proto"
+	language := "ts" if strings.has_suffix(path, ".ts") else "go" if strings.has_suffix(path, ".go") else "proto"
 	old, old_error := lex(before, language); next, next_error := lex(after, language)
 	if old_error != "" || next_error != "" {
 		return finish(
@@ -1006,7 +1133,9 @@ assess :: proc(
 		if value == current[i] {
 			continue
 		}
+
 		append(&indices, number(i64(i)))
+
 		if len(changes) < 32 {
 			old_excerpt, new_excerpt := excerpt(value), excerpt(current[i])
 			append(
@@ -1022,21 +1151,9 @@ assess :: proc(
 		}
 	}
 	put(&evidence, "static_regression", text("indexed_table_comparison"))
-	put(
-		&evidence,
-		"reference_table_sha256",
-		text(sha256(transmute([]u8)encode(value_strings(reference)))),
-	)
-	put(
-		&evidence,
-		"target_table_sha256",
-		text(sha256(transmute([]u8)encode(value_strings(current)))),
-	)
-	put(
-		&evidence,
-		"local_table_sha256",
-		text(sha256(transmute([]u8)encode(value_strings(local_values)))),
-	)
+	put(&evidence, "reference_table_sha256", text(sha256(transmute([]u8)encode(value_strings(reference)))))
+	put(&evidence, "target_table_sha256", text(sha256(transmute([]u8)encode(value_strings(current)))))
+	put(&evidence, "local_table_sha256", text(sha256(transmute([]u8)encode(value_strings(local_values)))))
 	put(&evidence, "table_count", number(TABLE_COUNT))
 	put(&evidence, "outside_tokens_equal", boolean(true))
 	put(&evidence, "local_table_matches", text("reference"))
@@ -1092,10 +1209,12 @@ assess :: proc(
 }
 excerpt :: proc(value: string) -> string {
 	out: strings.Builder; n := 0
+
 	for c in value {
 		if n == 128 {
 			break
 		}; strings.write_rune(&out, c if c >= 32 && c < 127 else '?'); n += 1
 	}
+
 	return strings.to_string(out)
 }

@@ -109,12 +109,10 @@ socket_message_destroy :: proc(message: ^Socket_Message) {
 	if message == nil do return
 
 	a := message.allocator
-	delete(message.group, a); delete(message.participant, a)
+	delete(message.group, a)
+	delete(message.participant, a)
 	delete(message.id, a)
-	crypto.zero_explicit(
-		raw_data(message.protobuf),
-		len(message.protobuf),
-	)
+	crypto.zero_explicit(raw_data(message.protobuf), len(message.protobuf))
 	delete(message.protobuf, a)
 	free(message, a)
 }
@@ -157,25 +155,16 @@ socket_connect :: proc(
 	store: ^State_Store,
 	config: Socket_Config,
 ) -> Socket_Error {
-	if validation_error := socket_connect_validate(socket, auth, prekeys, store, config);
-	   validation_error.kind != .None do return validation_error
+	if validation_error := socket_connect_validate(socket, auth, prekeys, store, config); validation_error.kind != .None do return validation_error
 	settings, settings_error := socket_connect_settings(config)
 	if settings_error.kind != .None do return settings_error
 
-	socket.config, socket.auth, socket.prekeys, socket.store =
-		settings, auth, prekeys, store
+	socket.config, socket.auth, socket.prekeys, socket.store = settings, auth, prekeys, store
 	socket.phase = .Connecting
-	if websocket_error := socket_websocket_dial(socket, settings);
-	   websocket_error.kind != .None do return websocket_error
+	if websocket_error := socket_websocket_dial(socket, settings); websocket_error.kind != .None do return websocket_error
 
 	if e := socket_client_init(socket, settings); e.kind != .None {
-		return socket_fail(
-			socket,
-			{
-				kind = .Session_Failed,
-				session = {kind = .Client_Failed, client = e},
-			},
-		)
+		return socket_fail(socket, {kind = .Session_Failed, session = {kind = .Client_Failed, client = e}})
 	}
 
 	if e := session_init(
@@ -190,18 +179,11 @@ socket_connect :: proc(
 			observer_data = settings.observer_data,
 		},
 	); e.kind != .None {
-		return socket_fail(
-			socket,
-			{kind = .Session_Failed, session = e},
-		)
+		return socket_fail(socket, {kind = .Session_Failed, session = e})
 	}
 
-	if e := session_start(&socket.session, time.now());
-	   e.kind != .None {
-		return socket_fail(
-			socket,
-			{kind = .Session_Failed, session = e},
-		)
+	if e := session_start(&socket.session, time.now()); e.kind != .None {
+		return socket_fail(socket, {kind = .Session_Failed, session = e})
 	}
 
 	socket.phase = .Pairing
@@ -213,8 +195,10 @@ socket_connect :: proc(
 @(private)
 socket_client_init :: proc(socket: ^Socket, settings: Socket_Config) -> Client_Error {
 	assert(socket != nil && socket.auth != nil)
+
 	return client_init(
-		&socket.client, &socket.websocket,
+		&socket.client,
+		&socket.websocket,
 		{static_private_key = socket.auth.credentials.noise_private},
 		{verify_certificate = settings.verify_certificate},
 	)
@@ -233,53 +217,36 @@ socket_websocket_dial :: proc(socket: ^Socket, settings: Socket_Config) -> Socke
 		},
 		settings.tls,
 	)
+
 	if err.kind != .None {
-		return socket_fail(
-			socket,
-			{kind = .Websocket_Failed, websocket = err},
-		)
+		return socket_fail(socket, {kind = .Websocket_Failed, websocket = err})
 	}
 
 	return {}
 }
 
 socket_connect_validate :: proc(
-	socket: ^Socket, auth: ^Auth_State, prekeys: ^Prekey_Store,
-	store: ^State_Store, config: Socket_Config,
+	socket: ^Socket,
+	auth: ^Auth_State,
+	prekeys: ^Prekey_Store,
+	store: ^State_Store,
+	config: Socket_Config,
 ) -> Socket_Error {
-	if socket == nil ||
-	   socket.phase != .Uninitialized ||
-	   auth == nil ||
-	   prekeys == nil ||
-	   store == nil {
+	if socket == nil || socket.phase != .Uninitialized || auth == nil || prekeys == nil || store == nil {
 		return {kind = .Invalid_State}
 	}
 
-	if !prekeys.initialized ||
-	   !store.initialized ||
-	   config.prekey_path == "" ||
-	   config.state_path == "" {
+	if !prekeys.initialized || !store.initialized || config.prekey_path == "" || config.state_path == "" {
 		return {kind = .Invalid_Config}
 	}
 
-	if e := device_credentials_validate(&auth.credentials);
-	   e != .None {
+	if e := device_credentials_validate(&auth.credentials); e != .None {
 		return {kind = .Invalid_Config}
 	}
 
-	identity := signal_curve_public(
-		auth.credentials.identity_private,
-	)
-	if crypto.compare_constant_time(
-		   identity[:],
-		   store.identity[:],
-	   ) !=
-		   1 ||
-	   crypto.compare_constant_time(
-		   identity[:],
-		   prekeys.identity_public[:],
-	   ) !=
-		   1 {
+	identity := signal_curve_public(auth.credentials.identity_private)
+	if crypto.compare_constant_time(identity[:], store.identity[:]) != 1 ||
+	   crypto.compare_constant_time(identity[:], prekeys.identity_public[:]) != 1 {
 		return {kind = .Invalid_Config}
 	}
 
@@ -290,7 +257,9 @@ socket_connect_settings :: proc(config: Socket_Config) -> (Socket_Config, Socket
 	if !pairing_qr_format_valid(config.qr_format) {
 		return {}, {kind = .Invalid_Config}
 	}
+
 	settings := config
+
 	if settings.host == "" {
 		settings.host = "web.whatsapp.com"
 	}
@@ -325,15 +294,11 @@ socket_connect_settings :: proc(config: Socket_Config) -> (Socket_Config, Socket
 socket_close :: proc(socket: ^Socket) {
 	if socket == nil do return
 
-	if socket.websocket.phase == .Open &&
-	   socket.websocket.stream.set_write_deadline != nil {
-		if e := network_client.websocket_set_write_deadline(
-			&socket.websocket,
-			time.time_add(time.now(), time.Second),
-		); e.kind != .None {
+	if socket.websocket.phase == .Open && socket.websocket.stream.set_write_deadline != nil {
+		if e := network_client.websocket_set_write_deadline(&socket.websocket, time.time_add(time.now(), time.Second));
+		   e.kind != .None {
 			socket.websocket.phase = .Failed
 		}
-
 	}
 
 	if socket.session.phase != .Uninitialized {
@@ -356,16 +321,8 @@ socket_close :: proc(socket: ^Socket) {
 	socket.phase = .Closed
 }
 
-socket_tick :: proc(
-	socket: ^Socket,
-	now: time.Time,
-) -> (
-	Socket_Event,
-	Socket_Error,
-) {
-	if socket == nil ||
-	   socket.phase == .Failed ||
-	   socket.phase == .Closed {
+socket_tick :: proc(socket: ^Socket, now: time.Time) -> (Socket_Event, Socket_Error) {
+	if socket == nil || socket.phase == .Failed || socket.phase == .Closed {
 		return {}, {kind = .Invalid_State}
 	}
 
@@ -378,11 +335,9 @@ socket_tick :: proc(
 	}
 
 	event, err := session_tick(&socket.session, now)
+
 	if err.kind != .None {
-		return {}, socket_fail(
-			socket,
-			{kind = .Session_Failed, session = err},
-		)
+		return {}, socket_fail(socket, {kind = .Session_Failed, session = err})
 	}
 
 	if event.kind == .QR {
@@ -391,56 +346,40 @@ socket_tick :: proc(
 
 	if socket.phase == .Online &&
 	   socket.query_depth == 0 &&
-	   (socket.last_prune == (time.Time{}) ||
-			   time.diff(socket.last_prune, now) > time.Hour) {
+	   (socket.last_prune == (time.Time{}) || time.diff(socket.last_prune, now) > time.Hour) {
 		if e := socket_prune_state(socket, now); e.kind != .None {
 			return {}, e
 		}
-
 	}
 
-	if socket.phase == .Online &&
-	   socket.query_depth == 0 &&
-	   len(socket.deferred_retries) > 0 {
+	if socket.phase == .Online && socket.query_depth == 0 && len(socket.deferred_retries) > 0 {
 		doc := socket.deferred_retries[0]
 		ordered_remove(&socket.deferred_retries, 0)
 		defer binary_document_destroy(&doc)
-		if e := socket_retry_outgoing(socket, doc.root);
-		   e.kind != .None {
+
+		if e := socket_retry_outgoing(socket, doc.root); e.kind != .None {
 			return {}, e
 		}
-
 	}
 
 	return {}, {}
 }
 
-socket_receive :: proc(
-	socket: ^Socket,
-) -> (
-	Socket_Event,
-	Socket_Error,
-) {
-	if socket == nil ||
-	   socket.phase == .Closed ||
-	   socket.phase == .Failed {
+socket_receive :: proc(socket: ^Socket) -> (Socket_Event, Socket_Error) {
+	if socket == nil || socket.phase == .Closed || socket.phase == .Failed {
 		return {}, {kind = .Invalid_State}
 	}
 
-	scoped :=
-		socket.websocket.stream.set_read_deadline != nil &&
-		socket.read_deadline_scopes == 0
+	scoped := socket.websocket.stream.set_read_deadline != nil && socket.read_deadline_scopes == 0
+
 	if scoped {
-		if e := socket_read_deadline(
-			socket,
-			time.time_add(time.now(), 15 * time.Second),
-		); e.kind != .None {
+		if e := socket_read_deadline(socket, time.time_add(time.now(), 15 * time.Second)); e.kind != .None {
 			return {}, e
 		}
-
 	}
 
 	output, failure := socket_receive_inner(socket)
+
 	if scoped && socket.websocket.phase == .Open {
 		if e := socket_read_deadline(socket, {}); e.kind != .None {
 			if output.message != nil {
@@ -449,23 +388,15 @@ socket_receive :: proc(
 
 			return {}, e
 		}
-
 	}
 
 	return output, failure
 }
-socket_receive_inner :: proc(
-	socket: ^Socket,
-) -> (
-	Socket_Event,
-	Socket_Error,
-) {
+socket_receive_inner :: proc(socket: ^Socket) -> (Socket_Event, Socket_Error) {
 	event, err := session_read(&socket.session, time.now())
+
 	if err.kind != .None {
-		return {}, socket_fail(
-			socket,
-			{kind = .Session_Failed, session = err},
-		)
+		return {}, socket_fail(socket, {kind = .Session_Failed, session = err})
 	}
 
 	#partial switch event.kind {
@@ -481,12 +412,10 @@ socket_receive_inner :: proc(
 	case .Node:
 		if socket.provision_stage != .None {
 			id, _ := node_attr(event.node, "id")
-			if event.node.tag == "iq" &&
-			   id ==
-				   cast(string)socket.provision_id[:socket.provision_id_size] {
+
+			if event.node.tag == "iq" && id == cast(string)socket.provision_id[:socket.provision_id_size] {
 				return socket_provision(socket, event.node)
 			}
-
 		}
 
 		process := socket.phase == .Online
@@ -502,8 +431,7 @@ socket_receive_inner :: proc(
 			output, e := socket_process_node(socket, event.node)
 			if e.kind != .None do return output, e
 
-			if control_err := socket_control_node(socket, event.node);
-			   control_err.kind != .None {
+			if control_err := socket_control_node(socket, event.node); control_err.kind != .None {
 				return {}, control_err
 			}
 
@@ -516,63 +444,38 @@ socket_receive_inner :: proc(
 	}
 }
 
-socket_login_provision_start :: proc(
-	socket: ^Socket, event: Session_Event,
-) -> (Socket_Event, Socket_Error) {
+socket_login_provision_start :: proc(socket: ^Socket, event: Session_Event) -> (Socket_Event, Socket_Error) {
 	socket.phase = .Provisioning
-	if lid, found := node_attr(event.node, "lid");
-	   found && device_user_valid(lid, true) {
-		if e := state_store_set(
-			socket.store,
-			.LID_Mapping,
-			"self",
-			transmute([]u8)lid,
-		); e.kind != .None {
-			return {}, socket_fail(
-				socket,
-				{kind = .State_Failed, state = e},
-			)
+
+	if lid, found := node_attr(event.node, "lid"); found && device_user_valid(lid, true) {
+		if e := state_store_set(socket.store, .LID_Mapping, "self", transmute([]u8)lid); e.kind != .None {
+			return {}, socket_fail(socket, {kind = .State_Failed, state = e})
 		}
 
-		if e := state_store_save(
-			socket.store,
-			socket.config.state_path,
-		); e.kind != .None {
-			return {}, socket_fail(
-				socket,
-				{kind = .State_Failed, state = e},
-			)
+		if e := state_store_save(socket.store, socket.config.state_path); e.kind != .None {
+			return {}, socket_fail(socket, {kind = .State_Failed, state = e})
 		}
-
 	}
 
 	id := socket_next_id(socket, socket.provision_id[:])
 	socket.provision_id_size = len(id)
 	buffer: [1024]u8
 	n, e := prekey_count_query_encode(buffer[:], id)
+
 	if e.kind != .None {
-		return {}, socket_fail(
-			socket,
-			{kind = .Prekey_Failed, prekey = e},
-		)
+		return {}, socket_fail(socket, {kind = .Prekey_Failed, prekey = e})
 	}
 
 	socket.provision_stage = .Count
-	if e := socket_provision_write(socket, buffer[:n]);
-	   e.kind != .None {
+
+	if e := socket_provision_write(socket, buffer[:n]); e.kind != .None {
 		return {}, e
 	}
 
 	return {}, {}
 }
 
-socket_provision :: proc(
-	socket: ^Socket,
-	node: Binary_Node,
-) -> (
-	Socket_Event,
-	Socket_Error,
-) {
+socket_provision :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_Event, Socket_Error) {
 	socket.provision_deadline = {}
 	#partial switch socket.provision_stage {
 	case .Count:
@@ -588,52 +491,32 @@ socket_provision :: proc(
 
 socket_provision_count :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_Event, Socket_Error) {
 	buffer: [65536]u8
-	count, err := prekey_count_response(
-		node,
-		cast(string)socket.provision_id[:socket.provision_id_size],
-	)
+	count, err := prekey_count_response(node, cast(string)socket.provision_id[:socket.provision_id_size])
+
 	if err.kind != .None {
-		return {}, socket_fail(
-			socket,
-			{kind = .Prekey_Failed, prekey = err},
-		)
+		return {}, socket_fail(socket, {kind = .Prekey_Failed, prekey = err})
 	}
 
-	if count <= PREKEY_SERVER_MIN_COUNT ||
-	   socket.prekeys.pending_count > 0 {
+	if count <= PREKEY_SERVER_MIN_COUNT || socket.prekeys.pending_count > 0 {
 		id := socket_next_id(socket, socket.provision_id[:])
 		socket.provision_id_size = len(id)
 		upload_err :=
 			socket.prekeys.pending_count > 0 \
 				? prekey_upload_retry(socket.prekeys, id) \
 				: prekey_upload_prepare(socket.prekeys, id)
+
 		if upload_err.kind != .None {
-			return {}, socket_fail(
-				socket,
-				{kind = .Prekey_Failed, prekey = upload_err},
-			)
+			return {}, socket_fail(socket, {kind = .Prekey_Failed, prekey = upload_err})
 		}
 
-		if e := prekey_store_save(
-			socket.config.prekey_path,
-			socket.prekeys,
-		); e.kind != .None {
-			return {}, socket_fail(
-				socket,
-				{kind = .Prekey_Failed, prekey = e},
-			)
+		if e := prekey_store_save(socket.config.prekey_path, socket.prekeys); e.kind != .None {
+			return {}, socket_fail(socket, {kind = .Prekey_Failed, prekey = e})
 		}
 
-		n, e := prekey_upload_encode(
-			buffer[:],
-			socket.prekeys,
-			&socket.auth.credentials,
-		)
+		n, e := prekey_upload_encode(buffer[:], socket.prekeys, &socket.auth.credentials)
+
 		if e.kind != .None {
-			return {}, socket_fail(
-				socket,
-				{kind = .Prekey_Failed, prekey = e},
-			)
+			return {}, socket_fail(socket, {kind = .Prekey_Failed, prekey = e})
 		}
 
 		socket.provision_stage = .Upload
@@ -641,59 +524,44 @@ socket_provision_count :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_Ev
 	}
 
 	if socket.phase == .Online {
-		socket.provision_stage = .None; return {}, {}
+		socket.provision_stage = .None
+		return {}, {}
 	}
 
 	return {}, socket_activate(socket)
 }
 
-socket_provision_upload :: proc(
-	socket: ^Socket, node: Binary_Node,
-) -> (Socket_Event, Socket_Error) {
-	if e := prekey_upload_handle_response(socket.prekeys, node);
-	   e.kind != .None {
-		return {}, socket_fail(
-			socket,
-			{kind = .Prekey_Failed, prekey = e},
-		)
+socket_provision_upload :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_Event, Socket_Error) {
+	if e := prekey_upload_handle_response(socket.prekeys, node); e.kind != .None {
+		return {}, socket_fail(socket, {kind = .Prekey_Failed, prekey = e})
 	}
 
-	if e := prekey_store_save(
-		socket.config.prekey_path,
-		socket.prekeys,
-	); e.kind != .None {
-		return {}, socket_fail(
-			socket,
-			{kind = .Prekey_Failed, prekey = e},
-		)
+	if e := prekey_store_save(socket.config.prekey_path, socket.prekeys); e.kind != .None {
+		return {}, socket_fail(socket, {kind = .Prekey_Failed, prekey = e})
 	}
 
-	if e := socket_cleanup_consumed_prekeys(socket);
-	   e.kind != .None {
+	if e := socket_cleanup_consumed_prekeys(socket); e.kind != .None {
 		return {}, socket_fail(socket, e)
 	}
 
 	if socket.phase == .Online {
-		socket.provision_stage = .None; return {}, {}
+		socket.provision_stage = .None
+		return {}, {}
 	}
 
 	return {}, socket_activate(socket)
 }
 
-socket_provision_active :: proc(
-	socket: ^Socket, node: Binary_Node,
-) -> (Socket_Event, Socket_Error) {
-	if e := device_response_validate(
-		node,
-		cast(string)socket.provision_id[:socket.provision_id_size],
-	); e.kind != .None {
+socket_provision_active :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_Event, Socket_Error) {
+	if e := device_response_validate(node, cast(string)socket.provision_id[:socket.provision_id_size]);
+	   e.kind != .None {
 		return {}, socket_fail(socket, {kind = .Server_Rejected})
 	}
 
 	socket.provision_stage = .None
 	socket.phase = .Online
-	if e := socket_cleanup_consumed_prekeys(socket);
-	   e.kind != .None {
+
+	if e := socket_cleanup_consumed_prekeys(socket); e.kind != .None {
 		return {}, socket_fail(socket, e)
 	}
 
@@ -701,7 +569,6 @@ socket_provision_active :: proc(
 		if e := socket_inbox_restore(socket); e.kind != .None {
 			return {}, socket_fail(socket, e)
 		}
-
 	}
 
 	presence: [512]u8
@@ -710,19 +577,14 @@ socket_provision_active :: proc(
 		{
 			tag = "presence",
 			attrs = []Binary_Node_Attribute {
-				{
-					"name",
-					cast(string)socket.auth.account.name[:socket.auth.account.name_size],
-				},
+				{"name", cast(string)socket.auth.account.name[:socket.auth.account.name_size]},
 				{"type", "available"},
 			},
 		},
 	)
+
 	if e.kind != .None {
-		return {}, socket_fail(
-			socket,
-			{kind = .Binary_Failed, binary = e},
-		)
+		return {}, socket_fail(socket, {kind = .Binary_Failed, binary = e})
 	}
 
 	if e := socket_write(socket, presence[:n]); e.kind != .None {
@@ -753,98 +615,73 @@ socket_activate :: proc(socket: ^Socket) -> Socket_Error {
 			content = []Binary_Node{{tag = "active"}},
 		},
 	)
+
 	if err.kind != .None {
-		return socket_fail(
-			socket,
-			{kind = .Binary_Failed, binary = err},
-		)
+		return socket_fail(socket, {kind = .Binary_Failed, binary = err})
 	}
 
 	socket.provision_stage = .Active
+
 	return socket_provision_write(socket, buffer[:n])
 }
 
-socket_provision_write :: proc(
-	socket: ^Socket,
-	encoded: []u8,
-) -> Socket_Error {
+socket_provision_write :: proc(socket: ^Socket, encoded: []u8) -> Socket_Error {
 	timeout := socket.config.query_timeout
+
 	if timeout == 0 {
 		timeout = 30 * time.Second
 	}
 
 	socket.provision_deadline = time.time_add(time.now(), timeout)
+
 	return socket_write(socket, encoded)
 }
 socket_next_id :: proc(socket: ^Socket, dst: []u8) -> string {
 	socket.sequence += 1
-	return fmt.bprintf(
-		dst,
-		"odin-%d-%d",
-		time.now()._nsec,
-		socket.sequence,
-	)
+
+	return fmt.bprintf(dst, "odin-%d-%d", time.now()._nsec, socket.sequence)
 }
-socket_write :: proc(
-	socket: ^Socket,
-	encoded: []u8,
-) -> Socket_Error {
+socket_write :: proc(socket: ^Socket, encoded: []u8) -> Socket_Error {
 	deadline_set := false
+
 	if socket.websocket.stream.set_write_deadline != nil {
 		timeout := socket.config.query_timeout
 		if timeout == 0 do timeout = 30 * time.Second
 
-		if e := socket_write_deadline(
-			socket,
-			time.time_add(time.now(), timeout),
-		); e.kind != .None {
+		if e := socket_write_deadline(socket, time.time_add(time.now(), timeout)); e.kind != .None {
 			return e
 		}
 
 		deadline_set = true
 	}
 
-	if err := client_write(&socket.client, encoded);
-	   err.kind != .None {
-		return socket_fail(
-			socket,
-			{
-				kind = .Session_Failed,
-				session = {kind = .Client_Failed, client = err},
-			},
-		)
+	if err := client_write(&socket.client, encoded); err.kind != .None {
+		return socket_fail(socket, {kind = .Session_Failed, session = {kind = .Client_Failed, client = err}})
 	}
 
 	if deadline_set {
 		if e := socket_write_deadline(socket, {}); e.kind != .None {
 			return e
 		}
-
 	}
 
 	return {}
 }
-socket_fail :: proc(
-	socket: ^Socket,
-	err: Socket_Error,
-) -> Socket_Error {
+socket_fail :: proc(socket: ^Socket, err: Socket_Error) -> Socket_Error {
 	socket.last_error = err
+
 	if socket.websocket.phase == .Open {
 		socket.websocket.phase = .Failed
 	}
 
 	socket_close(socket)
 	socket.phase = .Failed
+
 	return err
 }
 
 // Queued events retain their owned storage while synchronous IQ queries run.
-socket_read :: proc(
-	socket: ^Socket,
-) -> (
-	Socket_Event,
-	Socket_Error,
-) {
+socket_read :: proc(socket: ^Socket) -> (Socket_Event, Socket_Error) {
 	if socket != nil && len(socket.queue) > 0 {
 		message := socket.queue[0]
 		ordered_remove(&socket.queue, 0)
@@ -854,47 +691,36 @@ socket_read :: proc(
 	return socket_receive(socket)
 }
 
-socket_control_node :: proc(
-	socket: ^Socket,
-	node: Binary_Node,
-) -> Socket_Error {
+socket_control_node :: proc(socket: ^Socket, node: Binary_Node) -> Socket_Error {
 	if node.tag == "ib" {
-		if _, found := pairing_node_child(node, "offline_preview");
-		   found {
+		if _, found := pairing_node_child(node, "offline_preview"); found {
 			buffer: [512]u8
 			n, e := binary_node_encode(
 				buffer[:],
 				{
 					tag = "ib",
 					content = []Binary_Node {
-						{
-							tag = "offline_batch",
-							attrs = []Binary_Node_Attribute {
-								{"count", "100"},
-							},
-						},
+						{tag = "offline_batch", attrs = []Binary_Node_Attribute{{"count", "100"}}},
 					},
 				},
 			)
+
 			if e.kind != .None {
 				return {kind = .Binary_Failed, binary = e}
 			}
 
 			return socket_write(socket, buffer[:n])
 		}
-
 	}
 
-	if node.tag != "notification" ||
-	   socket.phase != .Online ||
-	   socket.provision_stage != .None {
+	if node.tag != "notification" || socket.phase != .Online || socket.provision_stage != .None {
 		return {}
 	}
 
 	kind, _ := node_attr(node, "type")
 	from, _ := node_attr(node, "from")
-	if kind != "encrypt" ||
-	   (from != "@s.whatsapp.net" && from != "s.whatsapp.net") {
+
+	if kind != "encrypt" || (from != "@s.whatsapp.net" && from != "s.whatsapp.net") {
 		return {}
 	}
 
@@ -909,24 +735,20 @@ socket_control_node :: proc(
 	socket.provision_id_size = len(id)
 	buffer: [1024]u8
 	size, e := prekey_count_query_encode(buffer[:], id)
+
 	if e.kind != .None {
 		return {kind = .Prekey_Failed, prekey = e}
 	}
 
 	socket.provision_stage = .Count
+
 	return socket_provision_write(socket, buffer[:size])
 }
 
 // Polls the native connection without consuming an incomplete TLS/WS record.
 // This keeps timers on the same thread as I/O. Once a peer starts a frame, the
 // bounded read deadline prevents a partial frame from stalling indefinitely.
-socket_poll :: proc(
-	socket: ^Socket,
-	timeout: time.Duration = 250 * time.Millisecond,
-) -> (
-	bool,
-	Socket_Error,
-) {
+socket_poll :: proc(socket: ^Socket, timeout: time.Duration = 250 * time.Millisecond) -> (bool, Socket_Error) {
 	if socket == nil do return false, {kind = .Invalid_State}
 
 	#partial switch socket.phase {
@@ -943,21 +765,14 @@ socket_poll :: proc(
 	return socket_network_poll(socket, timeout)
 }
 
-socket_network_poll :: proc(
-	socket: ^Socket,
-	timeout: time.Duration,
-) -> (
-	bool,
-	Socket_Error,
-) {
+socket_network_poll :: proc(socket: ^Socket, timeout: time.Duration) -> (bool, Socket_Error) {
 	w := &socket.websocket
 	t := &socket.client.frames
 	if t.ready ||
 	   t.ws_at < t.ws_size ||
 	   w.message_ready ||
 	   w.prefetched_at < w.prefetched_size ||
-	   w.tls_client.application.inbound_at <
-		   w.tls_client.application.inbound_size {
+	   w.tls_client.application.inbound_at < w.tls_client.application.inbound_size {
 		return true, {}
 	}
 
@@ -966,11 +781,9 @@ socket_network_poll :: proc(
 			fd     = cast(posix.FD)w.tls_client.tcp.socket,
 			events = {.IN},
 		}
-		result := posix.poll(
-			&fd,
-			1,
-			cast(i32)(timeout / time.Millisecond),
-		)
+
+		result := posix.poll(&fd, 1, cast(i32)(timeout / time.Millisecond))
+
 		if result < 0 {
 			return false, socket_fail(socket, {kind = .Poll_Failed})
 		}
@@ -983,13 +796,7 @@ socket_network_poll :: proc(
 
 // Owns the returned document. Incoming messages encountered while waiting are
 // processed normally and queued for socket_read. No nested receive threads.
-socket_query :: proc(
-	socket: ^Socket,
-	query: Binary_Node,
-) -> (
-	Binary_Document,
-	Socket_Error,
-) {
+socket_query :: proc(socket: ^Socket, query: Binary_Node) -> (Binary_Document, Socket_Error) {
 	if socket == nil || socket.phase != .Online {
 		return {}, {kind = .Invalid_State}
 	}
@@ -1000,12 +807,17 @@ socket_query :: proc(
 
 	socket.query_depth += 1
 	socket.read_deadline_scopes += 1
-	defer {socket.query_depth -= 1; socket.read_deadline_scopes -= 1}
+	defer {
+		socket.query_depth -= 1
+		socket.read_deadline_scopes -= 1
+	}
+
 	attrs: [17]Binary_Node_Attribute
 	copy(attrs[:], query.attrs)
 	count := len(query.attrs)
 	buffer_id: [128]u8
 	id, has_id := node_attr(query, "id")
+
 	if has_id {
 		if !device_request_valid(id) {
 			return {}, {kind = .Invalid_Config}
@@ -1021,27 +833,27 @@ socket_query :: proc(
 
 	request := query
 	request.attrs = attrs[:count]
-	if send_error := socket_query_send(socket, request);
-	   send_error.kind != .None do return {}, send_error
+	if send_error := socket_query_send(socket, request); send_error.kind != .None do return {}, send_error
+
 	return socket_query_response_receive(socket, id)
 }
 
 socket_query_send :: proc(socket: ^Socket, request: Binary_Node) -> Socket_Error {
 	n, measured := binary_node_encode(nil, request)
+
 	if measured.kind != .Destination_Undersized {
 		return {kind = .Binary_Failed, binary = measured}
 	}
 
 	encoded, alloc_err := make([]u8, n)
+
 	if alloc_err != nil {
-		return {
-			kind = .Allocation_Failed,
-			allocation = alloc_err,
-		}
+		return {kind = .Allocation_Failed, allocation = alloc_err}
 	}
 
 	defer delete(encoded)
 	_, encode_err := binary_node_encode(encoded, request)
+
 	if encode_err.kind != .None {
 		return {kind = .Binary_Failed, binary = encode_err}
 	}
@@ -1059,18 +871,9 @@ socket_query_message_enqueue :: proc(socket: ^Socket, event: Socket_Event) -> So
 		return socket_fail(socket, {kind = .Queue_Full})
 	}
 
-	if _, allocation_err := append(
-		&socket.queue,
-		event.message,
-	); allocation_err != nil {
+	if _, allocation_err := append(&socket.queue, event.message); allocation_err != nil {
 		socket_message_destroy(event.message)
-		return socket_fail(
-			socket,
-			{
-				kind = .Allocation_Failed,
-				allocation = allocation_err,
-			},
-		)
+		return socket_fail(socket, {kind = .Allocation_Failed, allocation = allocation_err})
 	}
 
 	return {}
@@ -1078,25 +881,26 @@ socket_query_message_enqueue :: proc(socket: ^Socket, event: Socket_Event) -> So
 
 socket_query_response_copy :: proc(node: Binary_Node) -> (Binary_Document, Socket_Error) {
 	size, response_measure := binary_node_encode(nil, node)
+
 	if response_measure.kind != .Destination_Undersized {
 		return {}, {kind = .Binary_Failed, binary = response_measure}
 	}
 
 	storage, allocation_err := make([]u8, size)
+
 	if allocation_err != nil {
-		return {}, {
-			kind = .Allocation_Failed,
-			allocation = allocation_err,
-		}
+		return {}, {kind = .Allocation_Failed, allocation = allocation_err}
 	}
 
 	defer delete(storage)
 	_, e := binary_node_encode(storage, node)
+
 	if e.kind != .None {
 		return {}, {kind = .Binary_Failed, binary = e}
 	}
 
 	document, decoded := binary_node_decode(storage)
+
 	if decoded.kind != .None {
 		return {}, {kind = .Binary_Failed, binary = decoded}
 	}
@@ -1104,33 +908,24 @@ socket_query_response_copy :: proc(node: Binary_Node) -> (Binary_Document, Socke
 	return document, {}
 }
 
-socket_query_response_receive :: proc(
-	socket: ^Socket, id: string,
-) -> (Binary_Document, Socket_Error) {
-	deadline := time.time_add(
-		time.now(),
-		socket.config.query_timeout,
-	)
+socket_query_response_receive :: proc(socket: ^Socket, id: string) -> (Binary_Document, Socket_Error) {
+	deadline := time.time_add(time.now(), socket.config.query_timeout)
+
 	for {
 		if time.now()._nsec >= deadline._nsec {
 			return {}, socket_fail(socket, {kind = .Query_Timeout})
 		}
 
-		if _, err := socket_tick(socket, time.now());
-		   err.kind != .None {
+		if _, err := socket_tick(socket, time.now()); err.kind != .None {
 			return {}, err
 		}
 
-		ready, poll_err := socket_network_poll(
-			socket,
-			100 * time.Millisecond,
-		)
+		ready, poll_err := socket_network_poll(socket, 100 * time.Millisecond)
 		if poll_err.kind != .None do return {}, poll_err
 
 		if !ready do continue
 
-		if e := socket_read_deadline(socket, deadline);
-		   e.kind != .None {
+		if e := socket_read_deadline(socket, deadline); e.kind != .None {
 			return {}, e
 		}
 
@@ -1146,8 +941,7 @@ socket_query_response_receive :: proc(
 		}
 
 		if event.kind == .Message {
-			if enqueue_error := socket_query_message_enqueue(socket, event);
-			   enqueue_error.kind != .None do return {}, enqueue_error
+			if enqueue_error := socket_query_message_enqueue(socket, event); enqueue_error.kind != .None do return {}, enqueue_error
 		}
 
 		if event.kind == .Restart_Required {
@@ -1165,12 +959,8 @@ socket_query_response_receive :: proc(
 	}
 }
 
-socket_read_deadline :: proc(
-	socket: ^Socket,
-	deadline: time.Time,
-) -> Socket_Error {
-	if deadline == (time.Time{}) &&
-	   (socket.websocket.phase == .Closed || socket.websocket.phase == .Failed) {
+socket_read_deadline :: proc(socket: ^Socket, deadline: time.Time) -> Socket_Error {
+	if deadline == (time.Time{}) && (socket.websocket.phase == .Closed || socket.websocket.phase == .Failed) {
 		return {}
 	}
 
@@ -1178,36 +968,20 @@ socket_read_deadline :: proc(
 		return {}
 	}
 
-	if e := socket.websocket.stream.set_read_deadline(
-		socket.websocket.stream.data,
-		deadline,
-	); e.kind != .None {
-		return socket_fail(
-			socket,
-			{kind = .Deadline_Failed, stream = e},
-		)
+	if e := socket.websocket.stream.set_read_deadline(socket.websocket.stream.data, deadline); e.kind != .None {
+		return socket_fail(socket, {kind = .Deadline_Failed, stream = e})
 	}
 
 	return {}
 }
-socket_write_deadline :: proc(
-	socket: ^Socket,
-	deadline: time.Time,
-) -> Socket_Error {
+socket_write_deadline :: proc(socket: ^Socket, deadline: time.Time) -> Socket_Error {
 	if socket.websocket.stream.set_write_deadline == nil {
 		return {}
 	}
 
-	if e := socket.websocket.stream.set_write_deadline(
-		socket.websocket.stream.data,
-		deadline,
-	); e.kind != .None {
-		return socket_fail(
-			socket,
-			{kind = .Deadline_Failed, stream = e},
-		)
+	if e := socket.websocket.stream.set_write_deadline(socket.websocket.stream.data, deadline); e.kind != .None {
+		return socket_fail(socket, {kind = .Deadline_Failed, stream = e})
 	}
 
 	return {}
 }
-
