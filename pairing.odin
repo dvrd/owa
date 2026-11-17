@@ -6,7 +6,6 @@ import "core:crypto/hmac"
 import "core:encoding/base64"
 import "core:fmt"
 import "core:mem"
-import "core:slice"
 import "core:strconv"
 import "core:strings"
 import "core:time"
@@ -689,15 +688,11 @@ session_checkpoint :: proc(session: ^Session) -> Session_Error {
 session_receiving :: proc(session: ^Session) -> bool {
 	if session == nil do return false
 
-	return (slice.contains(
-				[]type_of(session.phase) {
-					.Awaiting_Pairing,
-					.Authenticating,
-					.Paired,
-					.Login_Accepted,
-				},
-				session.phase,
-			))
+	#partial switch session.phase {
+	case .Awaiting_Pairing, .Authenticating, .Paired, .Login_Accepted:
+		return true
+	}
+	return false
 }
 
 session_state_error :: proc(session: ^Session) -> Session_Error {
@@ -883,10 +878,7 @@ pairing_jid_decode :: proc(
 	if at <= 0 do return "", 0, {kind = .Invalid_JID}
 
 	domain := jid[at + 1:]
-	if !slice.contains(
-		[]string{"s.whatsapp.net", "c.us", "lid"},
-		domain,
-	) {
+	if domain != "s.whatsapp.net" && domain != "c.us" && domain != "lid" {
 		return "", 0, {kind = .Invalid_JID}
 	}
 
@@ -898,7 +890,7 @@ pairing_jid_decode :: proc(
 		}
 
 		for c in local[colon + 1:] {
-			if c < '0' || c > '9' {
+			if !is_digit(c) {
 				return "", 0, {kind = .Invalid_JID}
 			}
 
@@ -915,7 +907,7 @@ pairing_jid_decode :: proc(
 	if underscore := strings.index_byte(local, '_');
 	   underscore >= 0 {
 		for c in local[underscore + 1:] {
-			if c < '0' || c > '9' {
+			if !is_digit(c) {
 				return "", 0, {kind = .Invalid_JID}
 			}
 
@@ -932,7 +924,7 @@ pairing_jid_decode :: proc(
 	}
 
 	for c in local {
-		if c < '0' || c > '9' {
+		if !is_digit(c) {
 			return "", 0, {kind = .Invalid_JID}
 		}
 
@@ -1960,7 +1952,7 @@ qr_functions :: proc(
 					functions,
 					center[0] + dx,
 					center[1] + dy,
-					!slice.contains([]type_of(dist){2, 4}, dist),
+					dist != 2 && dist != 4,
 				)
 			}
 		}
@@ -2296,9 +2288,9 @@ revision_digits :: proc(
 	i += 1
 	for i < len(src) && revision_space(src[i]) do i += 1
 	start := i
-	for i < len(src) && i - start < 10 && src[i] >= '0' && src[i] <= '9' {i += 1}
+	for i < len(src) && i - start < 10 && is_digit(src[i]) {i += 1}
 	if i == start do return 0, false, true
-	if i < len(src) && src[i] >= '0' && src[i] <= '9' do return 0, false, true
+	if i < len(src) && is_digit(src[i]) do return 0, false, true
 	end := i
 	for i < len(src) && revision_space(src[i]) do i += 1
 	if i >= len(src) || (src[i] != ',' && src[i] != '}') {
@@ -2337,7 +2329,7 @@ web_version_parse :: proc(
 
 		if end == at do return {}, .Invalid_Version
 
-		for c in text[at:end] do if c < '0' || c > '9' {
+		for c in text[at:end] do if !is_digit(c) {
 			return {}, .Invalid_Version
 		}
 

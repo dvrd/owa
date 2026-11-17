@@ -11,7 +11,6 @@ import "core:crypto/sha2"
 import "core:encoding/base64"
 import "core:encoding/json"
 import "core:mem"
-import "core:slice"
 import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
@@ -422,10 +421,7 @@ media_metadata_from_message :: proc(
 	metadata: Media_Metadata,
 	err: Media_Error,
 ) {
-	if !slice.contains(
-		[]type_of(message.kind){.Image, .Document},
-		message.kind,
-	) {
+	if message.kind != .Image && message.kind != .Document {
 		return {}, {kind = .Invalid_Kind}
 	}
 
@@ -481,7 +477,8 @@ media_download_url :: proc(
 		for c in message.direct_path {
 			if c <= 32 ||
 			   c >= 127 ||
-			   slice.contains([]type_of(c){'#', '\\'}, c) {
+			   c == '#' ||
+			   c == '\\' {
 				return "", {kind = .Invalid_Download_Path}
 			}
 
@@ -511,10 +508,7 @@ media_message_encode :: proc(
 	int,
 	Media_Error,
 ) {
-	if !slice.contains(
-		[]type_of(message.kind){.Image, .Document},
-		message.kind,
-	) {
+	if message.kind != .Image && message.kind != .Document {
 		return 0, {kind = .Invalid_Kind}
 	}
 
@@ -548,7 +542,7 @@ media_message_decode :: proc(
 	payload, number, extract_err := media_extract_content(src, 0)
 	if extract_err.kind != .None do return {}, extract_err
 
-	if !slice.contains([]type_of(number){3, 7}, number) {
+	if number != 3 && number != 7 {
 		return {}, {}
 	}
 
@@ -582,10 +576,9 @@ media_message_decode :: proc(
 
 		seen |= bit
 		integer :=
-			slice.contains(
-				[]type_of(field.number){5, 6, timestamp_field},
-				field.number,
-			) ||
+			field.number == 5 ||
+			field.number == 6 ||
+			field.number == timestamp_field ||
 			message.kind == .Image && field.number == 7
 		if integer {
 			if integer_error := media_message_integer_decode(&message, field, timestamp_field);
@@ -602,36 +595,17 @@ media_message_decode :: proc(
 media_message_field_known :: proc(
 	message: ^Media_Message, field: Protobuf_Field, key_field, path_field, timestamp_field: u32,
 ) -> bool {
-	known := slice.contains(
-		[]type_of(field.number) {
-			1,
-			2,
-			3,
-			4,
-			5,
-			6,
-			9,
-			key_field,
-			path_field,
-			timestamp_field,
-			16,
-			17,
-		},
-		field.number,
-	)
-	if message.kind == .Image && field.number == 7 {
-		known = true
+	switch field.number {
+	case 1 ..= 6, 9, 16, 17:
+		return true
+	case 7:
+		if message.kind == .Image do return true
+	case 8, 20:
+		if message.kind == .Document do return true
 	}
-
-	if message.kind == .Document &&
-	   (slice.contains(
-				   []type_of(field.number){8, 20},
-				   field.number,
-			   )) {
-		known = true
-	}
-
-	return known
+	return field.number == key_field ||
+		field.number == path_field ||
+		field.number == timestamp_field
 }
 
 media_message_integer_decode :: proc(
@@ -678,10 +652,7 @@ media_message_bytes_decode :: proc(
 		return {kind = .Invalid_Protobuf}
 	}
 
-	if slice.contains(
-		[]type_of(field.number){4, 9, key_field},
-		field.number,
-	) {
+	if field.number == 4 || field.number == 9 || field.number == key_field {
 		if len(field.data) != 32 {
 			return {kind = .Invalid_Metadata}
 		}
@@ -1311,13 +1282,11 @@ media_extract_content :: proc(
 
 			seen = true
 			outer_number = field.number
-			if slice.contains(
-				[]type_of(field.number){37, 40, 53, 55, 59},
-				field.number,
-			) {
+			switch field.number {
+			case 37, 40, 53, 55, 59:
 				payload, number, err = media_extract_wrapper(field.data, depth)
 				if err.kind != .None do return nil, 0, err
-			} else {
+			case:
 				payload, number = field.data, field.number
 			}
 
@@ -1631,10 +1600,7 @@ media_connection_node_decode :: proc(
 	if node.tag != "iq" ||
 	   id != request_id ||
 	   present &&
-		   !slice.contains(
-				   []string{"s.whatsapp.net", "@s.whatsapp.net"},
-				   from,
-			   ) {
+		   (from != "s.whatsapp.net" && from != "@s.whatsapp.net") {
 		return nil, {kind = .Unexpected_Response}
 	}
 
@@ -1760,9 +1726,9 @@ media_upload_url :: proc(
 media_upload_auth_encode :: proc(scratch: []u8, at: ^int, auth: string) -> Media_Error {
 	hex_digits := "0123456789ABCDEF"
 	for c in transmute([]u8)auth {
-		unescaped := false
+		unescaped := is_alphanumeric(c)
 		switch c {
-		case 'a'..='z', 'A'..='Z', '0'..='9', '-', '_', '.', '!', '~', '*', '\'', '(', ')':
+		case '-', '_', '.', '!', '~', '*', '\'', '(', ')':
 			unescaped = true
 		}
 		required := 3; if unescaped do required = 1
@@ -1865,7 +1831,7 @@ media_upload_json_depth_validate :: proc(src: []u8) -> Media_Error {
 			quoted = true; continue
 		}
 
-		if slice.contains([]type_of(c){'{', '['}, c) {
+		if c == '{' || c == '[' {
 			depth += 1
 			if depth > 16 {
 				return {kind = .Invalid_Upload_Response}
@@ -1873,7 +1839,7 @@ media_upload_json_depth_validate :: proc(src: []u8) -> Media_Error {
 
 		}
 
-		if slice.contains([]type_of(c){'}', ']'}, c) {
+		if c == '}' || c == ']' {
 			depth -= 1
 			if depth < 0 {
 				return {kind = .Invalid_Upload_Response}
@@ -2132,11 +2098,7 @@ media_hostname_valid :: proc(host: string) -> bool {
 			continue
 		}
 
-		switch c {
-		case 'a'..='z', 'A'..='Z', '0'..='9', '-':
-		case:
-			return false
-		}
+		if !is_alphanumeric(c) && c != '-' do return false
 
 		label += 1
 	}
@@ -2365,7 +2327,7 @@ media_retry_event_route_validate :: proc(
 	participant, _ := node_attr(rmr^, "participant")
 	if jid != expected.remote_jid ||
 	   participant != expected.participant ||
-	   (!slice.contains([]string{"true", "false"}, from_me)) ||
+	   (from_me != "true" && from_me != "false") ||
 	   (from_me == "true") != expected.from_me {
 		return 0, {kind = .Unexpected_Response}
 	}
@@ -3088,15 +3050,9 @@ socket_media_send_validate :: proc(
 	}
 
 	if kind == .Image {
-		if !slice.contains(
-			[]string {
-				"image/jpeg",
-				"image/png",
-				"image/webp",
-				"image/gif",
-			},
-			mime_type,
-		) {
+		switch mime_type {
+		case "image/jpeg", "image/png", "image/webp", "image/gif":
+		case:
 			return {kind = .Invalid_Config}
 		}
 
@@ -3263,10 +3219,7 @@ socket_download_media :: proc(
 	if download_err.kind == .None do return n, {}
 
 	if download_err.kind != .HTTP_Status ||
-	   (!slice.contains(
-				   []type_of(download_err.status){404, 410},
-				   download_err.status,
-			   )) {
+	   (download_err.status != 404 && download_err.status != 410) {
 		return n, {kind = .Media_Failed, media = download_err}
 	}
 

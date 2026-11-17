@@ -4,7 +4,6 @@ package whatsapp
 import "core:bytes"
 import "core:fmt"
 import "core:mem"
-import "core:slice"
 import "core:sort"
 import "core:strconv"
 import "core:strings"
@@ -146,7 +145,7 @@ binary_node_decode :: proc(
 
 	if len(src) < 1 do return {}, {kind = .Truncated}
 
-	if !slice.contains([]type_of(src[0]){0, 2}, src[0]) {
+	if src[0] != 0 && src[0] != 2 {
 		return {}, {kind = .Unsupported_Flags}
 	}
 
@@ -539,12 +538,9 @@ binary_write_packed_string :: proc(writer: ^Binary_Writer, value: string) -> boo
 	if len(value) > 0 && len(value) <= BINARY_PACKED_MAX {
 		nibble, hex := true, true
 		for c in value {
-			switch c {
-			case '0'..='9':
-			case '-', '.': hex = false
-			case 'A'..='F': nibble = false
-			case: nibble, hex = false, false
-			}
+			if !is_digit(c) && c != '-' && c != '.' do nibble = false
+
+			if !is_digit(c) && (c < 'A' || c > 'F') do hex = false
 		}
 		if nibble do packed_type = .NIBBLE_8
 
@@ -622,7 +618,7 @@ binary_write_jid :: proc(writer: ^Binary_Writer, value: string, at, depth: int) 
 }
 
 binary_pack_char :: proc(c: u8) -> u8 {
-	if c >= '0' && c <= '9' do return c - '0'
+	if is_digit(c) do return c - '0'
 
 	if c == '-' do return 10
 
@@ -979,7 +975,7 @@ binary_read_device_jid :: proc(reader: ^Binary_Reader, depth: int) -> string {
 		depth + 1,
 	)
 	server := "lid"
-	if slice.contains([]type_of(domain){0, 128}, domain) {
+	if domain == 0 || domain == 128 {
 		server = "s.whatsapp.net"
 	}
 

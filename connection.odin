@@ -4,7 +4,6 @@ import network_client "../surf"
 import "core:crypto"
 import "core:crypto/x25519"
 import "core:mem"
-import "core:slice"
 import "core:time"
 import "core:bytes"
 import grp "core:crypto/_edwards25519"
@@ -215,10 +214,7 @@ client_handshake :: proc(
 
 	defer {
 		if deadlines_set &&
-		   !slice.contains(
-				   []type_of(client.phase){.Failed, .Closed},
-				   client.phase,
-			   ) &&
+		   (client.phase != .Failed && client.phase != .Closed) &&
 		   client.websocket.phase == .Open {
 			network_client.websocket_set_deadline(client.websocket, {})
 		}

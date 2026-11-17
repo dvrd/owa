@@ -9,7 +9,6 @@ import "core:io"
 import "core:mem"
 import "core:os"
 import "core:path/filepath"
-import "core:slice"
 
 MAX_STATE_RECORDS :: 65536
 MAX_STATE_RECORD_SIZE :: 1 << 20
@@ -516,10 +515,7 @@ state_store_load :: proc(
 	for used < len(buffer) {
 		n, read_err := os.read(file, buffer[used:])
 		used += n
-		if !slice.contains(
-			[]type_of(read_err){nil, io.Error.EOF},
-			read_err,
-		) {
+		if read_err != nil && read_err != io.Error.EOF {
 			return {kind = .Read_Failed, io = read_err}
 		}
 

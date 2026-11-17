@@ -4,7 +4,6 @@ package whatsapp
 import "core:bytes"
 import "core:crypto"
 import "core:fmt"
-import "core:slice"
 import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
@@ -223,10 +222,7 @@ socket_group_metadata_decode :: proc(
 		id,
 		nil,
 	)
-	if !slice.contains(
-		[]type_of(measured.kind){.None, .Destination_Undersized},
-		measured.kind,
-	) {
+	if measured.kind != .None && measured.kind != .Destination_Undersized {
 		return {kind = .Protocol_Error}
 	}
 
@@ -1237,10 +1233,7 @@ socket_group_devices_batch :: proc(
 		id,
 		nil,
 	)
-	if !slice.contains(
-		[]type_of(measured.kind){.None, .Destination_Undersized},
-		measured.kind,
-	) {
+	if measured.kind != .None && measured.kind != .Destination_Undersized {
 		return {kind = .Device_Failed, device = measured}
 	}
 

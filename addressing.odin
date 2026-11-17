@@ -1,7 +1,6 @@
 package whatsapp
 
 import "core:fmt"
-import "core:slice"
 import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
@@ -570,11 +569,7 @@ device_response_validate :: proc(
 	from, has_from := pairing_node_attr(node, "from")
 	if node.tag != "iq" ||
 	   id != request_id ||
-	   (has_from &&
-			   !slice.contains(
-					   []string{"s.whatsapp.net", "@s.whatsapp.net"},
-					   from,
-				   )) {
+	   has_from && from != "s.whatsapp.net" && from != "@s.whatsapp.net" {
 		return {kind = .Unexpected_Response}
 	}
 
@@ -859,10 +854,7 @@ group_metadata_response_group :: proc(
 
 	group_id, _ := pairing_node_attr(group^, "id")
 	bare := expected_jid[:len(expected_jid) - len("@g.us")]
-	if !slice.contains(
-		[]type_of(group_id){expected_jid, bare},
-		group_id,
-	) {
+	if group_id != expected_jid && group_id != bare {
 		return nil, {kind = .Unexpected_Response}
 	}
 
@@ -905,12 +897,12 @@ group_jid_valid :: proc(jid: string) -> bool {
 	}
 
 	local := jid[:len(jid) - len("@g.us")]
-	if local[0] == '-' || local[len(local) - 1] == '-' {
+	if !is_digit(local[0]) || !is_digit(local[len(local) - 1]) {
 		return false
 	}
 
 	for c in local {
-		if (c < '0' || c > '9') && c != '-' do return false
+		if !is_digit(c) && c != '-' do return false
 	}
 	return true
 }
@@ -1413,18 +1405,12 @@ socket_lid_record_name :: proc(
 			jid = name[:at]; suffix = name[at:]
 		}
 
-	} else if slice.contains(
-		[]type_of(kind){.Sender_Key, .Sender_Key_Membership},
-		kind,
-	) {
+	} else if kind == .Sender_Key || kind == .Sender_Key_Membership {
 		at := strings.index_byte(name, '|')
 		if at < 0 do return "", {kind = .Protocol_Error}
 
 		prefix = name[:at + 1]; jid = name[at + 1:]
-	} else if slice.contains(
-		[]type_of(kind){.Processed_Message, .Inbox_Message},
-		kind,
-	) {
+	} else if kind == .Processed_Message || kind == .Inbox_Message {
 		first := strings.index_byte(name, '|')
 		if first < 0 do return strings.clone(name), {}
 

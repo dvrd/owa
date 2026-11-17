@@ -8,7 +8,6 @@ import "core:io"
 import "core:mem"
 import "core:os"
 import "core:path/filepath"
-import "core:slice"
 import "core:strconv"
 
 // Device credentials and authentication persistence.
@@ -583,7 +582,7 @@ auth_state_load :: proc(
 	for used < len(buffer) {
 		count, err := os.read(file, buffer[used:])
 		used += count
-		if !slice.contains([]type_of(err){nil, io.Error.EOF}, err) {
+		if err != nil && err != io.Error.EOF {
 			return {kind = .Read_Failed, io = err}
 		}
 
@@ -1091,7 +1090,7 @@ prekey_count_response :: proc(
 	}
 
 	for c in value {
-		if c < '0' || c > '9' {
+		if !is_digit(c) {
 			return 0, {kind = .Invalid_Response}
 		}
 
@@ -1356,7 +1355,7 @@ prekey_store_load :: proc(
 	for used < len(buffer) {
 		count, err := os.read(file, buffer[used:])
 		used += count
-		if !slice.contains([]type_of(err){nil, io.Error.EOF}, err) {
+		if err != nil && err != io.Error.EOF {
 			return {kind = .Read_Failed, io = err}
 		}
 
@@ -1583,10 +1582,7 @@ prekey_response_validate :: proc(
 
 	from, has_from := node_attr(response, "from")
 	if has_from &&
-	   !slice.contains(
-			   []type_of(from){"s.whatsapp.net", PREKEY_SERVER_JID},
-			   from,
-		   ) {
+	   (from != "s.whatsapp.net" && from != PREKEY_SERVER_JID) {
 		return {kind = .Response_Mismatch}
 	}
 

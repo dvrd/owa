@@ -2,7 +2,6 @@ package whatsapp
 
 import "core:bytes"
 import "core:crypto/legacy/md5"
-import "core:slice"
 import "core:unicode/utf8"
 
 // Protobuf fields, login payloads and pairing codecs.
@@ -198,10 +197,7 @@ cert_chain_decode :: proc(
 		field, field_err := protobuf_field_read(src, &at)
 		if field_err != .None do return {}, field_err
 
-		if !slice.contains(
-			[]type_of(field.number){1, 2},
-			field.number,
-		) {
+		if field.number != 1 && field.number != 2 {
 			continue
 		}
 
@@ -342,10 +338,7 @@ protobuf_handshake_field_decode :: proc(
 	message: ^Handshake_Message, field: Protobuf_Field,
 ) -> Protobuf_Error {
 	if message.kind == .Client_Finish {
-		if !slice.contains(
-			[]type_of(field.number){1, 2},
-			field.number,
-		) {
+		if field.number != 1 && field.number != 2 {
 			return .None
 		}
 
@@ -415,10 +408,7 @@ protobuf_certificate_decode :: proc(
 		field, field_err := protobuf_field_read(src, &at)
 		if field_err != .None do return {}, field_err
 
-		if !slice.contains(
-			[]type_of(field.number){1, 2},
-			field.number,
-		) {
+		if field.number != 1 && field.number != 2 {
 			continue
 		}
 
@@ -683,7 +673,7 @@ login_payload_encode :: proc(
 
 	username: u64
 	for c in user {
-		if c < '0' || c > '9' do return 0, .Invalid_Username
+		if !is_digit(c) do return 0, .Invalid_Username
 
 		digit := cast(u64)(c - '0')
 		if username > (0xffff_ffff_ffff_ffff - digit) / 10 {
@@ -846,11 +836,7 @@ payload_config_validate :: proc(
 	}
 
 	for c in config.country_code {
-		switch c {
-		case 'a'..='z', 'A'..='Z':
-		case:
-			return .Invalid_Country_Code
-		}
+		if !is_alpha(c) do return .Invalid_Country_Code
 	}
 	return .None
 }
@@ -1387,10 +1373,7 @@ message_extended_text_decode :: proc(
 			return .Invalid_Protobuf
 		}
 
-		if !slice.contains(
-			[]type_of(f.number){1, 17},
-			f.number,
-		) {
+		if f.number != 1 && f.number != 17 {
 			continue
 		}
 
@@ -1493,10 +1476,7 @@ message_sender_key_distribution_decode :: proc(
 			return .Invalid_Protobuf
 		}
 
-		if !slice.contains(
-			[]type_of(f.number){1, 2},
-			f.number,
-		) {
+		if f.number != 1 && f.number != 2 {
 			continue
 		}
 
@@ -1624,10 +1604,7 @@ text_message_encode :: proc(
 }
 
 text_message_encode_validate :: proc(m: Text_Message) -> Message_Error {
-	if !slice.contains(
-		[]type_of(m.kind){.None, .Conversation, .Extended_Text},
-		m.kind,
-	) {
+	if m.kind != .None && m.kind != .Conversation && m.kind != .Extended_Text {
 		return .Conflicting_Content
 	}
 

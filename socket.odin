@@ -5,7 +5,6 @@ import network_client "../surf"
 import "core:crypto"
 import "core:fmt"
 import "core:mem"
-import "core:slice"
 import "core:strconv"
 import "core:time"
 import "core:sys/posix"
@@ -365,10 +364,8 @@ socket_tick :: proc(
 	Socket_Error,
 ) {
 	if socket == nil ||
-	   slice.contains(
-		   []type_of(socket.phase){.Failed, .Closed},
-		   socket.phase,
-	   ) {
+	   socket.phase == .Failed ||
+	   socket.phase == .Closed {
 		return {}, {kind = .Invalid_State}
 	}
 
@@ -425,10 +422,8 @@ socket_receive :: proc(
 	Socket_Error,
 ) {
 	if socket == nil ||
-	   slice.contains(
-		   []type_of(socket.phase){.Closed, .Failed},
-		   socket.phase,
-	   ) {
+	   socket.phase == .Closed ||
+	   socket.phase == .Failed {
 		return {}, {kind = .Invalid_State}
 	}
 
@@ -494,14 +489,16 @@ socket_receive_inner :: proc(
 
 		}
 
-		if socket.phase == .Online ||
-		   socket.phase == .Provisioning &&
-			   (slice.contains(
-						   // The server can send offline_preview before activation
-						   // finishes. Request its batch immediately, as Baileys does.
-						   []string{"message", "status", "receipt", "call", "notification", "ib"},
-						   event.node.tag,
-					   )) {
+		process := socket.phase == .Online
+		if socket.phase == .Provisioning {
+			// The server can send offline_preview before activation
+			// finishes. Request its batch immediately, as Baileys does.
+			switch event.node.tag {
+			case "message", "status", "receipt", "call", "notification", "ib":
+				process = true
+			}
+		}
+		if process {
 			output, e := socket_process_node(socket, event.node)
 			if e.kind != .None do return output, e
 
@@ -897,10 +894,7 @@ socket_control_node :: proc(
 	kind, _ := pairing_node_attr(node, "type")
 	from, _ := pairing_node_attr(node, "from")
 	if kind != "encrypt" ||
-	   !slice.contains(
-			   []string{"@s.whatsapp.net", "s.whatsapp.net"},
-			   from,
-		   ) {
+	   (from != "@s.whatsapp.net" && from != "s.whatsapp.net") {
 		return {}
 	}
 
@@ -935,16 +929,10 @@ socket_poll :: proc(
 	bool,
 	Socket_Error,
 ) {
-	if socket == nil ||
-	   slice.contains(
-		   []type_of(socket.phase) {
-			   .Uninitialized,
-			   .Failed,
-			   .Closed,
-			   .Restart_Required,
-		   },
-		   socket.phase,
-	   ) {
+	if socket == nil do return false, {kind = .Invalid_State}
+
+	#partial switch socket.phase {
+	case .Uninitialized, .Failed, .Closed, .Restart_Required:
 		return false, {kind = .Invalid_State}
 	}
 
@@ -1184,13 +1172,7 @@ socket_read_deadline :: proc(
 	deadline: time.Time,
 ) -> Socket_Error {
 	if deadline == (time.Time{}) &&
-	   (slice.contains(
-				   []type_of(socket.websocket.phase) {
-					   .Closed,
-					   .Failed,
-				   },
-				   socket.websocket.phase,
-			   )) {
+	   (socket.websocket.phase == .Closed || socket.websocket.phase == .Failed) {
 		return {}
 	}
 

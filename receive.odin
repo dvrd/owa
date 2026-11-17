@@ -5,7 +5,6 @@ import "core:encoding/hex"
 import "core:fmt"
 import "core:log"
 import "core:mem"
-import "core:slice"
 import "core:strconv"
 import "core:strings"
 import "core:time"
@@ -22,10 +21,7 @@ socket_process_node :: proc(
 	Socket_Error,
 ) {
 	if socket == nil ||
-	   (!slice.contains(
-				   []type_of(socket.phase){.Online, .Provisioning},
-				   socket.phase,
-			   )) ||
+	   (socket.phase != .Online && socket.phase != .Provisioning) ||
 	   socket.store == nil ||
 	   socket.auth == nil ||
 	   socket.prekeys == nil {
@@ -121,14 +117,9 @@ socket_message_node_process :: proc(
 			// success marker or automatically retry an unsupported cipher.
 			return {}, socket_acknowledge(socket, node, socket_message_encryption_nack(node))
 		}
-		if slice.contains(
-			[]type_of(err.kind) {
-				.Signal_Failed,
-				.Group_Failed,
-				.Message_Failed,
-			},
-			err.kind,
-		) {
+		if err.kind == .Signal_Failed ||
+		   err.kind == .Group_Failed ||
+		   err.kind == .Message_Failed {
 			if e := socket_request_retry(socket, node);
 			   e.kind != .None {
 				return {}, e
@@ -537,7 +528,7 @@ socket_message_payload_decrypt :: proc(
 
 			kind, _ := pairing_node_attr(child, "type")
 			if pass == 0 &&
-			   !slice.contains([]string{"pkmsg", "msg"}, kind) {
+			   (kind != "pkmsg" && kind != "msg") {
 				continue
 			}
 
@@ -1004,7 +995,7 @@ socket_receive_group_valid :: proc(jid: string) -> bool {
 		return false
 	}
 
-	for byte in transmute([]u8)user do if (byte < '0' || byte > '9') && byte != '-' {
+	for byte in transmute([]u8)user do if !is_digit(byte) && byte != '-' {
 		return false
 	}
 
@@ -1279,8 +1270,8 @@ socket_inbox_record_restore :: proc(
 	stamp, valid := strconv.parse_u64(timestamp)
 	if !ok ||
 	   !valid ||
-	   (!slice.contains([]string{"0", "1"}, own)) ||
-	   (!slice.contains([]string{"0", "1"}, offline)) ||
+	   (own != "0" && own != "1") ||
+	   (offline != "0" && offline != "1") ||
 	   !device_user_valid(participant, true) ||
 	   !socket_inbox_id_valid(id) ||
 	   (group != "" && !socket_receive_group_valid(group)) {
@@ -1686,16 +1677,14 @@ socket_history_notification :: proc(
 		field, e := protobuf_field_read(message, &at)
 		if e != .None do return false
 
-		if field.number == 12 {
+		switch field.number {
+		case 12:
 			if field.wire_type != 2 || protocol != nil {
 				return false
 			}
 
 			protocol = field.data
-		} else if slice.contains(
-			[]type_of(field.number){31, 37, 40, 53, 55, 58, 59},
-			field.number,
-		) {
+		case 31, 37, 40, 53, 55, 58, 59:
 			if field.wire_type != 2 || wrapper != nil {
 				return false
 			}
@@ -2050,13 +2039,7 @@ socket_trust_identity :: proc(
 			record.kind == .Session &&
 			(record.name == address ||
 					strings.has_prefix(record.name, archive_prefix))
-		if slice.contains(
-			[]type_of(record.kind) {
-				.Sender_Key,
-				.Sender_Key_Membership,
-			},
-			record.kind,
-		) {
+		if record.kind == .Sender_Key || record.kind == .Sender_Key_Membership {
 			if at := strings.index_byte(record.name, '|');
 			   at >= 0 && record.name[at + 1:] == address {
 				remove = true
