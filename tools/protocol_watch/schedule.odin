@@ -271,55 +271,75 @@ report_open :: proc(path: string) -> (file: Report_File, failure: Failure) {
 	}; return {fd, info.st_dev, info.st_ino}, nil
 }
 watch_run :: proc(args: Schedule, argv: []string = nil) -> (value: Value, failure: Failure) {
-	path := join(args.state_dir, "report.json"); previous: Report_File; had_previous := false
+	path := join(args.state_dir, "report.json")
+	previous: Report_File
+	had_previous := false
+
 	info: p.stat_t
 	if p.lstat(strings.clone_to_cstring(path), &info) == {} {
-		previous = report_open(path) or_return; had_previous = true
+		previous = report_open(path) or_return
+		had_previous = true
 	}
+
 	defer if had_previous {
 		p.close(previous.fd)
 	}
+
 	invocation := argv
 	if invocation == nil {
-		invocation = []string {
-			args.executable,
-			"watch",
-			"--manifest",
-			args.manifest,
-			"--state-dir",
-			args.state_dir,
-		}; if args.approved_contract != "" {
-			invocation = append_string(invocation, "--approved-contract")
-			invocation = append_string(invocation, args.approved_contract)
+		command := make([dynamic]string, 0, 8)
+		append(&command, args.executable, "watch", "--manifest", args.manifest, "--state-dir", args.state_dir)
+		if args.approved_contract != "" {
+			append(&command, "--approved-contract", args.approved_contract)
 		}
+		invocation = command[:]
 	}
-	summary := watch_capture(invocation) or_return; current := report_open(path) or_return
+
+	summary := watch_capture(invocation) or_return
+	current := report_open(path) or_return
 	defer p.close(current.fd)
+
 	if had_previous && current.device == previous.device && current.inode == previous.inode {
 		return null(), "WATCH_REPORT_STALE"
 	}
-	data := make([]u8, MAX_REPORT + 1); used := 0; for used < len(data) {
-		n := p.read(current.fd, raw_data(data[used:]), c.size_t(int(len(data)) - used)); if n < 0 {
+
+	data := make([]u8, MAX_REPORT + 1)
+	used := 0
+	for used < len(data) {
+		n := p.read(current.fd, raw_data(data[used:]), c.size_t(int(len(data)) - used))
+		if n < 0 {
 			return null(), "WATCH_REPORT_INVALID"
-		}; if n == 0 {
+		}
+		if n == 0 {
 			break
-		}; used += int(n)
+		}
+		used += int(n)
 	}
+
 	if used > MAX_REPORT {
 		return null(), "WATCH_REPORT_LIMIT"
-	}; report, error := decode(data[:used]); if error != "" {
+	}
+	report, error := decode(data[:used])
+	if error != "" {
 		return null(), "WATCH_REPORT_INVALID"
 	}
+
 	if _, ok := get(report, "observation").(j.Object); !ok {
 		return null(), "WATCH_REPORT_INVALID"
-	}; without := object(); for key in keys(report) {
+	}
+
+	without := object()
+	for key in keys(report) {
 		if key != "observation" {
 			put(&without, key, get(report, key))
 		}
 	}
+
 	if !equal(summary, without) {
 		return null(), "WATCH_REPORT_MISMATCH"
-	}; return report, nil
+	}
+
+	return report, nil
 }
 WatchRun :: proc(args: Schedule) -> (Value, Failure)
 AgentRun :: proc(argv: []string, prompt: []u8, seconds: int) -> (Value, Failure)

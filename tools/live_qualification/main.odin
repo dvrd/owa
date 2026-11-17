@@ -286,10 +286,6 @@ group_counts :: proc(groups: []wa.Socket_Group_Summary, subject: string) -> Grou
  return counts
 }
 
-action_fingerprint :: proc(data: []u8) -> string {
- return action_fingerprint_parts("", data)
-}
-
 action_fingerprint_parts :: proc(metadata: string, data: []u8) -> string {
  state: sha2.Context_256
  digest: [32]u8

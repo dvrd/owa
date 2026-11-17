@@ -422,11 +422,14 @@ validate_assessment :: proc(
 		   equal(get(evidence, "target_table_sha256"), get(evidence, "reference_table_sha256")) {
 			return null(), "FIX_CONTRACT_REQUIRED"
 		}
-		records := []Value{proof, get(proof, "requirement")}
-		suffixes := []string{".json", ".md"}
+		records := make([dynamic]Value, 0, 3)
+		suffixes := make([dynamic]string, 0, 3)
+		append(&records, proof, get(proof, "requirement"))
+		append(&suffixes, ".json", ".md")
 		if p, proof_ok := proof.(j.Object); proof_ok {
 			if fixture, present := p["fixture"]; present {
-				records = append_copy(records, fixture); suffixes = append_string(suffixes, "")
+				append(&records, fixture)
+				append(&suffixes, "")
 			}
 		}
 		for record, i in records {
@@ -450,12 +453,6 @@ validate_assessment :: proc(
 		return null(), "ASSESSMENT_TOO_LARGE"
 	}
 	return
-}
-append_copy :: proc(values: []Value, value: Value) -> []Value {
-	out := make([dynamic]Value); append(&out, ..values); append(&out, value); return out[:]
-}
-append_string :: proc(values: []string, value: string) -> []string {
-	out := make([dynamic]string); append(&out, ..values); append(&out, value); return out[:]
 }
 findings :: proc(report: Value, root: string) -> (result: j.Array, failure: Failure) {
 	changed: [dynamic]Item; _, changed, failure = snapshot(report); if failure != nil {

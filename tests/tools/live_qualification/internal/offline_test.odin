@@ -222,7 +222,7 @@ probe_target_selection_and_action_fingerprint_are_deterministic :: proc(t: ^test
  groups[1].subject = "offline"
  _, ambiguous := group_select(groups, "offline")
  testing.expect_value(t, ambiguous.kind, .Target_Ambiguous)
- fingerprint := action_fingerprint([]u8{97, 98, 99}); defer delete(fingerprint)
+ fingerprint := action_fingerprint_parts("", []u8{97, 98, 99}); defer delete(fingerprint)
  testing.expect_value(t, fingerprint,
   "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
  bound := action_fingerprint_parts("application/pdf", []u8{97, 98, 99})

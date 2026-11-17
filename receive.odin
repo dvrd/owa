@@ -310,7 +310,8 @@ socket_message_cipher_decrypt :: proc(
 		defer delete(key)
 		record := new(Signal_Group_Record)
 		defer {
-			signal_group_record_clear(record); free(record)
+			signal_group_record_clear(record)
+			free(record)
 		}
 		snapshot, have := state_store_get(
 			staged.store,
@@ -386,10 +387,12 @@ socket_message_distribution_install :: proc(
 			"%s|%s",
 			distribution.group_id,
 			signal_participant,
-		); defer delete(key)
+		)
+		defer delete(key)
 		record := new(Signal_Group_Record)
 		defer {
-			signal_group_record_clear(record); free(record)
+			signal_group_record_clear(record)
+			free(record)
 		}
 		if snapshot, have := state_store_get(
 			staged.store,
@@ -498,10 +501,13 @@ socket_message_payload_decrypt :: proc(
 	}
 	staged := new(Socket)
 	defer {
-		crypto.zero_explicit(staged, size_of(Socket)); free(staged)
+		crypto.zero_explicit(staged, size_of(Socket))
+		free(staged)
 	}
-	staged.store = candidate; staged.auth = socket.auth
-	staged.prekeys = socket.prekeys; staged.config = socket.config
+	staged.store = candidate
+	staged.auth = socket.auth
+	staged.prekeys = socket.prekeys
+	staged.config = socket.config
 	signal_participant, address_error := socket_signal_address(
 		staged,
 		participant,
@@ -634,7 +640,10 @@ socket_pairwise_decrypt :: proc(
 
 	defer delete(address)
 	session := new(Signal_Session)
-	defer {signal_session_clear(session); free(session)}
+	defer {
+		signal_session_clear(session)
+		free(session)
+	}
 	session_name := strings.clone(address)
 	defer delete(session_name)
 	trusted: [32]u8
@@ -707,7 +716,10 @@ socket_pairwise_prekey_archive_select :: proc(
 	prefix := fmt.aprintf("%s#", address)
 	defer delete(prefix)
 	old := new(Signal_Session)
-	defer {signal_session_clear(old); free(old)}
+	defer {
+		signal_session_clear(old)
+		free(old)
+	}
 	for record in socket.store.records {
 		if record.kind != .Session ||
 		   !strings.has_prefix(record.name, prefix) {
@@ -724,9 +736,11 @@ socket_pairwise_prekey_archive_select :: proc(
 				return {kind = .Identity_Changed}
 			}
 
-			session^ = old^; delete(session_name^)
+			session^ = old^
+			delete(session_name^)
 			session_name^ = strings.clone(record.name)
-			archived = true; break
+			archived = true
+			break
 		}
 
 	}
@@ -857,7 +871,8 @@ socket_pairwise_whisper_open :: proc(
 			if e.kind == .None {
 				delete(session_name^)
 				session_name^ = strings.clone(record.name)
-				recovered = true; break
+				recovered = true
+				break
 			}
 
 		}
@@ -973,7 +988,9 @@ socket_store_commit :: proc(
 		return {kind = .State_Failed, state = e}
 	}
 
-	old := socket.store^; socket.store^ = next^; next^ = old
+	old := socket.store^
+	socket.store^ = next^
+	next^ = old
 	return socket_cleanup_consumed_prekeys(socket)
 }
 
@@ -991,7 +1008,8 @@ socket_receive_group_valid :: proc(jid: string) -> bool {
 		return false
 	}
 
-	user := jid[:len(jid) - 5]; if len(user) == 0 {
+	user := jid[:len(jid) - 5]
+	if len(user) == 0 {
 		return false
 	}
 
@@ -1121,9 +1139,12 @@ socket_message_new :: proc(
 		return nil, {kind = .Allocation_Failed, allocation = de}
 	}
 
-	copy(data, protobuf); message.protobuf = data
-	message.from_me = from_me; message.timestamp = timestamp
-	message.offline = offline; success = true
+	copy(data, protobuf)
+	message.protobuf = data
+	message.from_me = from_me
+	message.timestamp = timestamp
+	message.offline = offline
+	success = true
 	return message, {}
 }
 
@@ -1155,7 +1176,8 @@ socket_inbox_stage :: proc(
 
 	data := make([]u8, n)
 	defer {
-		crypto.zero_explicit(raw_data(data), len(data)); delete(data)
+		crypto.zero_explicit(raw_data(data), len(data))
+		delete(data)
 	}
 	_, e = binary_node_encode(data, node)
 	if e.kind != .None {
@@ -1189,7 +1211,8 @@ socket_message_complete :: proc(
 	if name_error.kind != .None do return name_error
 
 	defer delete(name)
-	candidate: State_Store; defer state_store_clear(&candidate)
+	candidate: State_Store
+	defer state_store_clear(&candidate)
 	if e := socket_store_clone(&candidate, socket.store);
 	   e.kind != .None {
 		return e
@@ -1220,8 +1243,10 @@ socket_inbox_restore :: proc(socket: ^Socket) -> Socket_Error {
 		return {kind = .Invalid_State}
 	}
 
-	pending := make([dynamic]^Socket_Message); defer delete(pending)
-	success := false; defer {
+	pending := make([dynamic]^Socket_Message)
+	defer delete(pending)
+	success := false
+	defer {
 		if !success {
 			for message in pending do socket_message_destroy(message)
 		}
@@ -1233,7 +1258,8 @@ socket_inbox_restore :: proc(socket: ^Socket) -> Socket_Error {
 		message, message_error := socket_inbox_record_restore(socket, record)
 		if message_error.kind != .None do return message_error
 
-		_, ae := append(&pending, message); if ae != nil {
+		_, ae := append(&pending, message)
+		if ae != nil {
 			socket_message_destroy(message)
 			return {kind = .Allocation_Failed, allocation = ae}
 		}
@@ -1286,10 +1312,12 @@ socket_inbox_record_restore :: proc(
 		id,
 	)
 	if name_error.kind != .None {
-		binary_document_destroy(&doc); return nil, name_error
+		binary_document_destroy(&doc)
+		return nil, name_error
 	}
 
-	matches := name == record.name; delete(name)
+	matches := name == record.name
+	delete(name)
 	if !matches {
 		binary_document_destroy(&doc)
 		return nil, {kind = .Protocol_Error}
