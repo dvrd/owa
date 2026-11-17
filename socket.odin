@@ -6,6 +6,7 @@ import "core:crypto"
 import "core:fmt"
 import "core:mem"
 import "core:strconv"
+import "core:sync"
 import "core:time"
 import "core:sys/posix"
 
@@ -200,7 +201,6 @@ socket_connect :: proc(
 }
 
 // The initialized transport and caller-owned auth stay pinned through the handshake.
-@(private)
 socket_client_init :: proc(socket: ^Socket, settings: Socket_Config) -> Client_Error {
 	assert(socket != nil && socket.auth != nil)
 
@@ -826,6 +826,28 @@ socket_network_poll :: proc(socket: ^Socket, timeout: time.Duration) -> (bool, S
 	}
 }
 
+// Optional process-wide observer of socket_query round trips for application
+// metrics. It is called once per query that was sent or failed to send, with the
+// tick taken before sending and whether a response was received without error.
+// Queries refused before sending are not observed. It runs on the socket's thread
+// and must not block.
+Query_Observer :: #type proc(started: time.Tick, ok: bool)
+
+query_observer: Query_Observer
+
+// Installs the query observer; nil removes it. Install it before sockets connect.
+query_observer_set :: proc(observer: Query_Observer) {
+	sync.atomic_store(&query_observer, observer)
+}
+
+query_observe :: proc(started: time.Tick, ok: bool) {
+	observer := sync.atomic_load(&query_observer)
+
+	if observer != nil {
+		observer(started, ok)
+	}
+}
+
 // Owns the returned document. Incoming messages encountered while waiting are
 // processed normally and queued for socket_read. No nested receive threads.
 socket_query :: proc(socket: ^Socket, query: Binary_Node) -> (Binary_Document, Socket_Error) {
@@ -865,11 +887,17 @@ socket_query :: proc(socket: ^Socket, query: Binary_Node) -> (Binary_Document, S
 
 	request := query
 	request.attrs = attrs[:count]
+	started := time.tick_now()
+
 	if send_error := socket_query_send(socket, request); send_error.kind != .None {
+		query_observe(started, false)
 		return {}, send_error
 	}
 
-	return socket_query_response_receive(socket, id)
+	document, error := socket_query_response_receive(socket, id)
+	query_observe(started, error.kind == .None)
+
+	return document, error
 }
 
 socket_query_send :: proc(socket: ^Socket, request: Binary_Node) -> Socket_Error {
