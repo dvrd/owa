@@ -60,11 +60,11 @@ status_ack_top_level_live_and_offline_preserves_transport_attributes :: proc(t: 
 						{"participant", "222@s.whatsapp.net"},
 						{"recipient", "333:4@s.whatsapp.net"},
 					}) {
-					value, found := pairing_node_attr(document.root, expected.key)
+					value, found := node_attr(document.root, expected.key)
 					testing.expect(t, found && value == expected.value)
 				}
-				_, nack := pairing_node_attr(document.root, "error")
-				_, offline_copied := pairing_node_attr(document.root, "offline")
+				_, nack := node_attr(document.root, "error")
+				_, offline_copied := node_attr(document.root, "offline")
 				testing.expect(t, !nack && !offline_copied)
 				testing.expect_value(t, f.socket.client.noise.write_counter, u64(1))
 				testing.expect_value(t, f.store.revision, revision)
@@ -165,7 +165,7 @@ status_ack_encrypted_socket_read_handles_provisioning_offline_batch :: proc(t: ^
 		document, decode := binary_node_decode(transmute([]u8)encoded)
 		assert(decode.kind == .None)
 		defer binary_document_destroy(&document)
-		class, class_found := pairing_node_attr(document.root, "class")
+		class, class_found := node_attr(document.root, "class")
 		testing.expect(t, document.root.tag == "ack" && class_found && class == "status")
 		testing.expect_value(t, f.socket.client.noise.write_counter, u64(1))
 		after := negative_ack_disk(f); defer delete(after)
@@ -250,10 +250,10 @@ status_ack_legacy_broadcast_message_remains_transport_only :: proc(t: ^testing.T
 	encoded := send_id_wire_plain(&wire, plain[:])
 	document, decode := binary_node_decode(transmute([]u8)encoded); assert(decode.kind == .None)
 	defer binary_document_destroy(&document)
-	class, found := pairing_node_attr(document.root, "class")
+	class, found := node_attr(document.root, "class")
 	testing.expect(t, document.root.tag == "ack" && found && class == "message")
-	_, viewed_type := pairing_node_attr(document.root, "type")
-	_, nack := pairing_node_attr(document.root, "error")
+	_, viewed_type := node_attr(document.root, "type")
+	_, nack := node_attr(document.root, "error")
 	testing.expect(t, !viewed_type && !nack)
 	testing.expect_value(t, f.socket.client.noise.write_counter, u64(1))
 	negative_ack_unchanged(t, f, before, revision, durable)

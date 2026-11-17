@@ -2998,8 +2998,8 @@ socket_media_existing_send :: proc(
 	document, decoded := binary_node_decode(content)
 	if decoded.kind != .None {return "", true, {kind = .Binary_Failed, binary = decoded}}
 	defer binary_document_destroy(&document)
-	stored_group, _ := pairing_node_attr(document.root, "to")
-	stored_type, _ := pairing_node_attr(document.root, "mediatype")
+	stored_group, _ := node_attr(document.root, "to")
+	stored_type, _ := node_attr(document.root, "mediatype")
 	protobuf, valid := document.root.content.([]u8)
 	if document.root.tag != "saved" || !valid {return "", true, {kind = .Protocol_Error}}
 	message, parsed := media_message_decode(protobuf)

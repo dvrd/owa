@@ -54,14 +54,14 @@ ack_routing_expect_exact :: proc(t: ^testing.T, f: ^Negative_Ack_Fixture,
  for expected in ([]Binary_Node_Attribute{{"id", "synthetic-routing-id"},
   {"to", "222@s.whatsapp.net"}, {"class", tag},
   {"participant", "333:4@s.whatsapp.net"}, {"recipient", "444@s.whatsapp.net"}}) {
-  value, found := pairing_node_attr(document.root, expected.key)
+  value, found := node_attr(document.root, expected.key)
   testing.expect(t, found && value == expected.value)
  }
- actual, typed := pairing_node_attr(document.root, "type")
+ actual, typed := node_attr(document.root, "type")
  testing.expect(t, typed == (kind != "") && actual == kind)
  testing.expect_value(t, len(document.root.attrs), kind == "" ? 5 : 6)
- _, has_error := pairing_node_attr(document.root, "error")
- _, has_offline := pairing_node_attr(document.root, "offline")
+ _, has_error := node_attr(document.root, "error")
+ _, has_offline := node_attr(document.root, "offline")
  testing.expect(t, !has_error && !has_offline)
  testing.expect_value(t, f.socket.client.noise.write_counter, u64(1))
  testing.expect_value(t, send_id_http_calls, 0)
@@ -190,7 +190,7 @@ ack_routing_expect_retry_ack :: proc(t: ^testing.T, stream: ^Status_Ack_Stream) 
  for expected in ([]Binary_Node_Attribute{{"id", "synthetic-missing-retry"},
   {"to", "123@g.us"}, {"class", "receipt"}, {"type", "retry"},
   {"participant", "333:4@s.whatsapp.net"}, {"recipient", "444@s.whatsapp.net"}}) {
-  value, found := pairing_node_attr(document.root, expected.key)
+  value, found := node_attr(document.root, expected.key)
   testing.expect(t, found && value == expected.value)
  }
 }
@@ -224,12 +224,12 @@ mandatory_provisioning_retry_is_owned_until_online_and_outside_query :: proc(t: 
   if len(f.socket.deferred_retries) != 1 {continue}
   binary_document_destroy(&f.socket.session.document)
   queued := f.socket.deferred_retries[0].root
-  id, found := pairing_node_attr(queued, "id")
-  kind, kind_found := pairing_node_attr(queued, "type")
+  id, found := node_attr(queued, "id")
+  kind, kind_found := node_attr(queued, "type")
   retry, have_retry := pairing_node_child(queued, "retry")
   testing.expect(t, found && id == "synthetic-missing-retry" && kind_found && kind == "retry" && have_retry)
   if have_retry {
-   count, count_found := pairing_node_attr(retry^, "count")
+   count, count_found := node_attr(retry^, "count")
    testing.expect(t, count_found && count == "1", "queued document must own its released session bytes")
   }
   now := f.socket.session.last_received
@@ -285,7 +285,7 @@ mandatory_provisioning_retry_keeps_existing_64_bound_and_ack_order :: proc(t: ^t
  ack_routing_expect_retry_ack(t, &stream)
  binary_document_destroy(&f.socket.session.document)
  for queued in f.socket.deferred_retries {
-  id, found := pairing_node_attr(queued.root, "id")
+  id, found := node_attr(queued.root, "id")
   testing.expect(t, found && id == "synthetic-missing-retry")
  }
  testing.expect_value(t, send_id_http_calls, 0)

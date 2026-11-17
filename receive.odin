@@ -38,7 +38,7 @@ socket_process_node :: proc(
 	case "ack":
 		return socket_message_ack_process(socket, node)
 	case "receipt":
-		kind, _ := pairing_node_attr(node, "type")
+		kind, _ := node_attr(node, "type")
 		if e := socket_acknowledge(socket, node); e.kind != .None {
 			return {}, e
 		}
@@ -98,7 +98,7 @@ socket_message_receipts_send :: proc(
 socket_message_node_process :: proc(
 	socket: ^Socket, node: Binary_Node,
 ) -> (Socket_Event, Socket_Error) {
-	from, _ := pairing_node_attr(node, "from")
+	from, _ := node_attr(node, "from")
 	if from == "status@broadcast" {
 		// Status updates can arrive in the offline batch before login
 		// finishes. Acknowledge transport delivery without exposing them
@@ -139,13 +139,13 @@ socket_message_node_process :: proc(
 socket_message_ack_process :: proc(
 	socket: ^Socket, node: Binary_Node,
 ) -> (Socket_Event, Socket_Error) {
-	class, _ := pairing_node_attr(node, "class")
+	class, _ := node_attr(node, "class")
 	if class == "message" {
-		id, _ := pairing_node_attr(node, "id")
+		id, _ := node_attr(node, "id")
 		if id != "" {
 			// An error attribute is a negative ACK, even if empty or malformed.
 			// Retain intent and ciphertext: retries/cancellation remain explicit.
-			if _, rejected := pairing_node_attr(node, "error"); rejected {
+			if _, rejected := node_attr(node, "error"); rejected {
 				_, pending := state_store_get(socket.store, .Outbound_Message, id)
 				_, retained := state_store_get(socket.store, .Outbound_Content, id)
 				if pending || retained {return {}, {kind = .Message_Rejected}}
@@ -257,9 +257,9 @@ socket_process_message :: proc(
 }
 
 socket_message_route_decode :: proc(node: Binary_Node) -> (string, string, string, Socket_Error) {
-	from, _ := pairing_node_attr(node, "from")
-	participant, _ := pairing_node_attr(node, "participant")
-	id, _ := pairing_node_attr(node, "id")
+	from, _ := node_attr(node, "from")
+	participant, _ := node_attr(node, "participant")
+	id, _ := node_attr(node, "id")
 	if !socket_inbox_id_valid(id) {
 		return "", "", "", {kind = .Protocol_Error}
 	}
@@ -480,7 +480,7 @@ socket_message_encryption_nack :: proc(node: Binary_Node) -> u32 {
 	reason: u32
 	for child in children {
 		if child.tag != "enc" do continue
-		kind, _ := pairing_node_attr(child, "type")
+		kind, _ := node_attr(child, "type")
 		switch kind {
 		case "pkmsg", "msg", "skmsg":
 		case "msmsg": reason = MESSAGE_NACK_MISSING_SECRET
@@ -526,7 +526,7 @@ socket_message_payload_decrypt :: proc(
 		for child in children {
 			if child.tag != "enc" do continue
 
-			kind, _ := pairing_node_attr(child, "type")
+			kind, _ := node_attr(child, "type")
 			if pass == 0 &&
 			   (kind != "pkmsg" && kind != "msg") {
 				continue
@@ -581,14 +581,14 @@ socket_message_event_commit :: proc(
 	var_payload: []u8, own: bool,
 ) -> (Socket_Event, Socket_Error) {
 	timestamp: u64
-	if raw, have := pairing_node_attr(node, "t"); have {
+	if raw, have := node_attr(node, "t"); have {
 		value, valid := strconv.parse_u64(raw)
 		if !valid do return {}, {kind = .Protocol_Error}
 
 		timestamp = value
 	}
 
-	offline, _ := pairing_node_attr(node, "offline")
+	offline, _ := node_attr(node, "offline")
 	message, message_error := socket_message_new(
 		group,
 		participant,
@@ -1260,12 +1260,12 @@ socket_inbox_record_restore :: proc(
 	}
 
 	node := doc.root
-	group, _ := pairing_node_attr(node, "from")
-	participant, _ := pairing_node_attr(node, "participant")
-	id, _ := pairing_node_attr(node, "id")
-	timestamp, _ := pairing_node_attr(node, "t")
-	own, _ := pairing_node_attr(node, "own")
-	offline, _ := pairing_node_attr(node, "offline")
+	group, _ := node_attr(node, "from")
+	participant, _ := node_attr(node, "participant")
+	id, _ := node_attr(node, "id")
+	timestamp, _ := node_attr(node, "t")
+	own, _ := node_attr(node, "own")
+	offline, _ := node_attr(node, "offline")
 	raw, ok := node.content.([]u8)
 	stamp, valid := strconv.parse_u64(timestamp)
 	if !ok ||
@@ -1439,8 +1439,8 @@ socket_retry_keys_prepare :: proc(socket: ^Socket, body: ^Socket_Retry_Body) -> 
 	   error.kind != .None {return {kind = .Prekey_Failed, prekey = error}}
 	key := &socket.prekeys.keys[socket.prekeys.count - 1]
 	body.type_byte[0] = 5
-	body.prekey_id = socket_retry_prekey_id(key.id)
-	body.signed_id = socket_retry_prekey_id(socket.auth.credentials.signed_prekey_id)
+	body.prekey_id = prekey_id_bytes(key.id)
+	body.signed_id = prekey_id_bytes(socket.auth.credentials.signed_prekey_id)
 	body.identity = signal_curve_public(socket.auth.credentials.identity_private)
 	body.key_children = {
 		{tag = "id", content = body.prekey_id[:]},
@@ -1474,8 +1474,8 @@ socket_retry_body_prepare :: proc(
 ) -> Socket_Error {
 	assert(count > 0)
 	assert(count <= SOCKET_RETRY_LIMIT)
-	id, _ := pairing_node_attr(node, "id")
-	timestamp, _ := pairing_node_attr(node, "t")
+	id, _ := node_attr(node, "id")
+	timestamp, _ := node_attr(node, "t")
 	registration := socket.auth.credentials.registration_id
 	for index in 0..<4 {
 		body.registration[index] = cast(u8)(registration >> cast(uint)(24 - index * 8))
@@ -1501,15 +1501,15 @@ socket_retry_body_prepare :: proc(
 socket_retry_receipt_send :: proc(
 	socket: ^Socket, node: Binary_Node, body: ^Socket_Retry_Body,
 ) -> Socket_Error {
-	id, _ := pairing_node_attr(node, "id")
-	from, _ := pairing_node_attr(node, "from")
-	participant, _ := pairing_node_attr(node, "participant")
+	id, _ := node_attr(node, "id")
+	from, _ := node_attr(node, "from")
+	participant, _ := node_attr(node, "participant")
 	attrs := [5]Binary_Node_Attribute{
 		{"id", id}, {"type", "retry"}, {"to", from}, {}, {},
 	}
 	count := 3
 	if participant != "" {attrs[count] = {"participant", participant}; count += 1}
-	if recipient, found := pairing_node_attr(node, "recipient"); found {
+	if recipient, found := node_attr(node, "recipient"); found {
 		attrs[count] = {"recipient", recipient}; count += 1
 	}
 	wire: [4096]u8
@@ -1523,9 +1523,9 @@ socket_retry_receipt_send :: proc(
 // Persist a bounded counter before issuing a retry. Capacity exhaustion stops
 // this message, never evicts private keys or terminates a healthy listener.
 socket_request_retry :: proc(socket: ^Socket, node: Binary_Node) -> Socket_Error {
-	id, _ := pairing_node_attr(node, "id")
-	from, _ := pairing_node_attr(node, "from")
-	participant, _ := pairing_node_attr(node, "participant")
+	id, _ := node_attr(node, "id")
+	from, _ := node_attr(node, "from")
+	participant, _ := node_attr(node, "participant")
 	if !socket_inbox_id_valid(id) ||
 	   (!device_user_valid(from, true) && !socket_receive_group_valid(from)) ||
 	   (participant != "" && !device_user_valid(participant, true)) {
@@ -1553,10 +1553,6 @@ socket_request_retry :: proc(socket: ^Socket, node: Binary_Node) -> Socket_Error
 	   error.kind != .None {return error}
 	if error := socket_store_commit(socket, &candidate); error.kind != .None {return error}
 	return socket_retry_receipt_send(socket, node, &body)
-}
-
-socket_retry_prekey_id :: proc(id: u32) -> [3]u8 {
-	return {cast(u8)(id >> 16), cast(u8)(id >> 8), cast(u8)id}
 }
 
 socket_archive_session :: proc(
@@ -1597,10 +1593,10 @@ socket_delivery_receipt :: proc(
 	socket: ^Socket,
 	node: Binary_Node,
 ) -> Socket_Error {
-	id, _ := pairing_node_attr(node, "id")
-	from, _ := pairing_node_attr(node, "from")
-	participant, _ := pairing_node_attr(node, "participant")
-	category, _ := pairing_node_attr(node, "category")
+	id, _ := node_attr(node, "id")
+	from, _ := node_attr(node, "from")
+	participant, _ := node_attr(node, "participant")
+	category, _ := node_attr(node, "category")
 	kind := ""; author := from
 	if participant != "" do author = participant
 
@@ -1614,7 +1610,7 @@ socket_delivery_receipt :: proc(
 	count := 1
 	if kind == "sender" && device_user_valid(from, true) {
 		remote := from
-		if recipient, have := pairing_node_attr(node, "recipient");
+		if recipient, have := node_attr(node, "recipient");
 		   have && device_user_valid(recipient, true) {
 			remote = recipient
 		}
@@ -1746,8 +1742,8 @@ socket_history_receipt :: proc(
 	socket: ^Socket,
 	node: Binary_Node,
 ) -> Socket_Error {
-	from, _ := pairing_node_attr(node, "from")
-	id, _ := pairing_node_attr(node, "id")
+	from, _ := node_attr(node, "from")
+	id, _ := node_attr(node, "id")
 	if !socket_sender_is_self(socket, from) ||
 	   !device_user_valid(from, true) {
 		return {kind = .Protocol_Error}
@@ -1828,8 +1824,8 @@ socket_acknowledge :: proc(
 	node: Binary_Node,
 	error_code: u32 = 0,
 ) -> Socket_Error {
-	id, has_id := pairing_node_attr(node, "id")
-	from, has_from := pairing_node_attr(node, "from")
+	id, has_id := node_attr(node, "id")
+	from, has_from := node_attr(node, "from")
 	if !has_id || !has_from || len(id) == 0 || len(from) == 0 {
 		return {kind = .Protocol_Error}
 	}
@@ -1840,14 +1836,14 @@ socket_acknowledge :: proc(
 	count := 3
 	names := [2]string{"participant", "recipient"}
 	for name in names {
-		if value, found := pairing_node_attr(node, name); found {
+		if value, found := node_attr(node, name); found {
 			attrs[count] = {name, value}; count += 1
 		}
 
 	}
 	_, unavailable := pairing_node_child(node, "unavailable")
 	if node.tag != "message" || unavailable || error_code != 0 {
-		if value, found := pairing_node_attr(node, "type"); found {
+		if value, found := node_attr(node, "type"); found {
 			attrs[count] = {"type", value}; count += 1
 		}
 
@@ -1889,11 +1885,11 @@ socket_retry_outgoing :: proc(
 	socket: ^Socket,
 	receipt: Binary_Node,
 ) -> Socket_Error {
-	raw_id, _ := pairing_node_attr(receipt, "id")
+	raw_id, _ := node_attr(receipt, "id")
 	id := strings.clone(raw_id)
 	defer delete(id)
-	from, _ := pairing_node_attr(receipt, "from")
-	raw_participant, _ := pairing_node_attr(receipt, "participant")
+	from, _ := node_attr(receipt, "from")
+	raw_participant, _ := node_attr(receipt, "participant")
 	participant := strings.clone(raw_participant)
 	defer delete(participant)
 	if !group_jid_valid(from) ||
@@ -1914,10 +1910,10 @@ socket_retry_outgoing :: proc(
 	}
 
 	defer binary_document_destroy(&doc)
-	group, _ := pairing_node_attr(doc.root, "to")
+	group, _ := node_attr(doc.root, "to")
 	if from != group do return {kind = .Protocol_Error}
 
-	media_type, _ := pairing_node_attr(doc.root, "mediatype")
+	media_type, _ := node_attr(doc.root, "mediatype")
 	protobuf, ok := doc.root.content.([]u8)
 	if !ok do return {kind = .Protocol_Error}
 
@@ -2142,7 +2138,7 @@ socket_prune_record :: proc(
 		if pending[sha256(transmute([]u8)record.name)] {return false, false, {}}
 		document, decoded := binary_node_decode(record.data)
 		if decoded.kind != .None {return false, false, {kind = .Binary_Failed, binary = decoded}}
-		text, _ := pairing_node_attr(document.root, "t")
+		text, _ := node_attr(document.root, "t")
 		value, valid := strconv.parse_u64(text)
 		binary_document_destroy(&document)
 		if !valid {return false, false, {}}

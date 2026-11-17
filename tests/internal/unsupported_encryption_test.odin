@@ -59,10 +59,10 @@ unsupported_enc_case :: proc(t: ^testing.T, kind: string, mixed, reverse, group:
    doc, decoded := binary_node_decode(transmute([]u8)encoded)
    assert(decoded.kind == .None)
    testing.expect_value(t, doc.root.tag, "ack")
-   code, found := pairing_node_attr(doc.root, "error")
+   code, found := node_attr(doc.root, "error")
    testing.expect(t, found)
    testing.expect_value(t, code, kind == "msmsg" ? "495" : "490")
-   id, _ := pairing_node_attr(doc.root, "id")
+   id, _ := node_attr(doc.root, "id")
    testing.expect_value(t, id, "unsupported-content-id")
    binary_document_destroy(&doc)
   } else {testing.expect(t, false, "exactly one negative ACK required")}

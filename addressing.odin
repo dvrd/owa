@@ -68,7 +68,7 @@ device_keys_response_decode :: proc(
 	for child in children {
 		if child.tag != "user" do continue
 
-		jid, _ := pairing_node_attr(child, "jid")
+		jid, _ := node_attr(child, "jid")
 		index := -1
 		for requested, i in jids do if requested == jid {
 			index = i
@@ -96,7 +96,7 @@ device_keys_response_decode :: proc(
 	for child in children {
 		if child.tag != "user" do continue
 
-		jid, _ := pairing_node_attr(child, "jid")
+		jid, _ := node_attr(child, "jid")
 		bundle, _ := device_bundle_decode(child)
 		storage[at] = {
 			jid    = jid,
@@ -350,7 +350,7 @@ devices_response_decode :: proc(
 	for child in children {
 		if child.tag != "user" do continue
 
-		jid, _ := pairing_node_attr(child, "jid")
+		jid, _ := node_attr(child, "jid")
 		devices, _ := device_unique_child(child, "devices")
 		device_list, _ := device_unique_child(devices, "device-list")
 		entries, _ := device_list.content.([]Binary_Node)
@@ -416,7 +416,7 @@ devices_response_children_validate :: proc(
 	for child in children {
 		if child.tag != "user" do continue
 
-		jid, _ := pairing_node_attr(child, "jid")
+		jid, _ := node_attr(child, "jid")
 		index := -1
 		for user, i in users do if user == jid do index = i
 
@@ -510,15 +510,15 @@ device_response_validate :: proc(
 	node: Binary_Node,
 	request_id: string,
 ) -> Device_Error {
-	id, _ := pairing_node_attr(node, "id")
-	from, has_from := pairing_node_attr(node, "from")
+	id, _ := node_attr(node, "id")
+	from, has_from := node_attr(node, "from")
 	if node.tag != "iq" ||
 	   id != request_id ||
 	   has_from && from != "s.whatsapp.net" && from != "@s.whatsapp.net" {
 		return {kind = .Unexpected_Response}
 	}
 
-	kind, _ := pairing_node_attr(node, "type")
+	kind, _ := node_attr(node, "type")
 	if kind == "error" do return {kind = .Server_Error}
 
 	if kind != "result" {
@@ -555,13 +555,13 @@ device_entry_decode :: proc(
 	Remote_Device,
 	Device_Error,
 ) {
-	id, _ := pairing_node_attr(node, "id")
+	id, _ := node_attr(node, "id")
 	n, valid := strconv.parse_uint(id, 10)
 	if !valid || n >= MAX_USER_DEVICES {
 		return {}, {kind = .Invalid_Response}
 	}
 
-	index, has_index := pairing_node_attr(node, "key-index")
+	index, has_index := node_attr(node, "key-index")
 	key_index: u32
 	if has_index {
 		value, ok := strconv.parse_uint(index, 10)
@@ -572,7 +572,7 @@ device_entry_decode :: proc(
 		key_index = cast(u32)value
 	}
 
-	hosted, _ := pairing_node_attr(node, "is_hosted")
+	hosted, _ := node_attr(node, "is_hosted")
 	return {
 		user_jid = jid,
 		id = cast(u32)n,
@@ -638,8 +638,8 @@ group_metadata_decode :: proc(
 	result := Group_Metadata {
 		jid = expected_jid,
 	}
-	result.subject, _ = pairing_node_attr(group^, "subject")
-	result.addressing_mode, _ = pairing_node_attr(
+	result.subject, _ = node_attr(group^, "subject")
+	result.addressing_mode, _ = node_attr(
 		group^,
 		"addressing_mode",
 	)
@@ -668,7 +668,7 @@ group_metadata_decode :: proc(
 		for previous in children[:i] {
 			if previous.tag != "participant" do continue
 
-			previous_jid, _ := pairing_node_attr(previous, "jid")
+			previous_jid, _ := node_attr(previous, "jid")
 			if previous_jid == participant.jid {
 				return {}, {kind = .Duplicate_Participant}
 			}
@@ -715,9 +715,9 @@ group_metadata_response_group :: proc(
 		return nil, {kind = .Invalid_Request_ID}
 	}
 
-	id, _ := pairing_node_attr(node, "id")
-	kind, _ := pairing_node_attr(node, "type")
-	from, has_from := pairing_node_attr(node, "from")
+	id, _ := node_attr(node, "id")
+	kind, _ := node_attr(node, "type")
+	from, has_from := node_attr(node, "from")
 	if node.tag != "iq" ||
 	   id != request_id ||
 	   (has_from && from != expected_jid) {
@@ -727,7 +727,7 @@ group_metadata_response_group :: proc(
 	if kind == "error" {
 		code: u32
 		if child, found := pairing_node_child(node, "error"); found {
-			text, _ := pairing_node_attr(child^, "code")
+			text, _ := node_attr(child^, "code")
 			n, valid := strconv.parse_uint(text, 10)
 			if valid && n <= cast(uint)max(u32) {
 				code = cast(u32)n
@@ -753,7 +753,7 @@ group_metadata_response_group :: proc(
 
 	if groups != 1 do return nil, {kind = .Invalid_Metadata}
 
-	group_id, _ := pairing_node_attr(group^, "id")
+	group_id, _ := node_attr(group^, "id")
 	bare := expected_jid[:len(expected_jid) - len("@g.us")]
 	if group_id != expected_jid && group_id != bare {
 		return nil, {kind = .Unexpected_Response}
@@ -765,7 +765,7 @@ group_metadata_response_group :: proc(
 group_metadata_description_decode :: proc(
 	result: ^Group_Metadata, child: Binary_Node,
 ) -> Group_Error {
-	result.description_id, _ = pairing_node_attr(child, "id")
+	result.description_id, _ = node_attr(child, "id")
 	bodies := 0
 	parts, _ := child.content.([]Binary_Node)
 	for part in parts {
@@ -815,10 +815,10 @@ group_participant_decode :: proc(
 	Group_Error,
 ) {
 	result: Group_Participant
-	result.jid, _ = pairing_node_attr(node, "jid")
-	result.phone_number, _ = pairing_node_attr(node, "phone_number")
-	result.lid, _ = pairing_node_attr(node, "lid")
-	result.role, _ = pairing_node_attr(node, "type")
+	result.jid, _ = node_attr(node, "jid")
+	result.phone_number, _ = node_attr(node, "phone_number")
+	result.lid, _ = node_attr(node, "lid")
+	result.role, _ = node_attr(node, "type")
 	// Unknown roles are retained. A new server role must not silently exclude
 	// a participant from the recipient set.
 	values := [4]string {

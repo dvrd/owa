@@ -87,8 +87,8 @@ socket_groups_decode :: proc(
 			return {}, {kind = .Protocol_Error}
 		}
 
-		group_id, present := pairing_node_attr(child, "id")
-		subject, _ := pairing_node_attr(child, "subject")
+		group_id, present := node_attr(child, "id")
+		subject, _ := node_attr(child, "subject")
 		if !present ||
 		   !utf8.valid_string(group_id) ||
 		   !utf8.valid_string(subject) {
@@ -128,8 +128,8 @@ socket_groups_decode :: proc(
 socket_groups_children_decode :: proc(
 	root: Binary_Node, request_id: string,
 ) -> ([]Binary_Node, Socket_Error) {
-	id, _ := pairing_node_attr(root, "id")
-	kind, _ := pairing_node_attr(root, "type")
+	id, _ := node_attr(root, "id")
+	kind, _ := node_attr(root, "type")
 	if root.tag != "iq" || id != request_id || kind != "result" {
 		return nil, {kind = .Protocol_Error}
 	}
@@ -776,8 +776,8 @@ socket_group_existing_intent :: proc(
 	document, decoded := binary_node_decode(content)
 	if decoded.kind != .None {return false, {kind = .Binary_Failed, binary = decoded}}
 	defer binary_document_destroy(&document)
-	stored_group, _ := pairing_node_attr(document.root, "to")
-	stored_media, _ := pairing_node_attr(document.root, "mediatype")
+	stored_group, _ := node_attr(document.root, "to")
+	stored_media, _ := node_attr(document.root, "mediatype")
 	stored_protobuf, valid := document.root.content.([]u8)
 	if document.root.tag != "saved" || !valid {return false, {kind = .Protocol_Error}}
 	if group != stored_group || media_type != stored_media {

@@ -325,8 +325,8 @@ socket_transport_inner :: proc(packet: []u8) -> []u8 {
 socket_peer_decrypt :: proc(f: ^Fixture, inner: []u8) {
 	document, decoded := wa.binary_node_decode(inner); assert(decoded.kind == .None)
 	defer wa.binary_document_destroy(&document)
-	id, id_found := wa.pairing_node_attr(document.root, "id")
-	destination, destination_found := wa.pairing_node_attr(document.root, "to")
+	id, id_found := wa.node_attr(document.root, "id")
+	destination, destination_found := wa.node_attr(document.root, "to")
 	assert(
 		document.root.tag == "message" &&
 		id_found &&
@@ -338,10 +338,10 @@ socket_peer_decrypt :: proc(f: ^Fixture, inner: []u8) {
 	assert(have_participants)
 	devices, valid_devices := participants.content.([]wa.Binary_Node)
 	assert(valid_devices && len(devices) == 1)
-	device, have_device := wa.pairing_node_attr(devices[0], "jid")
+	device, have_device := wa.node_attr(devices[0], "jid")
 	assert(have_device && device == SOCKET_B)
 	enc, have_enc := wa.pairing_node_child(devices[0], "enc"); assert(have_enc)
-	kind, have_kind := wa.pairing_node_attr(enc^, "type"); assert(have_kind && kind == "msg")
+	kind, have_kind := wa.node_attr(enc^, "type"); assert(have_kind && kind == "msg")
 	distribution_wire, valid_distribution := enc.content.([]u8); assert(valid_distribution)
 	plaintext: [2048]u8
 	count, error := wa.signal_session_decrypt(

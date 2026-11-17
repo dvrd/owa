@@ -100,7 +100,7 @@ canary_has_unknown :: proc(s: ^Storage) -> bool {
 canary_content_matches :: proc(s: ^Storage, index: int, node: wa.Binary_Node) -> bool {
  protobuf, valid := node.content.([]u8)
  if !valid || node.tag != "saved" {return false}
- media_type, _ := wa.pairing_node_attr(node, "mediatype")
+ media_type, _ := wa.node_attr(node, "mediatype")
  if index % 2 == 0 {
   if media_type != "" {return false}
   expected: [512]u8

@@ -57,13 +57,13 @@ message_ack_expect_frames :: proc(t: ^testing.T, wire: ^Send_Id_Wire, have_ack: 
 		doc, decoded := binary_node_decode(plain[:count]); assert(decoded.kind == .None)
 		defer binary_document_destroy(&doc)
 		testing.expect_value(t, doc.root.tag, frames == 0 ? "receipt" : "ack")
-		kind, _ := pairing_node_attr(doc.root, "type")
+		kind, _ := node_attr(doc.root, "type")
 		testing.expect(t, kind != "read" && kind != "viewed")
 		if frames == 1 {
 			testing.expect_value(t, len(doc.root.attrs), 3)
 			for attr in ([]Binary_Node_Attribute{{"id", "synthetic-ack-id"},
 				{"to", "222@s.whatsapp.net"}, {"class", "message"}}) {
-				value, found := pairing_node_attr(doc.root, attr.key)
+				value, found := node_attr(doc.root, attr.key)
 				testing.expect(t, found && value == attr.value)
 			}
 		}

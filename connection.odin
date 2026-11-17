@@ -724,14 +724,8 @@ client_finish_wire_size :: proc(payload_size: int) -> int {
 
 	encrypted_size := payload_size + NOISE_TAG_SIZE
 	inner :=
-		50 + 1 + client_varint_size(encrypted_size) + encrypted_size
-	return 1 + client_varint_size(inner) + inner
-}
-
-client_varint_size :: proc(value: int) -> int {
-	n, size := value, 1
-	for n >= 128 {n >>= 7; size += 1}
-	return size
+		50 + 1 + protobuf_varint_size(cast(u64)encrypted_size) + encrypted_size
+	return 1 + protobuf_varint_size(cast(u64)inner) + inner
 }
 
 // Encrypted client message I/O

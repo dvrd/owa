@@ -296,7 +296,7 @@ session_process :: proc(
 	}
 
 	if node.tag == "failure" {
-		reason, _ := pairing_node_attr(node, "reason")
+		reason, _ := node_attr(node, "reason")
 		code, valid_code := strconv.parse_uint(reason, 10)
 		if !valid_code || code > cast(uint)max(u32) {
 			code = 0
@@ -330,7 +330,7 @@ session_process :: proc(
 
 session_node_observe :: proc(session: ^Session, node: Binary_Node) {
 	if session.config.observe_node != nil {
-		kind, _ := pairing_node_attr(node, "type")
+		kind, _ := node_attr(node, "type")
 		tags: [32]string
 		count := 0
 		if children, found := node.content.([]Binary_Node); found {
@@ -394,7 +394,7 @@ session_ack_class :: proc(node: Binary_Node) -> Protocol_Ack_Class {
 session_stream_error :: proc(
 	session: ^Session, node: Binary_Node,
 ) -> (Session_Event, Session_Error) {
-	code_text, _ := pairing_node_attr(node, "code")
+	code_text, _ := node_attr(node, "code")
 	code, valid_code := strconv.parse_uint(code_text, 10)
 	if valid_code &&
 	   code == 515 &&
@@ -834,20 +834,6 @@ Pairing_QR_State :: struct {
 	initialized:                               bool,
 }
 
-pairing_node_attr :: proc(
-	node: Binary_Node,
-	key: string,
-) -> (
-	string,
-	bool,
-) {
-	for attr in node.attrs {
-		if attr.key == key do return attr.value, true
-
-	}
-	return "", false
-}
-
 pairing_node_child :: proc(
 	node: Binary_Node,
 	tag: string,
@@ -1033,12 +1019,12 @@ pairing_device_handle :: proc(
 
 	if iq.tag != "iq" do return 0, {kind = .Invalid_Stanza}
 
-	if kind, ok := pairing_node_attr(iq, "type");
+	if kind, ok := node_attr(iq, "type");
 	   !ok || kind != "set" {
 		return 0, {kind = .Invalid_Stanza}
 	}
 
-	id, id_present := pairing_node_attr(iq, "id")
+	id, id_present := node_attr(iq, "id")
 	if !id_present || len(id) == 0 {
 		return 0, {kind = .Missing_ID}
 	}
@@ -1211,7 +1197,7 @@ pairing_success_stanza_decode :: proc(
 ) -> (string, ^Binary_Node, ^Binary_Node, ^Binary_Node, Pairing_Error) {
 	if iq.tag != "iq" do return "", nil, nil, nil, {kind = .Invalid_Stanza}
 
-	id, present := pairing_node_attr(iq, "id")
+	id, present := node_attr(iq, "id")
 	if !present || id == "" {
 		return "", nil, nil, nil, {kind = .Missing_ID}
 	}
@@ -1300,7 +1286,7 @@ pairing_success_signed_identity_decode :: proc(
 pairing_success_metadata_decode :: proc(
 	next: ^Paired_Account, pair, device_node: ^Binary_Node,
 ) -> Pairing_Error {
-	jid, has_jid := pairing_node_attr(device_node^, "jid")
+	jid, has_jid := node_attr(device_node^, "jid")
 	if !has_jid do return {kind = .Invalid_JID}
 
 	if _, _, jid_err := pairing_jid_decode(jid);
@@ -1310,11 +1296,11 @@ pairing_success_metadata_decode :: proc(
 
 	name, platform := "", ""
 	if biz, ok := pairing_node_child(pair^, "biz"); ok {
-		name, _ = pairing_node_attr(biz^, "name")
+		name, _ = node_attr(biz^, "name")
 	}
 
 	if os_node, ok := pairing_node_child(pair^, "platform"); ok {
-		platform, _ = pairing_node_attr(os_node^, "name")
+		platform, _ = node_attr(os_node^, "name")
 	}
 
 	if len(jid) > 160 ||

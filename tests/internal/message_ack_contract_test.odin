@@ -24,7 +24,7 @@ message_ack_expect :: proc(t: ^testing.T, wire: ^Send_Id_Wire,
 	testing.expect_value(t, doc.root.tag, "ack")
 	testing.expect_value(t, len(doc.root.attrs), len(expected))
 	for attr in expected {
-		value, found := pairing_node_attr(doc.root, attr.key)
+		value, found := node_attr(doc.root, attr.key)
 		testing.expect(t, found && value == attr.value)
 	}
 }

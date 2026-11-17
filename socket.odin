@@ -480,7 +480,7 @@ socket_receive_inner :: proc(
 		return socket_login_provision_start(socket, event)
 	case .Node:
 		if socket.provision_stage != .None {
-			id, _ := pairing_node_attr(event.node, "id")
+			id, _ := node_attr(event.node, "id")
 			if event.node.tag == "iq" &&
 			   id ==
 				   cast(string)socket.provision_id[:socket.provision_id_size] {
@@ -520,7 +520,7 @@ socket_login_provision_start :: proc(
 	socket: ^Socket, event: Session_Event,
 ) -> (Socket_Event, Socket_Error) {
 	socket.phase = .Provisioning
-	if lid, found := pairing_node_attr(event.node, "lid");
+	if lid, found := node_attr(event.node, "lid");
 	   found && device_user_valid(lid, true) {
 		if e := state_store_set(
 			socket.store,
@@ -891,8 +891,8 @@ socket_control_node :: proc(
 		return {}
 	}
 
-	kind, _ := pairing_node_attr(node, "type")
-	from, _ := pairing_node_attr(node, "from")
+	kind, _ := node_attr(node, "type")
+	from, _ := node_attr(node, "from")
 	if kind != "encrypt" ||
 	   (from != "@s.whatsapp.net" && from != "s.whatsapp.net") {
 		return {}
@@ -901,7 +901,7 @@ socket_control_node :: proc(
 	count, found := pairing_node_child(node, "count")
 	if !found do return {}
 
-	value, _ := pairing_node_attr(count^, "value")
+	value, _ := node_attr(count^, "value")
 	n, valid := strconv.parse_uint(value, 10)
 	if !valid || n >= PREKEY_SERVER_MIN_COUNT do return {}
 
@@ -1007,7 +1007,7 @@ socket_query :: proc(
 	copy(attrs[:], query.attrs)
 	count := len(query.attrs)
 	buffer_id: [128]u8
-	id, has_id := pairing_node_attr(query, "id")
+	id, has_id := node_attr(query, "id")
 	if has_id {
 		if !device_request_valid(id) {
 			return {}, {kind = .Invalid_Config}
@@ -1160,7 +1160,7 @@ socket_query_response_receive :: proc(
 			continue
 		}
 
-		response_id, _ := pairing_node_attr(event.node, "id")
+		response_id, _ := node_attr(event.node, "id")
 		if response_id != id do continue
 
 		return socket_query_response_copy(event.node)
