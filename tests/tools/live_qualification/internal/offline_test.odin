@@ -73,7 +73,7 @@ probe_storage_is_private_complete_exclusive_and_resumable :: proc(t: ^testing.T)
  testing.expect_value(t, storage_open(other, path, .Pair_New, "offline"), .Already_Open)
  lock_path := storage_path(path, "owner.lock"); defer delete(lock_path)
  process, started := os.process_start({command = {
-  "sh", #directory + "/tests/lock_peer/run.sh", lock_path,
+  "sh", #directory + "/../../tests/tools/live_qualification/lock_peer/run.sh", lock_path,
  }})
  assert(started == nil)
  state, waited := os.process_wait(process)

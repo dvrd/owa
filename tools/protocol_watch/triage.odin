@@ -61,7 +61,7 @@ OWNERS := [?]Owner {
 		"baileys",
 		"src/Defaults/baileys-version.json",
 		[]string{"pairing.odin", "connection.odin"},
-		[]string{"tools/live_qualification/tests/internal/offline_test.odin"},
+		[]string{"tests/tools/live_qualification/internal/offline_test.odin"},
 		"Does this advertised version require a payload change, or only a separately qualified version choice?",
 	},
 	{
@@ -104,7 +104,7 @@ OWNERS := [?]Owner {
 		"pair.go",
 		[]string{"pairing.odin", "protobuf.odin", "auth.odin"},
 		[]string {
-			"tools/live_qualification/tests/internal/offline_test.odin",
+			"tests/tools/live_qualification/internal/offline_test.odin",
 			"tests/internal/pairing_domains_test.odin",
 			"tests/internal/pairing_qr_profile_test.odin",
 		},
@@ -128,7 +128,7 @@ OWNERS := [?]Owner {
 		"whatsmeow",
 		"store/clientpayload.go",
 		[]string{"pairing.odin", "protobuf.odin"},
-		[]string{"tools/live_qualification/tests/internal/offline_test.odin"},
+		[]string{"tests/tools/live_qualification/internal/offline_test.odin"},
 		"Which advertised client payload field changed, and does the local encoder emit it?",
 	},
 	{

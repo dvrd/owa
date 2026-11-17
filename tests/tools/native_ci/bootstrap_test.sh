@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 umask 077
-here=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+here=$(CDPATH= cd -- "$(dirname -- "$0")/../../../tools/native_ci" && pwd -P)
 work=$(mktemp -d "${TMPDIR:-/tmp}/owa-bootstrap-fixtures.XXXXXX")
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 mkdir "$work/assets" "$work/sdk" "$work/dependencies"

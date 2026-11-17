@@ -5,7 +5,7 @@ import tempfile,types,unittest
 from unittest import mock
 
 def load(name):
- s=importlib.util.spec_from_file_location('install_test_'+name,((Path(__file__).resolve().parent if name.startswith('test_') else Path(__file__).resolve().parents[1]) / (name+'.py')));m=importlib.util.module_from_spec(s);s.loader.exec_module(m);return m
+ s=importlib.util.spec_from_file_location('install_test_'+name,((Path(__file__).resolve().parent if name.startswith('test_') else Path(__file__).resolve().parents[3]/'tools/deployment') / (name+'.py')));m=importlib.util.module_from_spec(s);s.loader.exec_module(m);return m
 I=load('install');T=load('test_bundle')
 class Fake:
  def __init__(self,fail=False):self.created=0;self.ownership=[];self.stopped=[];self.fail=fail

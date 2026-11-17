@@ -3,7 +3,7 @@ import importlib.util, json, os
 from pathlib import Path
 import stat, tempfile, types, unittest
 from unittest import mock
-SPEC=importlib.util.spec_from_file_location('supervisor',(Path(__file__).resolve().parents[1] / ('supervisor.py')))
+SPEC=importlib.util.spec_from_file_location('supervisor',(Path(__file__).resolve().parents[3] / 'tools/reliability' / ('supervisor.py')))
 S=importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(S)
 
 class Tests(unittest.TestCase):

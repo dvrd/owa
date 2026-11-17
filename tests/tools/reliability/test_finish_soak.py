@@ -10,7 +10,7 @@ import types
 import unittest
 from unittest import mock
 SPEC=importlib.util.spec_from_file_location(
-    'finish_soak',(Path(__file__).resolve().parents[1] / ('finish_soak.py')))
+    'finish_soak',(Path(__file__).resolve().parents[3] / 'tools/reliability' / ('finish_soak.py')))
 F=importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(F)
 
 class Tests(unittest.TestCase):

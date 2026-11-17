@@ -9,7 +9,7 @@ on:
       - '.github/workflows/protocol-review.yml'
       - 'tools/protocol_watch/**'
       - 'tools/native_ci/bootstrap.sh'
-      - 'tools/native_ci/tests/bootstrap_test.sh'
+      - 'tests/tools/native_ci/bootstrap_test.sh'
       - 'tools/native_ci/pin.json'
 
   pull_request:
@@ -17,7 +17,7 @@ on:
       - '.github/workflows/protocol-review.yml'
       - 'tools/protocol_watch/**'
       - 'tools/native_ci/bootstrap.sh'
-      - 'tools/native_ci/tests/bootstrap_test.sh'
+      - 'tests/tools/native_ci/bootstrap_test.sh'
       - 'tools/native_ci/pin.json'
 
 permissions:
@@ -40,7 +40,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang-18 libclang-rt-18-dev libedit2 libxml2 libz3-4 jq
       - name: Verify offline bootstrap refusal controls
-        run: tools/native_ci/tests/bootstrap_test.sh
+        run: tests/tools/native_ci/bootstrap_test.sh
       - name: Bootstrap immutable native compiler and dependencies
         run: |
           tools/native_ci/bootstrap.sh --work "$RUNNER_TEMP/protocol-toolchain"

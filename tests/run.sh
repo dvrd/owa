@@ -46,8 +46,9 @@ while IFS= read -r directory; do
     private=false
     case "$relative" in
         tests/internal) owner=.; private=true ;;
-        */tests/internal) owner=${relative%/tests/internal}; private=true ;;
-        */*) owner=${relative%/*} ;;
+        tests/*/internal) owner=${relative#tests/}; owner=${owner%/internal}; private=true ;;
+        tests) owner=. ;;
+        tests/*) owner=${relative#tests/} ;;
         *) owner=. ;;
     esac
     if [[ "$library" == async ]]; then
@@ -101,15 +102,21 @@ for argument do
 done
 [[ "$has_output" == true ]] || flags+=("-out:$work/tests")
 staged=$shared/$library
+# <library>/tests/<package>/internal holds private tests for <library>/<package>.
 while IFS= read -r directory; do
-    target=$(dirname -- "$(dirname -- "$directory")")
+    rest=${directory#"$shared"/}
+    package=${rest#*/tests}; package=${package%internal}; package=${package#/}; package=${package%/}
+    target=$shared/${rest%%/*}${package:+/$package}
     for file in "$directory"/*.odin; do [[ ! -f "$file" ]] || cp "$file" "$target/"; done
-done < <(find "$shared" -type d -path "*/tests/internal" | sort)
+done < <(find "$shared" -type d \( -path "$shared/*/tests/internal" -o -path "$shared/*/tests/*/internal" \) | sort)
 set -m
 cd "$shared"
 while IFS=$'\t' read -r relative private; do
     target=$staged/$relative
-    if [[ "$private" == true ]]; then target=${target%/tests/internal}; fi
+    if [[ "$private" == true ]]; then
+        package=${relative#tests}; package=${package%internal}; package=${package#/}; package=${package%/}
+        target=$staged${package:+/$package}
+    fi
     printf 'Testing %s\n' "$relative"
     "$compiler" test "$target" "${flags[@]}" </dev/null & child=$!
     (sleep 300; printf 'Test timeout: %s\n' "$relative" >&2; kill -TERM -- "-$child" 2>/dev/null || :; sleep 5; kill -KILL -- "-$child" 2>/dev/null || :) & timer=$!

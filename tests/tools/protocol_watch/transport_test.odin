@@ -1,5 +1,5 @@
 package protocol_watch_test
-import w ".."
+import w "../../../tools/protocol_watch"
 import "core:fmt"
 import "core:mem"
 import "core:net"

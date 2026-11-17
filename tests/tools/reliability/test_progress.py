@@ -2,7 +2,7 @@
 import importlib.util
 from pathlib import Path
 import unittest
-SPEC=importlib.util.spec_from_file_location('progress',(Path(__file__).resolve().parents[1] / ('progress.py')))
+SPEC=importlib.util.spec_from_file_location('progress',(Path(__file__).resolve().parents[3] / 'tools/reliability' / ('progress.py')))
 P=importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(P)
 
 class Tests(unittest.TestCase):

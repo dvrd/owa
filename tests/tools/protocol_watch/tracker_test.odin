@@ -1,6 +1,6 @@
 package protocol_watch_test
 
-import w ".."
+import w "../../../tools/protocol_watch"
 import j "core:encoding/json"
 import "core:fmt"
 import "core:mem"

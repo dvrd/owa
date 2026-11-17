@@ -8,7 +8,7 @@ import sys
 import unittest
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'tools/native_ci'))
 import assets
 
 
@@ -67,7 +67,7 @@ class Tests(unittest.TestCase):
                 gate.live_binary_identity(link, 'macos-arm64')
 
     def gate(self):
-        spec = importlib.util.spec_from_file_location('native_gate', (Path(__file__).resolve().parents[1] / ('run.py')))
+        spec = importlib.util.spec_from_file_location('native_gate', (Path(__file__).resolve().parents[3] / 'tools/native_ci' / ('run.py')))
         gate = importlib.util.module_from_spec(spec); spec.loader.exec_module(gate)
         return gate
 
