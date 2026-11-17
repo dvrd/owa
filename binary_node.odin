@@ -540,7 +540,7 @@ binary_write_packed_string :: proc(writer: ^Binary_Writer, value: string) -> boo
 		for c in value {
 			if !is_digit(c) && c != '-' && c != '.' do nibble = false
 
-			if !is_digit(c) && (c < 'A' || c > 'F') do hex = false
+			if !is_hex_upper(c) do hex = false
 		}
 		if nibble do packed_type = .NIBBLE_8
 

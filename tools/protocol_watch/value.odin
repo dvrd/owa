@@ -107,7 +107,7 @@ hex_valid :: proc(s: string, n: int) -> bool {
 		return false
 	}
 	for c in s {
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+		if !is_hex_lower(c) {
 			return false
 		}
 	}
@@ -122,9 +122,7 @@ path_valid :: proc(path: string) -> bool {
 			return false
 		}
 		for c in part {
-			if !(c >= 'A' && c <= 'Z' ||
-				   c >= 'a' && c <= 'z' ||
-				   c >= '0' && c <= '9' ||
+			if !(is_alphanumeric(c) ||
 				   c == '_' ||
 				   c == '.' ||
 				   c == '-') {
@@ -360,7 +358,7 @@ run_valid :: proc(run: string) -> bool {
 		return false
 	}
 	for c in run[len(prefix):] {
-		if c < '0' || c > '9' {
+		if !is_digit(c) {
 			return false
 		}
 	}

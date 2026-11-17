@@ -874,7 +874,7 @@ payload_platform :: proc(browser: string) -> u32 {
 		match := true
 		for c, j in browser {
 			upper := c
-			if upper >= 'a' && upper <= 'z' {
+			if is_lower(upper) {
 				upper -= 'a' - 'A'
 			}
 

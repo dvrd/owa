@@ -230,9 +230,9 @@ reference_commit :: proc(source: string) -> string {
 	return ""
 }
 identifier_start :: proc(c: u8) -> bool {
-	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_' || c == '$'
+	return is_alpha(c) || c == '_' || c == '$'
 }
-identifier_part :: proc(c: u8) -> bool {return identifier_start(c) || c >= '0' && c <= '9'}
+identifier_part :: proc(c: u8) -> bool {return identifier_start(c) || is_digit(c)}
 sensitive_comment :: proc(comment: string) -> bool {
 	lower := strings.to_lower(comment)
 	for marker in ([]string {
@@ -305,10 +305,10 @@ number_end :: proc(s: string, at: int) -> int {
 		for i < len(s) {
 			c := s[i]
 			if c == '_' ||
-			   c >= '0' && c <= '1' ||
-			   (radix == 'o' || radix == 'O') && c >= '2' && c <= '7' ||
-			   (radix == 'x' || radix == 'X') &&
-				   (c >= '2' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+			   c == '0' ||
+			   c == '1' ||
+			   (radix == 'o' || radix == 'O') && is_octal_digit(c) ||
+			   (radix == 'x' || radix == 'X') && is_hex_digit(c) {
 				i += 1
 			} else {
 				break
@@ -319,15 +319,15 @@ number_end :: proc(s: string, at: int) -> int {
 		}
 		return i
 	}
-	for i < len(s) && (s[i] >= '0' && s[i] <= '9' || s[i] == '_') {i += 1}
+	for i < len(s) && (is_digit(s[i]) || s[i] == '_') {i += 1}
 	if i < len(s) && s[i] == '.' {
-		i += 1; for i < len(s) && (s[i] >= '0' && s[i] <= '9' || s[i] == '_') {i += 1}
+		i += 1; for i < len(s) && (is_digit(s[i]) || s[i] == '_') {i += 1}
 	}
 	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
 		end := i + 1; if end < len(s) && (s[end] == '+' || s[end] == '-') {
 			end += 1
 		}; start := end
-		for end < len(s) && (s[end] >= '0' && s[end] <= '9' || s[end] == '_') {end += 1}
+		for end < len(s) && (is_digit(s[end]) || s[end] == '_') {end += 1}
 		if end > start {
 			i = end
 		}
@@ -424,8 +424,8 @@ lex :: proc(data: []u8, language: string) -> (Lexed, string) {
 			start := i; i += 1; for i < len(s) && identifier_part(s[i]) {i += 1}
 			append(&result.tokens, Token{"identifier", s[start:i]}); continue
 		}
-		if c >= '0' && c <= '9' ||
-		   c == '.' && i + 1 < len(s) && s[i + 1] >= '0' && s[i + 1] <= '9' {
+		if is_digit(c) ||
+		   c == '.' && i + 1 < len(s) && is_digit(s[i + 1]) {
 			start := i; i = number_end(s, i)
 			if i < len(s) && identifier_part(s[i]) {
 				return {}, "NUMBER_BOUNDARY"
@@ -439,8 +439,7 @@ lex :: proc(data: []u8, language: string) -> (Lexed, string) {
 		if language == "ts" &&
 		   strings.has_prefix(s[i:], "?.") &&
 		   i + 2 < len(s) &&
-		   s[i + 2] >= '0' &&
-		   s[i + 2] <= '9' {
+		   is_digit(s[i + 2]) {
 			return {}, "OPTIONAL_CHAIN_DECIMAL_AMBIGUITY"
 		}
 		matched := false

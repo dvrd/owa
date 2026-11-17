@@ -801,7 +801,7 @@ validate_issue :: proc(issue: Value) -> Failure {
 		return "LINEAR_ISSUE_INVALID"
 	}
 	for c in identifier[len(prefix):] {
-		if c < '0' || c > '9' {
+		if !is_digit(c) {
 			return "LINEAR_ISSUE_INVALID"
 		}
 	}

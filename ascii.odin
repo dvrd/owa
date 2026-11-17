@@ -17,3 +17,13 @@ is_digit :: proc(c: $T) -> bool where T == u8 || T == rune {
 is_alphanumeric :: proc(c: $T) -> bool where T == u8 || T == rune {
 	return is_alpha(c) || is_digit(c)
 }
+
+@(private)
+is_lower :: proc(c: $T) -> bool where T == u8 || T == rune {
+	return c >= 'a' && c <= 'z'
+}
+
+@(private)
+is_hex_upper :: proc(c: $T) -> bool where T == u8 || T == rune {
+	return is_digit(c) || c >= 'A' && c <= 'F'
+}
