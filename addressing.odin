@@ -480,61 +480,6 @@ remote_device_jid :: proc(
 	return cast(string)dst[:len(text)], {}
 }
 
-device_keys_query_encode :: proc(
-	dst: []u8,
-	jids: []string,
-	request_id: string,
-) -> (
-	int,
-	Device_Error,
-) {
-	if len(jids) == 0 || !device_request_valid(request_id) {
-		return 0, {kind = .Invalid_Request}
-	}
-
-	if len(jids) > MAX_DEVICE_QUERY_USERS {
-		return 0, {kind = .Limit_Exceeded}
-	}
-
-	attrs: [MAX_DEVICE_QUERY_USERS][1]Binary_Node_Attribute
-	nodes: [MAX_DEVICE_QUERY_USERS]Binary_Node
-	for jid, i in jids {
-		if !device_user_valid(jid, true) {
-			return 0, {kind = .Invalid_JID}
-		}
-
-		for previous in jids[:i] do if previous == jid {
-			return 0, {kind = .Invalid_Request}
-		}
-
-		attrs[i] = {{"jid", jid}}
-		nodes[i] = {
-			tag   = "user",
-			attrs = attrs[i][:],
-		}
-	}
-	n, err := binary_node_encode(
-		dst,
-		{
-			tag = "iq",
-			attrs = []Binary_Node_Attribute {
-				{"xmlns", "encrypt"},
-				{"type", "get"},
-				{"to", "@s.whatsapp.net"},
-				{"id", request_id},
-			},
-			content = []Binary_Node {
-				{tag = "key", content = nodes[:len(jids)]},
-			},
-		},
-	)
-	if err.kind != .None {
-		return n, {kind = .Binary_Node_Failed, binary = err}
-	}
-
-	return n, {}
-}
-
 device_request_valid :: proc(id: string) -> bool {
 	if len(id) == 0 || len(id) > 128 do return false
 
@@ -674,50 +619,6 @@ Group_Error :: struct {
 	server_code:           u32,
 	required_participants: int,
 	binary:                Binary_Node_Error,
-}
-
-// Encodes the pinned Baileys groupMetadata query. Caller assigns a unique IQ
-// ID and routes the matching result; this function performs no network I/O.
-group_metadata_query_encode :: proc(
-	dst: []u8,
-	jid, request_id: string,
-) -> (
-	int,
-	Group_Error,
-) {
-	if !group_jid_valid(jid) {
-		return 0, {kind = .Invalid_Group_JID}
-	}
-
-	if len(request_id) == 0 ||
-	   len(request_id) > 128 ||
-	   !utf8.valid_string(request_id) {
-		return 0, {kind = .Invalid_Request_ID}
-	}
-
-	node := Binary_Node {
-		tag     = "iq",
-		attrs   = []Binary_Node_Attribute {
-			{"type", "get"},
-			{"xmlns", "w:g2"},
-			{"to", jid},
-			{"id", request_id},
-		},
-		content = []Binary_Node {
-			{
-				tag = "query",
-				attrs = []Binary_Node_Attribute {
-					{"request", "interactive"},
-				},
-			},
-		},
-	}
-	n, err := binary_node_encode(dst, node)
-	if err.kind != .None {
-		return n, {kind = .Binary_Node_Failed, binary = err}
-	}
-
-	return n, {}
 }
 
 // Strings borrow node's document (except jid, which borrows expected_jid).

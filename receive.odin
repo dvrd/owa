@@ -2073,7 +2073,7 @@ socket_prune_pending_ids :: proc(
 	if allocation != nil {return nil, {kind = .Allocation_Failed, allocation = allocation}}
 	for record in store.records {
 		if record.kind == .Outbound_Message {
-			pending[state_hash(transmute([]u8)record.name)] = true
+			pending[sha256(transmute([]u8)record.name)] = true
 		} else if record.kind == .Inbox_Message {
 			// socket_inbox_key is group|canonical participant|message ID.
 			// Split only the first two delimiters: IDs may themselves contain '|'.
@@ -2083,7 +2083,7 @@ socket_prune_pending_ids :: proc(
 			second := strings.index_byte(rest, '|')
 			if second < 0 {continue}
 			id := rest[second + 1:]
-			pending[state_hash(transmute([]u8)id)] = true
+			pending[sha256(transmute([]u8)id)] = true
 		}
 	}
 	return pending, {}
@@ -2121,7 +2121,7 @@ socket_prune_retry_record :: proc(
 		timestamp, changed = now_seconds, true
 	}
 	id := socket_retry_record_id(record.name)
-	if id == "" || pending[state_hash(transmute([]u8)id)] {return false, changed, {}}
+	if id == "" || pending[sha256(transmute([]u8)id)] {return false, changed, {}}
 	return timestamp < cutoff, changed, {}
 }
 
@@ -2139,7 +2139,7 @@ socket_prune_record :: proc(
 		if len(record.data) != 8 {return false, false, {}}
 		for value in record.data {timestamp = timestamp << 8 | cast(u64)value}
 	} else if record.kind == .Outbound_Content {
-		if pending[state_hash(transmute([]u8)record.name)] {return false, false, {}}
+		if pending[sha256(transmute([]u8)record.name)] {return false, false, {}}
 		document, decoded := binary_node_decode(record.data)
 		if decoded.kind != .None {return false, false, {kind = .Binary_Failed, binary = decoded}}
 		text, _ := pairing_node_attr(document.root, "t")

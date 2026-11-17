@@ -7,7 +7,6 @@ import "core:crypto"
 import "core:crypto/aes"
 import "core:crypto/hkdf"
 import "core:crypto/hmac"
-import "core:crypto/sha2"
 import "core:encoding/base64"
 import "core:encoding/json"
 import "core:mem"
@@ -194,8 +193,8 @@ media_encrypt :: proc(
 	defer crypto.zero_explicit(&mac, 32)
 	copy(dst[cipher_size:required], mac[:MEDIA_MAC_SIZE])
 	metadata.media_key = media_key
-	metadata.file_sha256 = media_hash(plaintext)
-	metadata.file_enc_sha256 = media_hash(dst[:required])
+	metadata.file_sha256 = sha256(plaintext)
+	metadata.file_enc_sha256 = sha256(dst[:required])
 	metadata.file_length = cast(u64)len(plaintext)
 	return required, metadata, {}
 }
@@ -263,7 +262,7 @@ media_decrypt :: proc(
 media_ciphertext_authenticate :: proc(
 	encrypted: []u8, details: ^Media_Metadata, keys: ^Media_Keys,
 ) -> Media_Error {
-	hash := media_hash(encrypted)
+	hash := sha256(encrypted)
 	if crypto.compare_constant_time(
 		   hash[:],
 		   details.file_enc_sha256[:],
@@ -327,7 +326,7 @@ media_plaintext_validate :: proc(
 		return {kind = .File_Length_Mismatch}
 	}
 
-	hash := media_hash(plaintext[:plain_size])
+	hash := sha256(plaintext[:plain_size])
 	if crypto.compare_constant_time(
 		   hash[:],
 		   details.file_sha256[:],
@@ -337,15 +336,6 @@ media_plaintext_validate :: proc(
 	}
 
 	return {}
-}
-
-media_hash :: proc(data: []u8) -> [32]u8 {
-	ctx: sha2.Context_256
-	sha2.init_256(&ctx)
-	sha2.update(&ctx, data)
-	hash: [32]u8
-	sha2.final(&ctx, hash[:])
-	return hash
 }
 
 media_mac :: proc(keys: Media_Keys, ciphertext: []u8) -> [32]u8 {
@@ -1949,7 +1939,7 @@ media_upload_input_validate :: proc(encrypted: []u8, metadata: Media_Metadata,
 		return {kind = .Invalid_Encrypted_Length}
 	}
 
-	if media_hash(encrypted) != metadata.file_enc_sha256 {
+	if sha256(encrypted) != metadata.file_enc_sha256 {
 		return {kind = .Encrypted_Hash_Mismatch}
 	}
 	return {}
@@ -3026,7 +3016,7 @@ socket_media_existing_send :: proc(
 	if message.caption != caption || message.mime_type != mime_type ||
 	   message.file_name != file_name {return "", true, {kind = .Invalid_Config}}
 	if metadata.file_length != u64(len(plaintext)) ||
-	   metadata.file_sha256 != media_hash(plaintext) {return "", true, {kind = .Invalid_Config}}
+	   metadata.file_sha256 != sha256(plaintext) {return "", true, {kind = .Invalid_Config}}
 	owned, error := socket_send_group(socket, group, protobuf, expected_type, id)
 	return owned, true, error
 }

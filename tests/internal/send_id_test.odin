@@ -183,7 +183,7 @@ send_id_retained_content_does_not_fabricate_acknowledgment :: proc(t: ^testing.T
 send_id_media_fixture :: proc(fixture: ^Send_Id_Fixture) {
  assert(state_store_delete(&fixture.store, .Outbound_Content, "stable-id").kind == .None)
  assert(state_store_delete(&fixture.store, .Outbound_Message, "stable-id").kind == .None)
- hash := media_hash(transmute([]u8)string("%PDF-original"))
+ hash := sha256(transmute([]u8)string("%PDF-original"))
  key: [32]u8; key[0] = 1
  message := Media_Message{kind = .Document, url = "https://mmg.whatsapp.net/a.enc",
   direct_path = "/a.enc", mime_type = "application/pdf", caption = "caption", file_name = "a.pdf",

@@ -2,7 +2,6 @@ package whatsapp
 
 import "core:bytes"
 import "core:crypto"
-import "core:crypto/sha2"
 import subtle "core:crypto/_subtle"
 import "core:crypto/aes"
 import "core:crypto/hkdf"
@@ -350,49 +349,6 @@ signal_group_message_decode :: proc(
 	}
 
 	return m, .None
-}
-
-// Low-level signed envelope encoder. Ciphertext must already be CBC padded.
-signal_group_message_encode :: proc(
-	dst: []u8,
-	id, iteration: u32,
-	ciphertext: []u8,
-	signing_private: [32]u8,
-) -> (
-	written: int,
-	err: Signal_Group_Error,
-) {
-	if len(ciphertext) == 0 || len(ciphertext) % 16 != 0 {
-		return 0, .Invalid_Ciphertext
-	}
-
-	if len(ciphertext) > MAX_SIGNAL_CIPHERTEXT_SIZE {
-		return 0, .Payload_Oversized
-	}
-
-	size :=
-		group_message_header_size(id, iteration, len(ciphertext)) +
-		len(ciphertext) +
-		64
-	if len(dst) < size do return 0, .Destination_Undersized
-
-	if bytes.alias(dst[:size], ciphertext) {
-		return 0, .Overlapping_Buffers
-	}
-
-	when !crypto.HAS_RAND_BYTES do return 0, .Entropy_Unavailable
-	written = group_message_header(
-		dst,
-		id,
-		iteration,
-		len(ciphertext),
-	)
-	written += copy(dst[written:], ciphertext)
-	signature, e := signal_curve_sign(signing_private, dst[:written])
-	if e != .None do return 0, .Signature_Failed
-
-	written += copy(dst[written:], signature[:])
-	return written, .None
 }
 
 // Caller transaction rule: operate on a candidate record, persist it durably,
@@ -747,22 +703,22 @@ signal_group_record_encode :: proc(
 
 	copy(dst, []u8{'O', 'D', 'G', 'R', 'O', 'U', 'P', 0})
 	at := 8
-	group_put(dst, &at, 1, 2)
-	group_put(dst, &at, cast(u64)record.count, 1)
+	store_put(dst, &at, 1, 2)
+	store_put(dst, &at, cast(u64)record.count, 1)
 	for &s in record.states[:record.count] {
-		group_put(dst, &at, cast(u64)s.id, 4)
-		group_put(dst, &at, s.next_iteration, 8)
+		store_put(dst, &at, cast(u64)s.id, 4)
+		store_put(dst, &at, s.next_iteration, 8)
 		at += copy(dst[at:], s.chain_seed[:])
 		at += copy(dst[at:], s.signing_public[:])
 		at += copy(dst[at:], s.signing_private[:])
-		group_put(dst, &at, (s.has_private ? 1 : 0), 1)
-		group_put(dst, &at, cast(u64)s.skipped_count, 2)
+		store_put(dst, &at, (s.has_private ? 1 : 0), 1)
+		store_put(dst, &at, cast(u64)s.skipped_count, 2)
 		for &key in s.skipped[:s.skipped_count] {
-			group_put(dst, &at, cast(u64)key.iteration, 4)
+			store_put(dst, &at, cast(u64)key.iteration, 4)
 			at += copy(dst[at:], key.seed[:])
 		}
 	}
-	digest := group_snapshot_hash(dst[:at])
+	digest := sha256(dst[:at])
 	copy(dst[at:], digest[:])
 	return size, .None
 }
@@ -790,13 +746,13 @@ signal_group_record_decode :: proc(
 	}
 
 	end := len(src) - 32
-	digest := group_snapshot_hash(src[:end])
+	digest := sha256(src[:end])
 	if crypto.compare_constant_time(digest[:], src[end:]) != 1 {
 		return .Checksum_Mismatch
 	}
 
 	at := 8
-	if group_get(src, &at, 2) != 1 {
+	if store_get(src, &at, 2) != 1 {
 		return .Invalid_Snapshot
 	}
 
@@ -808,7 +764,7 @@ signal_group_record_decode :: proc(
 		signal_group_record_clear(next)
 		free(next, allocator)
 	}
-	next.count = cast(int)group_get(src, &at, 1)
+	next.count = cast(int)store_get(src, &at, 1)
 	if next.count > MAX_GROUP_KEY_STATES {
 		return .Invalid_Snapshot
 	}
@@ -832,45 +788,27 @@ group_snapshot_states_decode :: proc(
 	for &s in next.states[:next.count] {
 		if end - at^ < 111 do return .Invalid_Snapshot
 
-		s.id = cast(u32)group_get(src, at, 4)
-		s.next_iteration = group_get(src, at, 8)
+		s.id = cast(u32)store_get(src, at, 4)
+		s.next_iteration = store_get(src, at, 8)
 		at^ += copy(s.chain_seed[:], src[at^:][:32])
 		at^ += copy(s.signing_public[:], src[at^:][:32])
 		at^ += copy(s.signing_private[:], src[at^:][:32])
-		flag := group_get(src, at, 1)
+		flag := store_get(src, at, 1)
 		if flag > 1 do return .Invalid_Snapshot
 
 		s.has_private = flag == 1
-		s.skipped_count = cast(int)group_get(src, at, 2)
+		s.skipped_count = cast(int)store_get(src, at, 2)
 		if s.skipped_count > MAX_GROUP_SKIPPED_KEYS ||
 		   s.skipped_count * 36 > end - at^ {
 			return .Invalid_Snapshot
 		}
 
 		for &key in s.skipped[:s.skipped_count] {
-			key.iteration = cast(u32)group_get(src, at, 4)
+			key.iteration = cast(u32)store_get(src, at, 4)
 			at^ += copy(key.seed[:], src[at^:][:32])
 		}
 	}
 	return .None
-}
-group_snapshot_hash :: proc(src: []u8) -> [32]u8 {
-	ctx: sha2.Context_256
-	sha2.init_256(&ctx)
-	sha2.update(&ctx, src)
-	digest: [32]u8
-	sha2.final(&ctx, digest[:])
-	return digest
-}
-group_put :: proc(dst: []u8, at: ^int, value: u64, size: int) {
-	for i in 0 ..< size do dst[at^ + i] = cast(u8)(value >> cast(uint)((size - 1 - i) * 8))
-	at^ += size
-}
-group_get :: proc(src: []u8, at: ^int, size: int) -> u64 {
-	value: u64
-	for i in 0 ..< size do value = value << 8 | cast(u64)src[at^ + i]
-	at^ += size
-	return value
 }
 
 group_bytes_write :: proc(
@@ -1215,7 +1153,6 @@ signal_message_mac_verify :: proc(
 
 // Pairwise Signal sessions and Double Ratchet.
 
-SIGNAL_SESSION_VERSION :: 3
 SIGNAL_SESSION_WIRE_VERSION :: cast(u8)0x33
 MAX_SIGNAL_SKIPPED_KEYS :: 2000
 MAX_SIGNAL_RECEIVING_CHAINS :: 32
@@ -2489,39 +2426,6 @@ signal_session_put_public :: proc(
 	at^ += 35
 }
 
-signal_session_decrypt_message :: proc(
-	session: ^Signal_Session,
-	dst: []u8,
-	kind: Signal_Message_Type,
-	wire: []u8,
-	local: Signal_Recipient_Keys,
-	trusted_identity: [32]u8,
-) -> (
-	written: int,
-	consumed_prekey_id: u32,
-	error: Signal_Session_Error,
-) {
-	#partial switch kind {
-	case .Prekey:
-		return signal_session_decrypt_prekey(
-			session,
-			dst,
-			wire,
-			local,
-			trusted_identity,
-		)
-	case .Whisper:
-		count, decrypt_err := signal_session_decrypt(
-			session,
-			dst,
-			wire,
-			trusted_identity,
-		)
-		return count, 0, decrypt_err
-	}
-	return 0, 0, {kind = .Invalid_Message}
-}
-
 // Structural validation for durable snapshots. A checksum is not an identity
 // trust decision; the caller still supplies trusted_identity on every use.
 signal_session_validate :: proc(
@@ -2664,14 +2568,14 @@ signal_session_encode :: proc(
 
 	written = 11
 	signal_session_keys_encode(dst, session, &written)
-	signal_store_put(
+	store_put(
 		dst,
 		&written,
 		cast(u64)(session.send_counter + 1),
 		8,
 	)
-	signal_store_put(dst, &written, cast(u64)chains, 1)
-	signal_store_put(
+	store_put(dst, &written, cast(u64)chains, 1)
+	store_put(
 		dst,
 		&written,
 		cast(u64)session.skipped_count,
@@ -2679,11 +2583,9 @@ signal_session_encode :: proc(
 	)
 	signal_session_chains_encode(dst, session, &written)
 	assert(written + 32 == required)
-	ctx: sha2.Context_256
-	sha2.init_256(&ctx)
-	sha2.update(&ctx, dst[:written])
-	sha2.final(&ctx, dst[written:written + 32])
-	return written + 32, {}
+	checksum := sha256(dst[:written])
+	written += copy(dst[written:], checksum[:])
+	return written, {}
 }
 
 signal_session_keys_encode :: proc(dst: []u8, session: ^Signal_Session, at: ^int) {
@@ -2694,7 +2596,7 @@ signal_session_keys_encode :: proc(dst: []u8, session: ^Signal_Session, at: ^int
 		session.pending_prekey_id,
 		session.previous_counter,
 	}
-	for value in metadata do signal_store_put(dst, at, cast(u64)value, 4)
+	for value in metadata do store_put(dst, at, cast(u64)value, 4)
 	parts := [?][]u8 {
 		session.local_identity_public[:],
 		session.remote_identity_public[:],
@@ -2723,7 +2625,7 @@ signal_session_chains_encode :: proc(
 		for value in chain.chain_key {
 			dst[at^] = value; at^ += 1
 		}
-		signal_store_put(
+		store_put(
 			dst,
 			at,
 			cast(u64)(chain.counter + 1),
@@ -2733,10 +2635,10 @@ signal_session_chains_encode :: proc(
 	for key, i in session.skipped {
 		if !key.in_use do continue
 
-		signal_store_put(dst, at, cast(u64)i, 2)
+		store_put(dst, at, cast(u64)i, 2)
 		dst[at^] = cast(u8)key.chain_index
 		at^ += 1
-		signal_store_put(dst, at, cast(u64)key.counter, 4)
+		store_put(dst, at, cast(u64)key.counter, 4)
 		for value in key.seed {dst[at^] = value; at^ += 1}
 	}
 }
@@ -2760,14 +2662,14 @@ signal_session_decode :: proc(
 	defer signal_session_clear(&next)
 	at := 11
 	signal_session_keys_decode(&next, src, &at)
-	counter := signal_store_get(src, &at, 8)
+	counter := store_get(src, &at, 8)
 	if counter > cast(u64)max(u32) + 1 {
 		return {kind = .Invalid_Format}
 	}
 
 	next.send_counter = cast(i64)counter - 1
-	chains := cast(int)signal_store_get(src, &at, 1)
-	skipped := cast(int)signal_store_get(src, &at, 2)
+	chains := cast(int)store_get(src, &at, 1)
+	skipped := cast(int)store_get(src, &at, 2)
 	if chains > MAX_SIGNAL_RECEIVING_CHAINS ||
 	   skipped > MAX_SIGNAL_SKIPPED_KEYS ||
 	   len(src) != 330 + chains * 74 + skipped * 39 {
@@ -2786,23 +2688,23 @@ signal_session_decode :: proc(
 }
 
 signal_session_keys_decode :: proc(next: ^Signal_Session, src: []u8, at: ^int) {
-	next.local_registration_id = cast(u32)signal_store_get(
+	next.local_registration_id = cast(u32)store_get(
 		src,
 		at,
 		4,
 	)
-	next.remote_registration_id = cast(u32)signal_store_get(
+	next.remote_registration_id = cast(u32)store_get(
 		src,
 		at,
 		4,
 	)
-	next.pending_signed_prekey_id = cast(u32)signal_store_get(
+	next.pending_signed_prekey_id = cast(u32)store_get(
 		src,
 		at,
 		4,
 	)
-	next.pending_prekey_id = cast(u32)signal_store_get(src, at, 4)
-	next.previous_counter = cast(u32)signal_store_get(src, at, 4)
+	next.pending_prekey_id = cast(u32)store_get(src, at, 4)
+	next.previous_counter = cast(u32)store_get(src, at, 4)
 	parts := [?][]u8 {
 		next.local_identity_public[:],
 		next.remote_identity_public[:],
@@ -2836,11 +2738,7 @@ signal_session_snapshot_validate :: proc(src: []u8) -> Signal_Session_Error {
 		return {kind = .Invalid_Format}
 	}
 
-	ctx: sha2.Context_256
-	checksum: [32]u8
-	sha2.init_256(&ctx)
-	sha2.update(&ctx, src[:len(src) - 32])
-	sha2.final(&ctx, checksum[:])
+	checksum := sha256(src[:len(src) - 32])
 	if crypto.compare_constant_time(
 		   checksum[:],
 		   src[len(src) - 32:],
@@ -2868,7 +2766,7 @@ signal_session_chains_decode :: proc(
 		chain.in_use, chain.closed = true, flags == 1
 		copy(chain.ratchet_public[:], src[at^:at^ + 32]); at^ += 32
 		copy(chain.chain_key[:], src[at^:at^ + 32]); at^ += 32
-		stored_counter := signal_store_get(src, at, 8)
+		stored_counter := store_get(src, at, 8)
 		if stored_counter > cast(u64)max(u32) + 1 {
 			return {kind = .Invalid_Format}
 		}
@@ -2876,7 +2774,7 @@ signal_session_chains_decode :: proc(
 		chain.counter = cast(i64)stored_counter - 1
 	}
 	for _ in 0 ..< skipped {
-		index := cast(int)signal_store_get(src, at, 2)
+		index := cast(int)store_get(src, at, 2)
 		chain_index := cast(u16)src[at^]; at^ += 1
 		if index >= MAX_SIGNAL_SKIPPED_KEYS ||
 		   next.skipped[index].in_use {
@@ -2885,26 +2783,10 @@ signal_session_chains_decode :: proc(
 
 		key := &next.skipped[index]
 		key.in_use, key.chain_index = true, chain_index
-		key.counter = cast(u32)signal_store_get(src, at, 4)
+		key.counter = cast(u32)store_get(src, at, 4)
 		copy(key.seed[:], src[at^:at^ + 32]); at^ += 32
 	}
 	next.skipped_count = skipped
 	return {}
 }
 
-signal_store_put :: proc(
-	dst: []u8,
-	at: ^int,
-	value: u64,
-	size: int,
-) {
-	for i in 0 ..< size do dst[at^ + i] = cast(u8)(value >> cast(uint)(8 * (size - i - 1)))
-	at^ += size
-}
-
-signal_store_get :: proc(src: []u8, at: ^int, size: int) -> u64 {
-	value: u64
-	for i in 0 ..< size do value = value << 8 | cast(u64)src[at^ + i]
-	at^ += size
-	return value
-}

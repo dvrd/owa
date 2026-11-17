@@ -2,12 +2,8 @@ package whatsapp
 
 import "core:bytes"
 import "core:crypto"
-import "core:crypto/sha2"
-import "core:fmt"
-import "core:io"
 import "core:mem"
 import "core:os"
-import "core:path/filepath"
 import "core:strconv"
 
 // Device credentials and authentication persistence.
@@ -291,15 +287,11 @@ auth_state_encode :: proc(
 	copy(dst[:8], AUTH_STATE_MAGIC)
 	dst[8], dst[9] = 0, AUTH_STATE_VERSION
 	n = 10
-	auth_put_u32(dst, &n, cast(u32)(required - 46))
-	auth_put_u32(dst, &n, state.credentials.registration_id)
-	auth_put_u32(dst, &n, state.credentials.signed_prekey_id)
-	auth_put_u32(dst, &n, state.credentials.next_prekey_id)
-	auth_put_u32(
-		dst,
-		&n,
-		state.credentials.first_unuploaded_prekey_id,
-	)
+	store_put(dst, &n, cast(u64)(required - 46), 4)
+	store_put(dst, &n, cast(u64)state.credentials.registration_id, 4)
+	store_put(dst, &n, cast(u64)state.credentials.signed_prekey_id, 4)
+	store_put(dst, &n, cast(u64)state.credentials.next_prekey_id, 4)
+	store_put(dst, &n, cast(u64)state.credentials.first_unuploaded_prekey_id, 4)
 	dst[n] = state.credentials.registered ? 1 : 0
 	n += 1
 	secrets := [7][]u8 {
@@ -317,17 +309,14 @@ auth_state_encode :: proc(
 	auth_account_encode(dst, state, &n)
 
 	assert(n + 32 == required)
-	checksum: sha2.Context_256
-	sha2.init_256(&checksum)
-	sha2.update(&checksum, dst[:n])
-	sha2.final(&checksum, dst[n:n + 32])
-	n += 32
+	checksum := sha256(dst[:n])
+	n += copy(dst[n:], checksum[:])
 	return n, {}
 }
 
 auth_account_encode :: proc(dst: []u8, state: ^Auth_State, at: ^int) {
 	if state.account.valid {
-		auth_put_u32(dst, at, state.account.key_index)
+		store_put(dst, at, cast(u64)state.account.key_index, 4)
 		dst[at^] = state.account.hosted ? 1 : 0
 		at^ += 1
 		dst[at^] = u8(state.account.signature_policy)
@@ -362,13 +351,10 @@ auth_state_decode :: proc(
 
 	next: Auth_State
 	defer auth_state_clear(&next)
-	next.credentials.registration_id = auth_get_u32(src, &at)
-	next.credentials.signed_prekey_id = auth_get_u32(src, &at)
-	next.credentials.next_prekey_id = auth_get_u32(src, &at)
-	next.credentials.first_unuploaded_prekey_id = auth_get_u32(
-		src,
-		&at,
-	)
+	next.credentials.registration_id = cast(u32)store_get(src, &at, 4)
+	next.credentials.signed_prekey_id = cast(u32)store_get(src, &at, 4)
+	next.credentials.next_prekey_id = cast(u32)store_get(src, &at, 4)
+	next.credentials.first_unuploaded_prekey_id = cast(u32)store_get(src, &at, 4)
 	if src[at] > 1 do return {kind = .Invalid_Format}
 
 	next.credentials.registered = src[at] == 1
@@ -416,15 +402,11 @@ auth_state_header_validate :: proc(src: []u8) -> (int, Auth_Store_Error) {
 	}
 
 	at := 10
-	if cast(int)auth_get_u32(src, &at) != len(src) - 46 {
+	if cast(int)cast(u32)store_get(src, &at, 4) != len(src) - 46 {
 		return 0, {kind = .Invalid_Format}
 	}
 
-	hash: [32]u8
-	checksum: sha2.Context_256
-	sha2.init_256(&checksum)
-	sha2.update(&checksum, src[:len(src) - 32])
-	sha2.final(&checksum, hash[:])
+	hash := sha256(src[:len(src) - 32])
 	if crypto.compare_constant_time(hash[:], src[len(src) - 32:]) !=
 	   1 {
 		return 0, {kind = .Checksum_Mismatch}
@@ -439,7 +421,7 @@ auth_account_decode :: proc(
 	if next.account.valid {
 		if end - at^ < 5 do return {kind = .Invalid_Format}
 
-		next.account.key_index = auth_get_u32(src, at)
+		next.account.key_index = cast(u32)store_get(src, at, 4)
 		if src[at^] > 1 do return {kind = .Invalid_Format}
 
 		next.account.hosted = src[at^] == 1
@@ -505,63 +487,17 @@ auth_state_save :: proc(
 	if encode_err.kind != .None do return encode_err
 
 	when !crypto.HAS_RAND_BYTES do return {kind = .Entropy_Unavailable}
-	random: [8]u8
-	crypto.rand_bytes(random[:])
-	temporary := fmt.aprintf(
-		"%s.tmp-%016x",
-		path,
-		transmute(u64)random,
-	)
-	defer delete(temporary)
-	file, open_err := os.open(
-		temporary,
-		{.Write, .Create, .Excl},
-		{.Read_User, .Write_User},
-	)
-	if open_err != nil {
-		return {kind = .Write_Failed, io = open_err}
+	// session_checkpoint permits a pairing reply only after this returns.
+	step, io_err := durable_write(path, buffer[:size])
+	kinds := [Durable_Write_Step]Auth_Store_Error_Kind {
+		.None      = .None,
+		.Write     = .Write_Failed,
+		.Flush     = .Flush_Failed,
+		.Close     = .Close_Failed,
+		.Rename    = .Rename_Failed,
+		.Directory = .Flush_Failed,
 	}
-
-	closed, renamed: bool
-	defer {
-		if !closed do os.close(file)
-
-		if !renamed do os.remove(temporary)
-
-	}
-	n, write_err := os.write(file, buffer[:size])
-	if write_err != nil || n != size {
-		return {kind = .Write_Failed, io = write_err}
-	}
-
-	if err := os.flush(file); err != nil {
-		return {kind = .Flush_Failed, io = err}
-	}
-
-	close_err := os.close(file)
-	closed = true
-	if close_err != nil {
-		return {kind = .Close_Failed, io = close_err}
-	}
-
-	if err := os.rename(temporary, path); err != nil {
-		return {kind = .Rename_Failed, io = err}
-	}
-
-	renamed = true
-	// Flushing the file protects its contents, but the directory entry must
-	// also be durable before session_checkpoint permits a pairing reply.
-	parent, parent_err := os.open(filepath.dir(path))
-	if parent_err != nil {
-		return {kind = .Flush_Failed, io = parent_err}
-	}
-
-	defer os.close(parent)
-	if err := os.flush(parent); err != nil {
-		return {kind = .Flush_Failed, io = err}
-	}
-
-	return {}
+	return {kind = kinds[step], io = io_err}
 }
 
 auth_state_load :: proc(
@@ -578,37 +514,16 @@ auth_state_load :: proc(
 	defer os.close(file)
 	buffer: [MAX_AUTH_STATE_SIZE + 1]u8
 	defer crypto.zero_explicit(&buffer, size_of(buffer))
-	used := 0
-	for used < len(buffer) {
-		count, err := os.read(file, buffer[used:])
-		used += count
-		if err != nil && err != io.Error.EOF {
-			return {kind = .Read_Failed, io = err}
-		}
-
-		if count == 0 || err == io.Error.EOF do break
-
+	used, read_err := bounded_read(file, buffer[:])
+	if read_err != nil {
+		return {kind = .Read_Failed, io = read_err}
 	}
+
 	if used > MAX_AUTH_STATE_SIZE {
 		return {kind = .State_Oversized}
 	}
 
 	return auth_state_decode(state, buffer[:used])
-}
-
-auth_put_u32 :: proc(dst: []u8, at: ^int, value: u32) {
-	for i in 0 ..< 4 do dst[at^ + i] = cast(u8)(value >> cast(uint)(24 - i * 8))
-	at^ += 4
-}
-
-auth_get_u32 :: proc(src: []u8, at: ^int) -> u32 {
-	value :=
-		cast(u32)src[at^] << 24 |
-		cast(u32)src[at^ + 1] << 16 |
-		cast(u32)src[at^ + 2] << 8 |
-		cast(u32)src[at^ + 3]
-	at^ += 4
-	return value
 }
 
 // One-time prekey provisioning and persistence.
@@ -1135,14 +1050,14 @@ prekey_store_encode :: proc(
 	}
 
 	at := copy(dst, transmute([]u8)PREKEY_STORE_MAGIC)
-	prekey_put_uint(dst, &at, PREKEY_STORE_VERSION, 2)
+	store_put(dst, &at, PREKEY_STORE_VERSION, 2)
 	at += copy(dst[at:], store.identity_public[:])
-	prekey_put_uint(dst, &at, cast(u64)store.next_id, 4)
-	prekey_put_uint(dst, &at, store.revision, 8)
-	prekey_put_uint(dst, &at, cast(u64)store.count, 2)
-	prekey_put_uint(dst, &at, cast(u64)store.pending_first_id, 4)
-	prekey_put_uint(dst, &at, cast(u64)store.pending_count, 2)
-	prekey_put_uint(
+	store_put(dst, &at, cast(u64)store.next_id, 4)
+	store_put(dst, &at, store.revision, 8)
+	store_put(dst, &at, cast(u64)store.count, 2)
+	store_put(dst, &at, cast(u64)store.pending_first_id, 4)
+	store_put(dst, &at, cast(u64)store.pending_count, 2)
+	store_put(
 		dst,
 		&at,
 		cast(u64)store.pending_request_id_size,
@@ -1153,7 +1068,7 @@ prekey_store_encode :: proc(
 		store.pending_request_id[:store.pending_request_id_size],
 	)
 	for key in store.keys[:store.count] {
-		prekey_put_uint(dst, &at, cast(u64)key.id, 4)
+		store_put(dst, &at, cast(u64)key.id, 4)
 		dst[at] = cast(u8)key.status
 		at += 1
 		for value, i in key.private do dst[at + i] = value
@@ -1161,7 +1076,7 @@ prekey_store_encode :: proc(
 		for value, i in key.public do dst[at + i] = value
 		at += 32
 	}
-	hash := prekey_hash(dst[:at])
+	hash := sha256(dst[:at])
 	copy(dst[at:], hash[:])
 	return size, {}
 }
@@ -1177,7 +1092,7 @@ prekey_store_decode :: proc(
 	   header_error.kind != .None do return header_error
 
 	at := 8
-	if prekey_get_uint(src, &at, 2) != PREKEY_STORE_VERSION {
+	if store_get(src, &at, 2) != PREKEY_STORE_VERSION {
 		return {kind = .Unsupported_Version}
 	}
 
@@ -1185,12 +1100,12 @@ prekey_store_decode :: proc(
 	defer prekey_store_clear(&next)
 	next.initialized = true
 	at += copy(next.identity_public[:], src[at:][:32])
-	next.next_id = cast(u32)prekey_get_uint(src, &at, 4)
-	next.revision = prekey_get_uint(src, &at, 8)
-	next.count = cast(int)prekey_get_uint(src, &at, 2)
-	next.pending_first_id = cast(u32)prekey_get_uint(src, &at, 4)
-	next.pending_count = cast(int)prekey_get_uint(src, &at, 2)
-	next.pending_request_id_size = cast(int)prekey_get_uint(
+	next.next_id = cast(u32)store_get(src, &at, 4)
+	next.revision = store_get(src, &at, 8)
+	next.count = cast(int)store_get(src, &at, 2)
+	next.pending_first_id = cast(u32)store_get(src, &at, 4)
+	next.pending_count = cast(int)store_get(src, &at, 2)
+	next.pending_request_id_size = cast(int)store_get(
 		src,
 		&at,
 		2,
@@ -1211,7 +1126,7 @@ prekey_store_decode :: proc(
 		src[at:][:next.pending_request_id_size],
 	)
 	for &key in next.keys[:next.count] {
-		key.id = cast(u32)prekey_get_uint(src, &at, 4)
+		key.id = cast(u32)store_get(src, &at, 4)
 		key.status = cast(Prekey_Status)src[at]
 		at += 1
 		at += copy(key.private[:], src[at:][:32])
@@ -1244,7 +1159,7 @@ prekey_store_header_validate :: proc(src: []u8) -> Prekey_Error {
 		return {kind = .Invalid_Format}
 	}
 
-	hash := prekey_hash(src[:len(src) - 32])
+	hash := sha256(src[:len(src) - 32])
 	if crypto.compare_constant_time(hash[:], src[len(src) - 32:]) !=
 	   1 {
 		return {kind = .Checksum_Mismatch}
@@ -1253,9 +1168,7 @@ prekey_store_header_validate :: proc(src: []u8) -> Prekey_Error {
 	return {}
 }
 
-// Exclusive temporary file, mode0600, full write+fsync, atomic rename, then
-// directory fsync. A failed durability step never permits upload. Serialize
-// writers; this is a local single-process store, not a multi-writer database.
+// A failed durability step never permits upload.
 prekey_store_save :: proc(
 	path: string,
 	store: ^Prekey_Store,
@@ -1266,73 +1179,20 @@ prekey_store_save :: proc(
 	if encode_err.kind != .None do return encode_err
 
 	when !crypto.HAS_RAND_BYTES do return {kind = .Entropy_Unavailable}
-	random: [8]u8
-	crypto.rand_bytes(random[:])
-	temporary := fmt.aprintf(
-		"%s.tmp-%016x",
-		path,
-		transmute(u64)random,
-	)
-	defer delete(temporary)
-	file, open_err := os.open(
-		temporary,
-		{.Write, .Create, .Excl},
-		{.Read_User, .Write_User},
-	)
-	if open_err != nil {
-		return {kind = .Write_Failed, io = open_err}
-	}
-
-	closed, renamed: bool
-	defer {
-		if !closed do os.close(file)
-
-		if !renamed do os.remove(temporary)
-
-	}
-	if write_error := prekey_store_write_flush(file, buffer[:size]);
-	   write_error.kind != .None do return write_error
-
-	close_err := os.close(file)
-	closed = true
-	if close_err != nil {
-		return {kind = .Close_Failed, io = close_err}
-	}
-
-	if err := os.rename(temporary, path); err != nil {
-		return {kind = .Rename_Failed, io = err}
-	}
-
-	renamed = true
-	parent := filepath.dir(path)
-	directory, directory_err := os.open(parent)
-	if directory_err != nil {
-		return {kind = .Directory_Sync_Failed, io = directory_err}
-	}
-
-	defer os.close(directory)
-	if err := os.flush(directory); err != nil {
-		return {kind = .Directory_Sync_Failed, io = err}
+	step, io_err := durable_write(path, buffer[:size])
+	if step != .None {
+		kinds := [Durable_Write_Step]Prekey_Error_Kind {
+			.None      = .None,
+			.Write     = .Write_Failed,
+			.Flush     = .Flush_Failed,
+			.Close     = .Close_Failed,
+			.Rename    = .Rename_Failed,
+			.Directory = .Directory_Sync_Failed,
+		}
+		return {kind = kinds[step], io = io_err}
 	}
 
 	store.durable_revision = store.revision
-	return {}
-}
-
-prekey_store_write_flush :: proc(file: ^os.File, buffer: []u8) -> Prekey_Error {
-	written := 0
-	for written < len(buffer) {
-		count, err := os.write(file, buffer[written:])
-		written += count
-		if err != nil || count == 0 {
-			return {kind = .Write_Failed, io = err}
-		}
-
-	}
-	if err := os.flush(file); err != nil {
-		return {kind = .Flush_Failed, io = err}
-	}
-
 	return {}
 }
 
@@ -1351,17 +1211,11 @@ prekey_store_load :: proc(
 	defer os.close(file)
 	buffer: [MAX_PREKEY_STORE_SIZE + 1]u8
 	defer crypto.zero_explicit(&buffer, size_of(buffer))
-	used := 0
-	for used < len(buffer) {
-		count, err := os.read(file, buffer[used:])
-		used += count
-		if err != nil && err != io.Error.EOF {
-			return {kind = .Read_Failed, io = err}
-		}
-
-		if count == 0 || err == io.Error.EOF do break
-
+	used, read_err := bounded_read(file, buffer[:])
+	if read_err != nil {
+		return {kind = .Read_Failed, io = read_err}
 	}
+
 	if used > MAX_PREKEY_STORE_SIZE {
 		return {kind = .State_Oversized}
 	}
@@ -1614,27 +1468,6 @@ prekey_response_validate :: proc(
 
 prekey_id_bytes :: proc(id: u32) -> [3]u8 {
 	return {cast(u8)(id >> 16), cast(u8)(id >> 8), cast(u8)id}
-}
-
-prekey_put_uint :: proc(dst: []u8, at: ^int, value: u64, size: int) {
-	for i in 0 ..< size do dst[at^ + i] = cast(u8)(value >> cast(uint)((size - 1 - i) * 8))
-	at^ += size
-}
-
-prekey_get_uint :: proc(src: []u8, at: ^int, size: int) -> u64 {
-	value: u64
-	for i in 0 ..< size do value = value << 8 | cast(u64)src[at^ + i]
-	at^ += size
-	return value
-}
-
-prekey_hash :: proc(src: []u8) -> [32]u8 {
-	ctx: sha2.Context_256
-	sha2.init_256(&ctx)
-	sha2.update(&ctx, src)
-	hash: [32]u8
-	sha2.final(&ctx, hash[:])
-	return hash
 }
 
 // Invoke only after an independently durable Signal-session/consumption

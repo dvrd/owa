@@ -279,18 +279,18 @@ state_store_encode :: proc(
 
 	}
 	at := copy(dst, transmute([]u8)STATE_STORE_MAGIC)
-	state_put(dst, &at, 1, 2)
+	store_put(dst, &at, 1, 2)
 	at += copy(dst[at:], store.identity[:])
-	state_put(dst, &at, store.revision, 8)
-	state_put(dst, &at, cast(u64)len(store.records), 4)
+	store_put(dst, &at, store.revision, 8)
+	store_put(dst, &at, cast(u64)len(store.records), 4)
 	for record in store.records {
-		state_put(dst, &at, cast(u64)record.kind, 1)
-		state_put(dst, &at, cast(u64)len(record.name), 2)
-		state_put(dst, &at, cast(u64)len(record.data), 4)
+		store_put(dst, &at, cast(u64)record.kind, 1)
+		store_put(dst, &at, cast(u64)len(record.name), 2)
+		store_put(dst, &at, cast(u64)len(record.data), 4)
 		at += copy(dst[at:], transmute([]u8)record.name)
 		at += copy(dst[at:], record.data)
 	}
-	hash := state_hash(dst[:at])
+	hash := sha256(dst[:at])
 	copy(dst[at:], hash[:])
 	return size, {}
 }
@@ -374,19 +374,19 @@ state_store_decode_header :: proc(
 	if !bytes.equal(source[:8], transmute([]u8)STATE_STORE_MAGIC) {
 		return 0, 0, {kind = .Invalid_Format}
 	}
-	digest := state_hash(source[:len(source) - 32])
+	digest := sha256(source[:len(source) - 32])
 	if crypto.compare_constant_time(digest[:], source[len(source) - 32:]) != 1 {
 		return 0, 0, {kind = .Checksum_Mismatch}
 	}
 	position := 8
-	if state_get(source, &position, 2) != 1 {return 0, 0, {kind = .Invalid_Format}}
+	if store_get(source, &position, 2) != 1 {return 0, 0, {kind = .Invalid_Format}}
 	local_identity := identity
 	if crypto.compare_constant_time(source[position:][:32], local_identity[:]) != 1 {
 		return 0, 0, {kind = .Identity_Mismatch}
 	}
 	position += 32
-	revision = state_get(source, &position, 8)
-	record_count := state_get(source, &position, 4)
+	revision = store_get(source, &position, 8)
+	record_count := store_get(source, &position, 4)
 	if revision == 0 || record_count > MAX_STATE_RECORDS {
 		return 0, 0, {kind = .Invalid_Format}
 	}
@@ -407,9 +407,9 @@ state_store_decode_records :: proc(
 	position, end := STATE_STORE_HEADER_SIZE, len(source) - 32
 	for _ in 0..<count {
 		if end - position < 7 {return {kind = .Invalid_Format}}
-		kind := cast(State_Record_Kind)state_get(source, &position, 1)
-		name_size := cast(int)state_get(source, &position, 2)
-		data_size := cast(int)state_get(source, &position, 4)
+		kind := cast(State_Record_Kind)store_get(source, &position, 1)
+		name_size := cast(int)store_get(source, &position, 2)
+		data_size := cast(int)store_get(source, &position, 4)
 		if name_size > 512 || data_size > MAX_STATE_RECORD_SIZE ||
 		   name_size + data_size > end - position {
 			return {kind = .Invalid_Format}
@@ -477,8 +477,17 @@ state_store_save :: proc(
 	_, encoded := state_store_encode(buffer, store)
 	if encoded.kind != .None do return encoded
 
-	if err := state_atomic_write(path, buffer); err.kind != .None {
-		return err
+	step, io_err := durable_write(path, buffer)
+	if step != .None {
+		kinds := [Durable_Write_Step]State_Error_Kind {
+			.None      = .None,
+			.Write     = .Write_Failed,
+			.Flush     = .Flush_Failed,
+			.Close     = .Write_Failed,
+			.Rename    = .Rename_Failed,
+			.Directory = .Flush_Failed,
+		}
+		return {kind = kinds[step], io = io_err}
 	}
 
 	store.durable_revision = store.revision
@@ -511,17 +520,11 @@ state_store_load :: proc(
 		crypto.zero_explicit(raw_data(buffer), len(buffer))
 		delete(buffer)
 	}
-	used := 0
-	for used < len(buffer) {
-		n, read_err := os.read(file, buffer[used:])
-		used += n
-		if read_err != nil && read_err != io.Error.EOF {
-			return {kind = .Read_Failed, io = read_err}
-		}
-
-		if n == 0 || read_err == io.Error.EOF do break
-
+	used, read_err := bounded_read(file, buffer)
+	if read_err != nil {
+		return {kind = .Read_Failed, io = read_err}
 	}
+
 	if err := state_store_decode(store, buffer[:used], identity);
 	   err.kind != .None {
 		return err
@@ -547,7 +550,26 @@ state_record_valid :: proc(
 
 	return true
 }
-state_atomic_write :: proc(path: string, data: []u8) -> State_Error {
+Durable_Write_Step :: enum {
+	None,
+	Write,
+	Flush,
+	Close,
+	Rename,
+	Directory,
+}
+
+// Exclusive temporary file, mode 0600, full write+fsync, atomic rename, then
+// directory fsync: flushing the file protects its contents, but the directory
+// entry must be durable too. Reports the step that failed. Serialize writers;
+// this is a local single-process store, not a multi-writer database.
+durable_write :: proc(
+	path: string,
+	data: []u8,
+) -> (
+	Durable_Write_Step,
+	os.Error,
+) {
 	random: [8]u8
 	crypto.rand_bytes(random[:])
 	tmp := fmt.aprintf("%s.tmp-%016x", path, transmute(u64)random)
@@ -557,58 +579,60 @@ state_atomic_write :: proc(path: string, data: []u8) -> State_Error {
 		{.Write, .Create, .Excl},
 		{.Read_User, .Write_User},
 	)
-	if open_err != nil {
-		return {kind = .Write_Failed, io = open_err}
-	}
+	if open_err != nil do return .Write, open_err
 
 	closed, renamed := false, false
 	defer {
-		if !closed {
-			os.close(file)
-		}
+		if !closed do os.close(file)
 
-		if !renamed {
-			os.remove(tmp)
-		}
-
+		if !renamed do os.remove(tmp)
 	}
 	at := 0
 	for at < len(data) {
 		n, err := os.write(file, data[at:])
 		at += n
-		if err != nil || n == 0 {
-			return {kind = .Write_Failed, io = err}
-		}
-
+		if err != nil || n == 0 do return .Write, err
 	}
-	if err := os.flush(file); err != nil {
-		return {kind = .Flush_Failed, io = err}
-	}
+	if err := os.flush(file); err != nil do return .Flush, err
 
 	close_err := os.close(file)
 	closed = true
-	if close_err != nil {
-		return {kind = .Write_Failed, io = close_err}
-	}
+	if close_err != nil do return .Close, close_err
 
-	if err := os.rename(tmp, path); err != nil {
-		return {kind = .Rename_Failed, io = err}
-	}
+	if err := os.rename(tmp, path); err != nil do return .Rename, err
 
 	renamed = true
 	parent, parent_err := os.open(filepath.dir(path))
-	if parent_err != nil {
-		return {kind = .Flush_Failed, io = parent_err}
-	}
+	if parent_err != nil do return .Directory, parent_err
 
 	defer os.close(parent)
-	if err := os.flush(parent); err != nil {
-		return {kind = .Flush_Failed, io = err}
-	}
+	if err := os.flush(parent); err != nil do return .Directory, err
 
-	return {}
+	return .None, nil
 }
-state_hash :: proc(src: []u8) -> [32]u8 {
+
+// Reads until EOF or a full buffer. Callers size the buffer one byte past
+// their limit so an oversized file is detected instead of truncated.
+bounded_read :: proc(
+	file: ^os.File,
+	buffer: []u8,
+) -> (
+	used: int,
+	err: os.Error,
+) {
+	for used < len(buffer) {
+		n, read_err := os.read(file, buffer[used:])
+		used += n
+		if read_err == io.Error.EOF do break
+
+		if read_err != nil do return used, read_err
+
+		if n == 0 do break
+	}
+	return used, nil
+}
+
+sha256 :: proc(src: []u8) -> [32]u8 {
 	ctx: sha2.Context_256
 	sha2.init_256(&ctx)
 	sha2.update(&ctx, src)
@@ -616,11 +640,11 @@ state_hash :: proc(src: []u8) -> [32]u8 {
 	sha2.final(&ctx, digest[:])
 	return digest
 }
-state_put :: proc(dst: []u8, at: ^int, value: u64, size: int) {
+store_put :: proc(dst: []u8, at: ^int, value: u64, size: int) {
 	for i in 0 ..< size do dst[at^ + i] = cast(u8)(value >> cast(uint)((size - 1 - i) * 8))
 	at^ += size
 }
-state_get :: proc(src: []u8, at: ^int, size: int) -> u64 {
+store_get :: proc(src: []u8, at: ^int, size: int) -> u64 {
 	value: u64
 	for i in 0 ..< size do value = value << 8 | cast(u64)src[at^ + i]
 	at^ += size

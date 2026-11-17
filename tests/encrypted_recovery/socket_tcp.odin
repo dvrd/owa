@@ -33,7 +33,7 @@ socket_tcp_connect :: proc(peer: ^Socket_Recovery) {
 
 socket_tcp_wait_replay :: proc(peer: ^Socket_Recovery) {
  path := fmt.aprintf("%s/tcp-replay-received.bin", peer.directory); defer delete(path)
- expected := wa.state_hash(peer.output[:peer.output_size])
+ expected := wa.sha256(peer.output[:peer.output_size])
  started := time.tick_now()
  for {
   assert(time.tick_since(started) < 5*time.Second)
@@ -82,7 +82,7 @@ socket_tcp_receive :: proc(directory: string, packet: []u8, replay: bool) {
   socket_owned_write(directory, "transport-state.bin", witness[:])
  }
  marker := "tcp-replay-received.bin" if replay else "tcp-transport-received.bin"
- digest := wa.state_hash(packet)
+ digest := wa.sha256(packet)
  socket_owned_write(directory, marker, digest[:])
  encoded, encoding := hex.encode(digest[:]); assert(encoding == nil)
  defer delete(encoded)

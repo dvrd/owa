@@ -92,7 +92,7 @@ socket_state_witness :: proc(peer: ^Socket_Recovery) -> [160]u8 {
 	defer delete(prekeys)
 	result: [160]u8
 	for value, index in ([]([]u8){session, group, members, content, prekeys}) {
-		digest := wa.state_hash(value); copy(result[index * 32:][:32], digest[:])
+		digest := wa.sha256(value); copy(result[index * 32:][:32], digest[:])
 	}
 	return result
 }

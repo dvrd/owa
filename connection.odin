@@ -890,12 +890,10 @@ MAX_FRAME_PAYLOAD :: 0xff_ffff
 Frame_Error :: enum {
 	Destination_Undersized,
 	Header_Incomplete,
-	Invalid_Consume_Count,
 	None,
 	Negative_Length,
 	Payload_Incomplete,
 	Payload_Oversized,
-	Receive_Buffer_Full,
 }
 
 frame_encode_len :: proc(
@@ -968,54 +966,6 @@ frame_decode :: proc(
 	}
 
 	return src[FRAME_HEADER_SIZE:required], required, .None
-}
-
-Frame_Reader :: struct {
-	storage: []u8,
-	used:    int,
-}
-
-frame_reader_feed :: proc(
-	reader: ^Frame_Reader,
-	data: []u8,
-) -> Frame_Error {
-	available := len(reader.storage) - reader.used
-
-	if len(data) > available do return .Receive_Buffer_Full
-
-	copy(reader.storage[reader.used:], data)
-	reader.used += len(data)
-
-	return .None
-}
-
-frame_reader_peek :: proc(
-	reader: ^Frame_Reader,
-) -> (
-	payload: []u8,
-	consumed: int,
-	error: Frame_Error,
-) {
-	return frame_decode(reader.storage[:reader.used])
-}
-
-frame_reader_consume :: proc(
-	reader: ^Frame_Reader,
-	count: int,
-) -> Frame_Error {
-	if count < 0 || count > reader.used {
-		return .Invalid_Consume_Count
-	}
-
-	remaining := reader.used - count
-
-	copy(
-		reader.storage[:remaining],
-		reader.storage[count:reader.used],
-	)
-
-	reader.used = remaining
-	return .None
 }
 
 // WhatsApp envelopes over WebSocket
