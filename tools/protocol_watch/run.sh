@@ -14,7 +14,7 @@ while [ "$#" -gt 0 ]; do
   *) break;;
  esac
 done
-if [ -z "$shared" ]; then shared=$(CDPATH= cd -- "$here/../../.." && pwd -P); fi
+if [ -z "$shared" ]; then shared=${WEBTOOLS_SHARED:-$HOME/dev/oss/Odin/shared}; fi
 [ -x "$odin" ] || command -v "$odin" >/dev/null 2>&1 || { printf '%s\n' 'ODIN_COMPILER_REQUIRED' >&2; exit 2; }
 [ -d "$shared/surf" ] && [ -d "$shared/http" ] || { printf '%s\n' 'SHARED_DEPENDENCIES_REQUIRED' >&2; exit 2; }
 case $mode in
@@ -22,7 +22,7 @@ case $mode in
   [ "$#" -eq 0 ] || exit 2
   work=$(mktemp -d "${TMPDIR:-/tmp}/owa-protocol-tests.XXXXXX")
   trap 'rm -rf "$work"' EXIT HUP INT TERM
-  "$odin" test "$here/tests" "-collection:shared=$shared" -thread-count:1 -vet -warnings-as-errors -define:ODIN_TEST_THREADS=1 -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true "-out:$work/tests"
+  "$odin" test "$here/../../tests/tools/protocol_watch" "-collection:shared=$shared" -thread-count:1 -vet -warnings-as-errors -define:ODIN_TEST_THREADS=1 -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true "-out:$work/tests"
   ;;
  build|watch|ci|linear|promotion|schedule)
   if [ -z "$binary" ]; then

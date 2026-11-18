@@ -712,6 +712,17 @@ table :: proc(tokens: []Token, language: string) -> ([]string, []Token, string) 
 	}; return values[:], outside[:], ""
 }
 
+// owner_root is the directory holding a library owner file: the repository's
+// src/ in the src/ layout, the root itself for a flat tree (synthetic fixtures).
+owner_root :: proc(root, relative: string) -> string {
+	direct := strings.concatenate({root, "/", relative}, context.temp_allocator)
+
+	if os.exists(direct) {
+		return root
+	}
+
+	return strings.concatenate({root, "/src"}, context.temp_allocator)
+}
 owned_bytes :: proc(root, relative, prefix, suffix: string) -> ([]u8, string) {
 	if !path_valid(relative) ||
 	   !strings.has_prefix(relative, prefix) ||
@@ -859,7 +870,7 @@ approved_metadata :: proc(assessment: Value, root, path: string) -> (Value, stri
 			return null(), "CONTRACT_OWNERS"
 		}
 
-		bytes, owner_error := owned_bytes(root, owner_path, "", ".odin"); if owner_error != "" {
+		bytes, owner_error := owned_bytes(owner_root(root, owner_path), owner_path, "", ".odin"); if owner_error != "" {
 			return null(), owner_error
 		}
 
@@ -984,7 +995,7 @@ assess :: proc(
 	)
 	targets := make(j.Array)
 	for owner_path in owner.targets {
-		bytes, error := read_file(join(root, owner_path))
+		bytes, error := read_file(join(owner_root(root, owner_path), owner_path))
 
 		if error != "" {
 			put(&result, "local_targets", targets)
@@ -1079,7 +1090,7 @@ assess :: proc(
 	}
 	reference, outside_old, re := table(old.tokens[:], "ts")
 	current, outside_new, ce := table(next.tokens[:], "ts")
-	local_bytes, le := read_file(join(root, "binary_tokens.odin"))
+	local_bytes, le := read_file(join(owner_root(root, "binary_tokens.odin"), "binary_tokens.odin"))
 	local_lex, lxe := lex(local_bytes, "odin")
 	local_values, _, lte := table(local_lex.tokens[:], "odin")
 	if re != "" ||

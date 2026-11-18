@@ -41,18 +41,23 @@ def runtime_entries(repository, commit):
     if git(repository, 'rev-parse', '--verify', commit+'^{commit}').strip() != commit:
         raise CompatibilityError('COMMIT_MISMATCH')
     result = {}
-    for entry in git(repository, 'ls-tree', '-rz', commit).split('\0'):
-        if not entry: continue
+    entries = [entry for entry in git(repository, 'ls-tree', '-rz', commit).split('\0') if entry]
+    # Library sources live under src/ from the src/ layout on, at the root before it.
+    prefix = 'src/' if any(entry.split('\t', 1)[1].startswith('src/') for entry in entries) else ''
+    for entry in entries:
         metadata, name = entry.split('\t', 1)
         mode, kind, blob = metadata.split()
-        # Export public root runtime code/notices only, never tests, reports,
+        relative = name[len(prefix):] if prefix and name.startswith(prefix) else None
+        # Export public runtime code/notices only, never tests, reports,
         # application/account files, arbitrary nested paths or Git metadata.
-        selected = ('/' not in name and name.endswith('.odin') and
-                    not name.endswith('_test.odin')) or name in ('LICENSE', 'LICENSE.txt', 'BAILEYS_LICENSE.txt')
+        if prefix == '':
+            relative = name
+        selected = (relative is not None and '/' not in relative and relative.endswith('.odin') and
+                    not relative.endswith('_test.odin')) or name in ('LICENSE', 'LICENSE.txt', 'BAILEYS_LICENSE.txt')
         if not selected: continue
         if mode not in ('100644', '100755') or kind != 'blob' or not COMMIT.fullmatch(blob):
             raise CompatibilityError('RUNTIME_BLOB_INVALID')
-        result[name] = blob
+        result[relative if relative is not None and relative.endswith('.odin') else name] = blob
     if not result or 'state_store.odin' not in result: raise CompatibilityError('RUNTIME_CLOSURE_MISSING')
     return result
 

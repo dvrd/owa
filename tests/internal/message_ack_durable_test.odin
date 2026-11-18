@@ -1,7 +1,7 @@
 package whatsapp
 
-import surf "../surf"
-import ws "../websocket"
+import surf "shared:surf"
+import ws "shared:websocket"
 import "core:bytes"
 import "core:fmt"
 import "core:testing"

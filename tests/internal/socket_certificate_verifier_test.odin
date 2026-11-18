@@ -1,7 +1,7 @@
 package whatsapp
 
-import network_client "../surf"
-import websocket "../websocket"
+import network_client "shared:surf"
+import websocket "shared:websocket"
 import "core:crypto"
 import "core:crypto/x25519"
 import "core:encoding/hex"

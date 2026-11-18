@@ -1,7 +1,7 @@
 package whatsapp
 
 import "core:testing"
-import network_client "../surf"
+import network_client "shared:surf"
 
 Official_Version_Peer :: struct {
 	calls: int,

@@ -5,7 +5,7 @@ import "core:encoding/hex"
 import "core:strings"
 import "core:mem"
 import "core:testing"
-import network_client "../surf"
+import network_client "shared:surf"
 
 codec_api_hex :: proc(text: string) -> []u8 {
 	decoded, ok := hex.decode(transmute([]u8)text, context.temp_allocator)

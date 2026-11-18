@@ -1,6 +1,6 @@
 package main
 
-import wa "../.."
+import wa "shared:whatsapp"
 import surf "shared:surf"
 import ws "shared:websocket"
 import "core:bytes"

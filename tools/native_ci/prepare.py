@@ -50,45 +50,54 @@ def pinned_runtime(base, pin, platform, output):
     return sealed(entry, output, 'sdk-'+platform)
 
 
-def dependency_sources(shared, stage):
-    repositories, selected = {}, set()
+def dependency_sources(projects, stage):
+    # Each owner is a repository at projects/<owner> whose src/ is the published
+    # library; staged names drop src/ so they match the shared collection.
+    repositories, selected = {}, {}
     for owner in OWNERS:
-        root = shared/owner
+        root = projects/owner
         if git(root, 'status', '--porcelain', '--untracked-files=all'):
             raise assets.AssetError('DEPENDENCY_REPOSITORY_DIRTY: '+owner)
         repositories[owner] = {'revision': git(root, 'rev-parse', 'HEAD'), 'files': {}}
+
+    def select(owner, path):
+        inner = path.relative_to(projects/owner).as_posix()
+        published = inner[len('src/'):] if inner.startswith('src/') else inner
+        selected[owner+'/'+published] = (owner, inner)
+
     for package in PACKAGES:
-        directory = shared/package
+        owner, _, inner = package.partition('/')
+        directory = projects/owner/'src'/inner
         for path in directory.glob('*.odin'):
-            selected.add(path.relative_to(shared).as_posix())
+            select(owner, path)
             for loaded in LOAD.findall(path.read_text()):
-                resource = (directory/loaded).resolve()
-                selected.add(resource.relative_to(shared).as_posix())
+                select(owner, (directory/loaded).resolve())
         readme = directory/'README.md'
-        if readme.is_file(): selected.add(readme.relative_to(shared).as_posix())
+        if readme.is_file(): select(owner, readme)
     for owner in OWNERS:
-        for path in (shared/owner).rglob('*'):
+        for path in (projects/owner).rglob('*'):
             if path.is_file() and path.name.startswith(('LICENSE', 'NOTICE', 'COPYING', 'PROVENANCE')):
-                if '.git' not in path.parts: selected.add(path.relative_to(shared).as_posix())
+                if '.git' not in path.parts and 'tests' not in path.relative_to(projects/owner).parts:
+                    select(owner, path)
     for name in sorted(selected):
-        owner, inner = name.split('/', 1)
+        owner, inner = selected[name]
         if owner not in repositories: raise assets.AssetError('DEPENDENCY_OUTSIDE_DECLARED_OWNER')
-        source = shared/assets.relative(name)
+        source = projects/owner/assets.relative(inner)
         if source.is_symlink() or not source.is_file(): raise assets.AssetError('DEPENDENCY_FILE_INVALID')
-        committed = subprocess.check_output(['git', '-C', str(shared/owner), 'show', 'HEAD:'+inner])
+        committed = subprocess.check_output(['git', '-C', str(projects/owner), 'show', 'HEAD:'+inner])
         if hashlib.sha256(committed).hexdigest() != assets.digest(source):
             raise assets.AssetError('DEPENDENCY_COMMIT_MISMATCH')
         target = stage/name; target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
-        repositories[owner]['files'][inner] = assets.digest(target)
+        repositories[owner]['files'][name.split('/', 1)[1]] = assets.digest(target)
     for owner, record in repositories.items():
-        if git(shared/owner, 'rev-parse', 'HEAD') != record['revision'] or \
-                git(shared/owner, 'status', '--porcelain', '--untracked-files=all'):
+        if git(projects/owner, 'rev-parse', 'HEAD') != record['revision'] or \
+                git(projects/owner, 'status', '--porcelain', '--untracked-files=all'):
             raise assets.AssetError('DEPENDENCY_CHANGED_DURING_EXPORT')
     metadata = {'schema': 1, 'packages': list(PACKAGES), 'repositories': repositories,
                 'license_policy': 'Existing source notices retained unchanged; no new blanket license imposed.'}
     (stage/'provenance.json').write_text(json.dumps(metadata, sort_keys=True, indent=2)+'\n')
-    return selected | {'provenance.json'}, metadata
+    return set(selected) | {'provenance.json'}, metadata
 
 
 def filtered_source(base, pin, stage):
@@ -126,7 +135,8 @@ def filtered_source(base, pin, stage):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mesa-root', type=Path, required=True)
-    parser.add_argument('--shared-root', type=Path, required=True)
+    parser.add_argument('--projects-root', type=Path, default=Path.home()/'dev/projects',
+                        help='Directory holding the dependency repositories (src/ layout)')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--release-tag', required=True)
     parser.add_argument('--pin-output', type=Path, default=HERE/'pin.json')
@@ -143,7 +153,7 @@ def main():
         pin['platforms'][platform] = pinned_runtime(base, mesa_pin, platform, args.output)
     with tempfile.TemporaryDirectory(prefix='owa-public-dependencies-') as tmp:
         stage = Path(tmp)
-        names, dependency_metadata = dependency_sources(args.shared_root.resolve(), stage)
+        names, dependency_metadata = dependency_sources(args.projects_root.resolve(), stage)
         pin['dependencies'] = sealed(assets.package(stage, names, args.output/'dependencies.tar.gz',
             args.output/'dependencies.manifest.json', 'dependencies'), args.output, 'dependencies')
     with tempfile.TemporaryDirectory(prefix='owa-public-source-') as tmp:

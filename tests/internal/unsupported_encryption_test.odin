@@ -2,7 +2,7 @@ package whatsapp
 
 import "core:bytes"
 import "core:testing"
-import surf "../surf"
+import surf "shared:surf"
 
 unsupported_enc_cipher := [1]u8{1}
 unsupported_enc_node :: proc(kind: string, mixed, reverse, group: bool) -> Binary_Node {

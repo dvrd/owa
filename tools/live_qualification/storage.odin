@@ -1,6 +1,6 @@
 package main
 
-import wa "../.."
+import wa "shared:whatsapp"
 import "core:crypto"
 import "core:crypto/sha2"
 import "core:encoding/hex"

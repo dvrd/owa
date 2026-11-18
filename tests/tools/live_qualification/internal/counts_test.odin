@@ -1,6 +1,6 @@
 package main
 
-import wa "../.."
+import wa "shared:whatsapp"
 import "core:testing"
 
 @(test)

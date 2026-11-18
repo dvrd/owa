@@ -240,7 +240,7 @@ tracker_cases :: proc(t: ^testing.T, suffix: string) {
 				bytes := fixture_blob(blobs, w.get(entry, "blob"))
 				if canonical, canonical_ok := w.get(entry, "canonical").(j.String); canonical_ok {
 					loaded, error := os.read_entire_file(
-						w.join(ROOT, string(canonical)),
+						w.join(SOURCE, string(canonical)),
 						context.allocator,
 					)
 					assert(error == nil)

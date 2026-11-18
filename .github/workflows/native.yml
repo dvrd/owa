@@ -7,6 +7,7 @@ on:
   push:
     paths:
       - '*.odin'
+      - 'src/**'
       - 'tests/**'
       - 'tools/live_qualification/**'
       - 'tools/native_ci/**'
@@ -17,6 +18,7 @@ on:
   pull_request:
     paths:
       - '*.odin'
+      - 'src/**'
       - 'tests/**'
       - 'tools/live_qualification/**'
       - 'tools/native_ci/**'

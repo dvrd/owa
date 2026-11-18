@@ -1,7 +1,7 @@
 package main
 
-import wa "../.."
-import surf "../../../surf"
+import wa "shared:whatsapp"
+import surf "shared:surf"
 import "core:testing"
 import "core:time"
 

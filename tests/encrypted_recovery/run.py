@@ -16,7 +16,7 @@ import time
 import native_tcp
 
 HERE = Path(__file__).resolve().parent
-SHARED = HERE.parents[2]
+SHARED = Path(os.environ.get('WEBTOOLS_SHARED', Path.home()/'dev/oss/Odin/shared'))
 OWNER = b'OWA-ENCRYPTED-RECOVERY-V1'
 STAGES = ('receiver-before-commit', 'receiver-after-commit', 'sender-before-commit',
           'sender-after-commit', 'receiver-after-message-commit',

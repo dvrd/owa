@@ -337,8 +337,8 @@ certificate_policy_malformed_or_incomplete_chain_fails_closed :: proc(t: ^testin
 
 // Public server data only. Independent exact Whatsmeow/libsignal verification
 // and the authenticated capture provenance accompany these two binary files.
-PUBLIC_CERTIFICATE :: #load("tests/certificate_policy/certificate.bin")
-PUBLIC_SERVER_STATIC :: #load("tests/certificate_policy/server-static.bin")
+PUBLIC_CERTIFICATE :: #load("../tests/certificate_policy/certificate.bin")
+PUBLIC_SERVER_STATIC :: #load("../tests/certificate_policy/server-static.bin")
 PUBLIC_CAPTURE_TIME_MS :: 1794504045498
 
 @(test)

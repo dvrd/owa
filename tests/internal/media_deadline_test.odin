@@ -1,7 +1,7 @@
 package whatsapp
 
-import http "../http"
-import network_client "../surf"
+import http "shared:http"
+import network_client "shared:surf"
 import "core:testing"
 import "core:time"
 

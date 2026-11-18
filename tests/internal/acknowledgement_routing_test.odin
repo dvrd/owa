@@ -1,10 +1,10 @@
 package whatsapp
 
-import ws "../websocket"
+import ws "shared:websocket"
 import "core:bytes"
 import "core:testing"
 import "core:time"
-import surf "../surf"
+import surf "shared:surf"
 
 // Reference: WhiskeySockets/Baileys src/Socket/messages-recv.ts handleReceipt and
 // handleCall ACK in finally; src/Utils/stanza-ack.ts preserves transport attrs.

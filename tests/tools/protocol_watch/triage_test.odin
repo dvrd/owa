@@ -10,6 +10,7 @@ import "core:strings"
 import "core:testing"
 
 ROOT :: #directory + "/../../.."
+SOURCE :: ROOT + "/src"
 fixture_blob :: proc(blobs, key: w.Value) -> []u8 {
 	record := w.get(blobs, w.str(key))
 
@@ -95,7 +96,7 @@ triage_cases :: proc(t: ^testing.T, suffix: string) {
 				bytes := fixture_blob(blobs, w.get(entry, "blob"))
 
 				if canonical, is_canonical := w.get(entry, "canonical").(j.String); is_canonical {
-					loaded_bytes, read_error := os.read_entire_file(w.join(ROOT, string(canonical)), context.allocator)
+					loaded_bytes, read_error := os.read_entire_file(w.join(SOURCE, string(canonical)), context.allocator)
 					assert(read_error == nil)
 					write_error := os.write_entire_file(path, loaded_bytes)
 					assert(write_error == nil)
@@ -257,7 +258,7 @@ triage_real_owned_dictionary :: proc(t: ^testing.T) {
 	mem.dynamic_arena_init(&arena)
 	defer mem.dynamic_arena_destroy(&arena)
 	context.allocator = mem.dynamic_arena_allocator(&arena)
-	bytes, error := w.read_file(w.join(ROOT, "binary_tokens.odin"))
+	bytes, error := w.read_file(w.join(SOURCE, "binary_tokens.odin"))
 
 	if !testing.expect_value(t, error, "") {
 		return

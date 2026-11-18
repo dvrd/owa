@@ -1,6 +1,6 @@
 package main
 
-import wa "../.."
+import wa "shared:whatsapp"
 import "core:bytes"
 import "core:fmt"
 import "core:os"

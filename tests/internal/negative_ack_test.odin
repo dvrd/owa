@@ -1,8 +1,8 @@
 package whatsapp
 
 import "core:bytes"
-import network_client "../surf"
-import ws "../websocket"
+import network_client "shared:surf"
+import ws "shared:websocket"
 import "core:fmt"
 import "core:os"
 import "core:testing"

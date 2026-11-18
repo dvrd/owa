@@ -257,11 +257,13 @@ def run(args, report):
     expected_sdk = assets.install(pin, pin['platforms'][key], downloads, sdk, args.assets_dir)
     shared = sdk/'shared'
     expected_dependencies = assets.install(pin, pin['dependencies'], downloads, shared, args.assets_dir)
-    copied = shared/'whatsapp'; copied.mkdir()
+    # The checkout is staged whole; the collection's whatsapp is its src/ (the published library).
+    copied = args.work/'whatsapp'; copied.mkdir()
     for name, expected in before_checkout.items():
         source = REPO/name; target = copied/name; target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
         if assets.digest(target) != expected: raise GateError('CHECKOUT_CHANGED_DURING_COPY')
+    shutil.copytree(copied/'src', shared/'whatsapp')
     compiler = sdk/'odin'; env = environment(sdk); rows = report['commands']
     report.update(compiler_sha256=assets.digest(compiler), core_source_revision=pin['core_source_revision'],
                   compiler_source_revision=pin['compiler_source_revision'],

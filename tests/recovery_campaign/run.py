@@ -14,7 +14,8 @@ import tempfile
 import time
 
 HERE = Path(__file__).resolve().parent
-SHARED = HERE.parents[2]
+REPO = HERE.parents[1]
+SHARED = Path(os.environ.get('WEBTOOLS_SHARED', Path.home()/'dev/oss/Odin/shared'))
 STAGES = {
     'before-commit': 'Uncommitted in-memory ratchet changes do not reach the reopened store.',
     'after-intent': 'Durable caller intent preserves its ID, without inventing queued wire or delivery.',
@@ -33,15 +34,15 @@ def digest(path):
 
 def snapshot(shared):
     paths = list((shared/'whatsapp').glob('*.odin'))
-    paths += list((shared/'whatsapp/tests/internal').glob('*.odin'))
-    paths += [shared/'whatsapp/tests/run.sh']
+    paths += list((REPO/'tests/internal').glob('*.odin'))
+    paths += [REPO/'tests/run.sh']
     for directory in ['surf', 'http', 'websocket', 'async']:
         paths += list((shared/directory).rglob('*.odin'))
     for directory in ['core', 'base', 'vendor/zlib']:
         paths += list((shared.parent/directory).rglob('*.odin'))
     paths += list(HERE.glob('*.odin')) + list(HERE.glob('*.py'))
-    paths += list((shared/'whatsapp/tests/loopback_noise').glob('*'))
-    paths += list((shared/'whatsapp/tests/certificate_policy').rglob('*'))
+    paths += list((REPO/'tests/loopback_noise').glob('*'))
+    paths += list((REPO/'tests/certificate_policy').rglob('*'))
     return {str(p): digest(p) for p in sorted(set(paths))
             if p.is_file() and '.git' not in p.parts and '__pycache__' not in p.parts}
 
@@ -113,7 +114,7 @@ def report_safe_exit(code):
 def focused_names(shared):
     names = []
     for file in FOCUSED:
-        source = (shared/'whatsapp/tests/internal'/file).read_text()
+        source = (REPO/'tests/internal'/file).read_text()
         names += ['whatsapp.'+name for name in re.findall(r'@\(test\)\s*(\w+)\s*::', source)]
     assert len(names) >= 20
     return names
@@ -189,7 +190,7 @@ def main():
                     row['duration_seconds'] = time.monotonic()-start
             names = focused_names(args.shared_root)
             focused = Path(tmp)/'focused'
-            command = ['bash', str(args.shared_root/'whatsapp/tests/run.sh'), '--odin', str(args.odin),
+            command = ['bash', str(REPO/'tests/run.sh'), '--odin', str(args.odin), '--shared', str(args.shared_root),
                        '--package', '.', '--internal-only', '--', '-keep-executable', '-thread-count:1',
                        '-define:ODIN_TEST_THREADS=1', '-define:ODIN_TEST_NAMES='+','.join(names),
                        '-warnings-as-errors', '-vet', '-out:'+str(focused)]
@@ -200,7 +201,7 @@ def main():
                              focused_result['stdout'] + focused_result['stderr'])
             report['focused_test_names'] = names
             wire_report = Path(tmp)/'noise.json'
-            execute(['python3', str(args.shared_root/'whatsapp/tests/loopback_noise/run.py'),
+            execute(['python3', str(REPO/'tests/loopback_noise/run.py'),
                 '--odin', str(args.odin), '--shared-root', str(args.shared_root),
                 '--report', str(wire_report), '--sanitize', args.sanitize], report['commands'], 180)
             report['owned_noise_wire'] = json.loads(wire_report.read_text())
