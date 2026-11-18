@@ -13,7 +13,7 @@ import tempfile
 import assets
 
 HERE = Path(__file__).resolve().parent
-PACKAGES = ('async', 'async/connection', 'http', 'http/testsupport',
+PACKAGES = ('async', 'async/connection', 'http',
             'http/v1', 'http/v2', 'http/v2/hpack', 'http/v3', 'surf', 'websocket')
 OWNERS = ('async', 'http', 'surf', 'websocket')
 LOAD = re.compile(r'#load\s*\(\s*"([^"]+)"')
