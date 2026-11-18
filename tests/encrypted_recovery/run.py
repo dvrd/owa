@@ -168,7 +168,7 @@ def campaign(binary, env, report, socket_transport="memory"):
 
 def source_snapshot(shared, compiler_root):
     files = list(HERE.rglob('*.odin'))+list(HERE.glob('*.py'))+list(HERE.glob('README.md'))
-    for root in ('whatsapp', 'ascii', 'async', 'http', 'surf', 'websocket'):
+    for root in ('whatsapp', 'async', 'http', 'surf', 'websocket'):
         files += list((shared/root).rglob('*.odin'))
     for root in ('base', 'core', 'vendor/zlib'):
         files += list((compiler_root/root).rglob('*.odin'))

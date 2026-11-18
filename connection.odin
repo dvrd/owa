@@ -1,6 +1,6 @@
 package whatsapp
 
-import network_client "../surf"
+import network_client "shared:surf"
 import "core:crypto"
 import "core:crypto/x25519"
 import "core:mem"
@@ -447,7 +447,6 @@ client_handshake_exchange :: proc(client: ^Client, client_payload: []u8, finish_
 // Trust anchor independently matches pinned Whatsmeow c88388f983b4bc43 and
 // Baileys 81345beb67ca3fb0. SHA256: 8f5c9b62980545504f24221417a5ebd8
 // 0fafd0c4f85f0b33e3aed78445a0cd7d. These are Signal Curve25519 signing keys.
-@(private)
 NOISE_CERTIFICATE_ROOT := [32]u8 {
 	0x14,
 	0x23,
@@ -493,7 +492,6 @@ strict_certificate_policy_at :: proc(payload: []u8, server_static: [32]u8, now: 
 	return strict_certificate_chain_verify(payload, server_static, now, NOISE_CERTIFICATE_ROOT)
 }
 
-@(private)
 strict_certificate_chain_verify :: proc(
 	payload: []u8,
 	server_static: [32]u8,
@@ -539,7 +537,6 @@ strict_certificate_chain_verify :: proc(
 	return strict_certificate_time(leaf, now)
 }
 
-@(private)
 strict_certificate_details :: proc(
 	certificate: Noise_Certificate,
 	intermediate: bool,
@@ -576,7 +573,6 @@ strict_certificate_details :: proc(
 	return details, .None
 }
 
-@(private)
 strict_certificate_time :: proc(details: Certificate_Details, now: time.Time) -> Certificate_Error {
 	if now._nsec < 0 {
 		return .Invalid_Validity

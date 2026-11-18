@@ -64,7 +64,6 @@ for source in "$source_shared"/*; do
     name=$(basename -- "$source")
     [[ "$name" != metalized ]] || continue
     [[ "$name" != "$library" ]] || source=$root
-    if [[ -e "$root/.git" && ! -e "$source/.git" ]]; then continue; fi
     mkdir -p "$shared/$name"
     if [[ -e "$source/.git" ]]; then
         while IFS= read -r -d '' path; do

@@ -35,7 +35,7 @@ def snapshot(shared):
     paths = list((shared/'whatsapp').glob('*.odin'))
     paths += list((shared/'whatsapp/tests/internal').glob('*.odin'))
     paths += [shared/'whatsapp/tests/run.sh']
-    for directory in ['ascii', 'surf', 'http', 'websocket', 'async']:
+    for directory in ['surf', 'http', 'websocket', 'async']:
         paths += list((shared/directory).rglob('*.odin'))
     for directory in ['core', 'base', 'vendor/zlib']:
         paths += list((shared.parent/directory).rglob('*.odin'))

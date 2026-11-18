@@ -1,7 +1,7 @@
 package whatsapp
 
 import tls "core:crypto/tls"
-import network_client "../surf"
+import network_client "shared:surf"
 import "core:crypto"
 import "core:fmt"
 import "core:mem"

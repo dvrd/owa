@@ -1,6 +1,6 @@
 package whatsapp
 
-import http "../http"
+import http "shared:http"
 import "core:crypto"
 import "core:crypto/hmac"
 import "core:encoding/base64"
@@ -10,7 +10,7 @@ import "core:strconv"
 import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
-import network_client "../surf"
+import network_client "shared:surf"
 
 // Registration, pairing and session establishment.
 

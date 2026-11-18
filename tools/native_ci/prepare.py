@@ -13,9 +13,9 @@ import tempfile
 import assets
 
 HERE = Path(__file__).resolve().parent
-PACKAGES = ('ascii', 'async', 'async/connection', 'http', 'http/testsupport',
+PACKAGES = ('async', 'async/connection', 'http', 'http/testsupport',
             'http/v1', 'http/v2', 'http/v2/hpack', 'http/v3', 'surf', 'websocket')
-OWNERS = ('ascii', 'async', 'http', 'surf', 'websocket')
+OWNERS = ('async', 'http', 'surf', 'websocket')
 LOAD = re.compile(r'#load\s*\(\s*"([^"]+)"')
 SOURCE_PREFIXES = {'src', 'base', 'core', 'vendor', 'tests', 'misc', 'bin', 'ci'}
 SOURCE_FILES = {'LICENSE', 'README.md', 'Makefile', 'build_odin.sh', 'build.bat',
