@@ -2459,7 +2459,9 @@ socket_media_download_http :: proc(
 		message     = message,
 	}
 	defer crypto.zero_explicit(&job, size_of(job))
-	if e := socket_http_run(socket, &job); e.kind != .None {
+	if socket.phase == .Provisioning {
+		job.n, job.media_error = socket_media_download_direct(&job)
+	} else if e := socket_http_run(socket, &job); e.kind != .None {
 		return 0, {}, e
 	}
 
@@ -2468,6 +2470,20 @@ socket_media_download_http :: proc(
 	}
 
 	return job.n, job.media_error, {}
+}
+
+// A Provisioning download runs on the caller's thread without pumping the socket: the
+// pump (socket_http_event_process) keeps only messages and media retries and would
+// drop the activation (.Online) event that the client's receive loop must see. The
+// request keeps the worker's 30 s budget; unread socket frames wait in the stream.
+socket_media_download_direct :: proc(job: ^Socket_HTTP_Job) -> (int, Media_Error) {
+	assert(job != nil && job.kind == .Download)
+	config := job.config
+	if config.timeout == 0 || config.timeout > 30 * time.Second {
+		config.timeout = 30 * time.Second
+	}
+
+	return media_download(job.destination, job.message, config)
 }
 
 socket_http_worker :: proc(data: rawptr) {
@@ -2987,8 +3003,12 @@ socket_media_message_send :: proc(
 // Caller owns message/protobuf and destination. A404/410 CDN response triggers
 // one authenticated request to the primary phone and one fresh download. No
 // fallback removes integrity checks, changes the media key, or follows redirects.
+// Offline-batch messages reach the client during Provisioning (socket_receive handles
+// them before activation, as Baileys does). Their CDN download needs no socket query,
+// so it runs then too; refusing it made the application reconnect once per backlog
+// media message.
 socket_download_media :: proc(socket: ^Socket, message: ^Socket_Message, dst: []u8) -> (int, Socket_Error) {
-	if socket == nil || socket.phase != .Online || socket.auth == nil {
+	if socket == nil || (socket.phase != .Online && socket.phase != .Provisioning) || socket.auth == nil {
 		return 0, {kind = .Invalid_State}
 	}
 
@@ -3022,6 +3042,12 @@ socket_download_media :: proc(socket: ^Socket, message: ^Socket_Message, dst: []
 
 	if download_err.kind != .HTTP_Status || (download_err.status != 404 && download_err.status != 410) {
 		return n, {kind = .Media_Failed, media = download_err}
+	}
+
+	// The phone answers an expired-media request with a notification that is handled
+	// only once Online; until activation the caller retries the message.
+	if socket.phase != .Online {
+		return 0, {kind = .Invalid_State}
 	}
 
 	return socket_media_download_recover(socket, message, &media, dst, config)

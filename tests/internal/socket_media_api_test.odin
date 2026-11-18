@@ -315,6 +315,49 @@ download_media_surfaces_http_status_without_retrying_other_codes :: proc(t: ^tes
 	testing.expect_value(t, fixture.state.calls, 1)
 }
 
+// Offline-batch media arrives while the socket is still Provisioning (live staging
+// restart after six days offline: each refusal cost the application a reconnect).
+// The CDN download runs; an expired one waits for Online, where the phone's
+// mediaretry answer is handled.
+@(test)
+download_media_runs_offline_backlog_while_provisioning :: proc(t: ^testing.T) {
+	fixture := new(Download_Fixture)
+	defer free(fixture)
+	download_fixture_init(fixture, SEND_IMAGE_PLAINTEXT)
+	context.user_ptr = &fixture.state
+	fixture.socket.phase = .Provisioning
+	destination: [128]u8
+
+	n, error := socket_download_media(&fixture.socket, &fixture.message, destination[:])
+
+	testing.expect_value(t, error.kind, Socket_Error_Kind.None)
+	testing.expect_value(t, string(destination[:n]), SEND_IMAGE_PLAINTEXT)
+	testing.expect_value(t, fixture.state.calls, 1)
+	testing.expect_value(t, fixture.socket.phase, Socket_Phase.Provisioning)
+	testing.expect_value(t, fixture.socket.sequence, u64(0))
+
+	fixture.state.status = 404
+	for &b in destination {
+		b = 0x55
+	}
+
+	_, expired := socket_download_media(&fixture.socket, &fixture.message, destination[:])
+
+	testing.expect_value(t, expired.kind, Socket_Error_Kind.Invalid_State)
+	testing.expect_value(t, fixture.state.calls, 2)
+	testing.expect_value(t, fixture.socket.sequence, u64(0))
+
+	for b in destination {
+		testing.expect_value(t, b, u8(0x55))
+	}
+
+	// Before login there is no session to download for.
+	fixture.socket.phase = .Pairing
+	_, refused := socket_download_media(&fixture.socket, &fixture.message, destination[:])
+	testing.expect_value(t, refused.kind, Socket_Error_Kind.Invalid_State)
+	testing.expect_value(t, fixture.state.calls, 2)
+}
+
 @(test)
 download_media_preflights_state_message_and_destination_before_network :: proc(t: ^testing.T) {
 	fixture := new(Download_Fixture)
