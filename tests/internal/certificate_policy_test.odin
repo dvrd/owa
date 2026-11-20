@@ -159,7 +159,7 @@ policy_test_verify :: proc(
 	fixture: ^Policy_Test_Fixture,
 	now: time.Time = time.Time{_nsec = 150_000_000_000},
 ) -> Certificate_Error {
-	return strict_certificate_chain_verify(fixture.payload[:fixture.size], fixture.server_static, now, fixture.root)
+	return verify_certificate_chain_against_root(fixture.payload[:fixture.size], fixture.server_static, now, fixture.root)
 }
 
 @(test)
@@ -168,7 +168,7 @@ certificate_policy_valid_synthetic_chain_does_not_replace_pinned_root :: proc(t:
 	testing.expect_value(t, policy_test_verify(&fixture), .None)
 	testing.expect_value(
 		t,
-		strict_certificate_policy_at(fixture.payload[:fixture.size], fixture.server_static, time.unix(150, 0)),
+		verify_whatsapp_server_certificate_at(fixture.payload[:fixture.size], fixture.server_static, time.unix(150, 0)),
 		.Invalid_Intermediate_Signature,
 	)
 	fixture.root[0] ~= 1
@@ -298,7 +298,7 @@ certificate_policy_checks_exact_time_boundaries_without_epoch_overflow :: proc(t
 certificate_policy_malformed_or_incomplete_chain_fails_closed :: proc(t: ^testing.T) {
 	fixture := policy_test_fixture(policy_test_options())
 	malformed := [?]u8{0xff}
-	testing.expect_value(t, strict_certificate_policy(malformed[:], fixture.server_static), .Invalid_Certificate_Chain)
+	testing.expect_value(t, verify_whatsapp_server_certificate(malformed[:], fixture.server_static), .Invalid_Certificate_Chain)
 	chain, decoded := cert_chain_decode(fixture.payload[:fixture.size])
 	assert(decoded == .None)
 
@@ -329,7 +329,7 @@ certificate_policy_malformed_or_incomplete_chain_fails_closed :: proc(t: ^testin
 		size := policy_test_chain(payload[:], copy)
 		testing.expect_value(
 			t,
-			strict_certificate_chain_verify(payload[:size], fixture.server_static, time.unix(150, 0), fixture.root),
+			verify_certificate_chain_against_root(payload[:size], fixture.server_static, time.unix(150, 0), fixture.root),
 			expected,
 		)
 	}
@@ -352,7 +352,7 @@ certificate_policy_genuine_public_chain_matches_pinned_signal_root :: proc(t: ^t
 
 	testing.expect_value(
 		t,
-		strict_certificate_policy_at(transmute([]u8)PUBLIC_CERTIFICATE, server_static, captured),
+		verify_whatsapp_server_certificate_at(transmute([]u8)PUBLIC_CERTIFICATE, server_static, captured),
 		.None,
 	)
 }

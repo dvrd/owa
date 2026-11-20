@@ -4,7 +4,7 @@ import wa "shared:whatsapp"
 import surf "shared:surf"
 import ws "shared:websocket"
 import "core:bytes"
-import "core:crypto/sha2"
+import "core:crypto/hash"
 import "core:fmt"
 import "core:os"
 import "core:strings"
@@ -117,12 +117,12 @@ boundary :: proc(stage, requested: string) {
 	fmt.printf("BOUNDARY_READY %s\n", stage)
 	_ = os.flush(os.stdout)
 
-	for {
-		time.sleep(time.Second)
-	}
+	// A failed parent must not leave a stopped fixture running indefinitely.
+	time.sleep(30 * time.Second)
+	os.exit(1)
 }
 
-child :: proc(directory, stage: string) {
+child_write_stage :: proc(directory, stage: string) {
 	f := fixture_open(directory, true)
 	defer fixture_close(f)
 	assert(
@@ -277,25 +277,8 @@ verify :: proc(directory, stage: string) {
 	)
 }
 
-main :: proc() {
-	assert(len(os.args) == 4)
-
-	switch os.args[1] {
-	case "child":
-		child(os.args[2], os.args[3])
-	case "verify":
-		verify(os.args[2], os.args[3])
-	case:
-		assert(false)
-	}
-}
-
 payload_digest :: proc() -> [32]u8 {
-	state: sha2.Context_256
 	digest: [32]u8
-	sha2.init_256(&state)
-	sha2.update(&state, transmute([]u8)PAYLOAD)
-	sha2.final(&state, digest[:])
-
+	hash.hash_string_to_buffer(.SHA256, PAYLOAD, digest[:])
 	return digest
 }

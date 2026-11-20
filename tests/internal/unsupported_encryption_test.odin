@@ -164,9 +164,9 @@ unsupported_encryption_keeps_supported_distribution_order_and_controls_admissibl
 		{tag = "enc", attrs = {{"type", "msg"}}},
 	}
 
-	testing.expect_value(t, socket_message_encryption_nack({content = supported[:]}), u32(0))
+	testing.expect_value(t, message_encryption_nack_reason({content = supported[:]}), u32(0))
 	supported[0], supported[2] = supported[2], supported[0]
-	testing.expect_value(t, socket_message_encryption_nack({content = supported[:]}), u32(0))
+	testing.expect_value(t, message_encryption_nack_reason({content = supported[:]}), u32(0))
 	controls := [1]Binary_Node{{tag = "unavailable"}}
-	testing.expect_value(t, socket_message_encryption_nack({content = controls[:]}), u32(0))
+	testing.expect_value(t, message_encryption_nack_reason({content = controls[:]}), u32(0))
 }

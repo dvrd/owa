@@ -1,4 +1,5 @@
 package protocol_watch_test
+import j "core:encoding/json"
 import w "../../../tools/protocol_watch"
 import "core:mem"
 import "core:os"
@@ -71,8 +72,8 @@ watch_drift_never_approves :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(w.items(w.get(second, "changes_since_observation"))), 0)
 	testing.expect(
 		t,
-		w.truth(w.get(second, "compatibility_approved"), false) &&
-		w.truth(w.get(second, "runtime_version_changed"), false),
+		w.json_boolean_equals(w.get(second, "compatibility_approved"), false) &&
+		w.json_boolean_equals(w.get(second, "runtime_version_changed"), false),
 	)
 }
 @(test)
@@ -96,7 +97,7 @@ watch_removal_visible :: proc(t: ^testing.T) {
 	)
 	testing.expect(
 		t,
-		w.truth(
+		w.json_boolean_equals(
 			w.get(w.get(w.items(w.get(w.items(w.get(current, "sources"))[0], "files"))[0], "current"), "present"),
 			false,
 		),
@@ -111,7 +112,7 @@ watch_failed_fetch_preserves_success :: proc(t: ^testing.T) {
 	assert(error == nil)
 	defer os.remove_all(root)
 	state := w.join(root, "state")
-	_, failure := w.check(watch_manifest(), state, w.Observation{fetch = upstream, root = ROOT})
+	_, failure := w.check_upstream_changes(watch_manifest(), state, w.Observation{fetch = upstream, root = ROOT})
 	testing.expect(t, failure == nil)
 	before, _ := os.read_entire_file(w.join(state, "observed.json"), context.allocator)
 	report, _ := os.read_entire_file(w.join(state, "report.json"), context.allocator)
@@ -119,7 +120,7 @@ watch_failed_fetch_preserves_success :: proc(t: ^testing.T) {
 		fail = true,
 	}
 
-	_, failure = w.check(watch_manifest(), state, w.Observation{fetch = upstream, data = &stub, root = ROOT})
+	_, failure = w.check_upstream_changes(watch_manifest(), state, w.Observation{fetch = upstream, data = &stub, root = ROOT})
 	testing.expect(t, failure == w.Failure("UPSTREAM_FETCH_FAILED"))
 	after, _ := os.read_entire_file(w.join(state, "observed.json"), context.allocator)
 	later, _ := os.read_entire_file(w.join(state, "report.json"), context.allocator)
@@ -178,7 +179,7 @@ watch_private_state_and_parallel_owner :: proc(t: ^testing.T) {
 	assert(os.write_entire_file(external, transmute([]u8)string("{}")) == nil)
 	p.chmod(strings.clone_to_cstring(external), {.IRUSR, .IWUSR})
 	assert(p.link(strings.clone_to_cstring(external), strings.clone_to_cstring(w.join(state, "observed.json"))) == {})
-	_, failure = w.check(watch_manifest(), state, w.Observation{fetch = upstream})
+	_, failure = w.check_upstream_changes(watch_manifest(), state, w.Observation{fetch = upstream})
 	testing.expect(t, failure == w.Failure("STATE_FILE_UNSAFE"))
 }
 @(test)
@@ -191,7 +192,7 @@ watch_manifest_rejects_untrusted_sources :: proc(t: ^testing.T) {
 	testing.expect(t, failure == nil)
 
 	for key, i in ([]string{"repository", "paths", "reference_commit"}) {
-		bad := w.clone(value)
+		bad := j.clone_value(value)
 		sources := w.items(w.get(bad, "sources"))
 		source := sources[0]
 		wrong := w.text("other/repo")

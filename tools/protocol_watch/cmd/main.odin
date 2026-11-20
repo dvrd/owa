@@ -1,5 +1,6 @@
 package main
 
+import "core:slice"
 import w ".."
 import "core:fmt"
 import "core:mem"
@@ -27,12 +28,12 @@ arg :: proc(options: w.Value, key: string, fallback: string = "") -> string {
 	return value if value != "" else fallback
 }
 
-options :: proc(values: []string) -> (result: w.Value, failure: w.Failure) {
+parse_option_pairs :: proc(values: []string) -> (result: w.Value, failure: w.Failure) {
 	result = w.object()
 	for i := 0; i < len(values); i += 2 {
 		if i + 1 >= len(values) ||
 		   !strings.has_prefix(values[i], "--") ||
-		   w.contains_string(w.keys(result), values[i]) {
+		   slice.contains(w.keys(result), values[i]) {
 			return w.null(), "ARGUMENTS_INVALID"
 		}
 
@@ -42,7 +43,7 @@ options :: proc(values: []string) -> (result: w.Value, failure: w.Failure) {
 	return
 }
 
-manifest :: proc(options: w.Value) -> (value: w.Value, failure: w.Failure) {
+load_source_manifest :: proc(options: w.Value) -> (value: w.Value, failure: w.Failure) {
 	path := arg(
 		options,
 		"--manifest",
@@ -71,10 +72,10 @@ public_scan :: proc(
 		approved_contract = approved,
 	}
 
-	return w.check(original^, state, settings)
+	return w.check_upstream_changes(original^, state, settings)
 }
 
-append_env :: proc(name, value: string) {
+append_to_env_named_file :: proc(name, value: string) {
 	if path, ok := os.lookup_env(name, context.allocator); ok && path != "" {
 		file, error := os.open(path, {.Write, .Append})
 		if error == nil {
@@ -92,7 +93,7 @@ execute :: proc(
 	code: int,
 	failure: w.Failure,
 ) {
-	opts := options(values) or_return
+	opts := parse_option_pairs(values) or_return
 
 	allowed := []string {
 		"--manifest",
@@ -111,7 +112,7 @@ execute :: proc(
 		"--budget-seconds",
 	}
 	for name in w.keys(opts) {
-		if !w.contains_string(allowed, name) {
+		if !slice.contains(allowed, name) {
 			return w.null(), 2, "ARGUMENTS_INVALID"
 		}
 	}
@@ -121,8 +122,8 @@ execute :: proc(
 
 	switch mode {
 	case "watch":
-		source := manifest(opts) or_return
-		result = w.check(
+		source := load_source_manifest(opts) or_return
+		result = w.check_upstream_changes(
 			source,
 			state,
 			w.Observation{root = w.library_root(), approved_contract = approved},
@@ -138,7 +139,7 @@ execute :: proc(
 		result = summary
 		return result, 3 if w.str(w.get(result, "status")) == "REVIEW_REQUIRED" else 0, nil
 	case "ci":
-		source := manifest(opts) or_return
+		source := load_source_manifest(opts) or_return
 		result = w.ci_prepare(
 			state,
 			arg(opts, "--output-dir"),
@@ -147,7 +148,7 @@ execute :: proc(
 			&source,
 		) or_return
 
-		append_env("GITHUB_OUTPUT", w.cat("status=", w.str(w.get(result, "status")), "\n"))
+		append_to_env_named_file("GITHUB_OUTPUT", w.concatenate_strings("status=", w.str(w.get(result, "status")), "\n"))
 		return result, 2 if w.str(w.get(result, "status")) == "FAILED" else 0, nil
 	case "linear":
 		report, tracking_error := read_json(arg(opts, "--report"))
@@ -165,7 +166,7 @@ execute :: proc(
 		}
 
 		if tracking_error == nil {
-			result, tracking_error = w.track(
+			result, tracking_error = w.sync_review_findings(
 				report,
 				arg(opts, "--run-url"),
 				w.library_root(),
@@ -183,9 +184,9 @@ execute :: proc(
 		w.atomic_json(arg(opts, "--output"), result) or_return
 
 		if w.str(w.get(result, "status")) != "FAILED" {
-			summary := w.cat("Protocol scan: ", w.str(w.get(result, "status")), ".\n")
+			summary := w.concatenate_strings("Protocol scan: ", w.str(w.get(result, "status")), ".\n")
 			for issue in w.items(w.get(result, "issues")) {
-				summary = w.cat(
+				summary = w.concatenate_strings(
 					summary,
 					"\nTriage: [",
 					w.str(w.get(issue, "identifier")),
@@ -195,7 +196,7 @@ execute :: proc(
 				)
 			}
 
-			append_env("GITHUB_STEP_SUMMARY", summary)
+			append_to_env_named_file("GITHUB_STEP_SUMMARY", summary)
 		}
 
 		return result, 2 if w.str(w.get(result, "status")) == "FAILED" else 0, nil
@@ -261,7 +262,7 @@ main :: proc() {
 	}
 
 	if mode == "schedule" && len(args) > 0 {
-		mode = w.cat(mode, "-", args[0])
+		mode = w.concatenate_strings(mode, "-", args[0])
 		args = args[1:]
 	}
 

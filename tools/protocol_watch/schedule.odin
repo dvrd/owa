@@ -1,19 +1,12 @@
 package protocol_watch
+import "core:fmt"
+import "core:slice"
 import "core:c"
 import j "core:encoding/json"
 import "core:os"
 import "core:strings"
 import p "core:sys/posix"
 import "core:time"
-when ODIN_OS == .Darwin {
-	foreign import libc "system:System"
-} else {
-	foreign import libc "system:c"
-}
-foreign libc {
-	@(link_name = "_exit")
-	child_exit :: proc(code: c.int) -> ! ---
-}
 MAX_OUTPUT :: 65536
 MAX_STREAM :: 2 * 1024 * 1024
 LABEL :: "com.webtools.whatsapp.protocol-review"
@@ -23,8 +16,8 @@ Schedule :: struct {
 	budget_seconds:                                                     int,
 }
 validate_result :: proc(value: Value) -> Failure {
-	if !fields(value, []string{"status", "summary", "findings"}) ||
-	   !contains_string([]string{"NO_ACTION", "REVIEW_REQUIRED", "FAILED"}, str(get(value, "status"))) ||
+	if !has_exact_object_fields(value, []string{"status", "summary", "findings"}) ||
+	   !slice.contains([]string{"NO_ACTION", "REVIEW_REQUIRED", "FAILED"}, str(get(value, "status"))) ||
 	   !text_limit(get(value, "summary"), 0, 2000) {
 		return "AGENT_RESULT_INVALID"
 	}
@@ -36,8 +29,8 @@ validate_result :: proc(value: Value) -> Failure {
 	}
 
 	for item in entries {
-		if !fields(item, []string{"severity", "source", "path", "recommendation"}) ||
-		   !contains_string([]string{"low", "medium", "high"}, str(get(item, "severity"))) ||
+		if !has_exact_object_fields(item, []string{"severity", "source", "path", "recommendation"}) ||
+		   !slice.contains([]string{"low", "medium", "high"}, str(get(item, "severity"))) ||
 		   !text_limit(get(item, "source"), 0, 200) ||
 		   !text_limit(get(item, "path"), 0, 200) ||
 		   !text_limit(get(item, "recommendation"), 0, 2000) {
@@ -47,7 +40,7 @@ validate_result :: proc(value: Value) -> Failure {
 
 	return nil
 }
-command :: proc(codex, library, schema: string) -> []string {
+build_review_agent_argv :: proc(codex, library, schema: string) -> []string {
 	values := []string {
 		codex,
 		"exec",
@@ -68,7 +61,7 @@ agent_environment :: proc() -> []string {
 
 	for name in ([]string{"HOME", "USER", "LOGNAME", "PATH", "TMPDIR", "LANG", "LC_ALL", "SHELL", "CODEX_HOME"}) {
 		if value, ok := os.lookup_env(name, context.allocator); ok {
-			append(&entries, cat(name, "=", value))
+			append(&entries, concatenate_strings(name, "=", value))
 		}
 	}
 
@@ -86,7 +79,7 @@ capture :: proc(
 	failure: Failure,
 ) {
 	if len(argv) == 0 || !strings.has_prefix(argv[0], "/") {
-		return nil, 0, cat(kind, "_EXEC_FAILED")
+		return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
 	}
 	cargv := make([]cstring, len(argv) + 1)
 	for item, i in argv {
@@ -99,7 +92,7 @@ capture :: proc(
 	}
 	input, stdout, stderr: [2]p.FD
 	if p.pipe(&input) != {} {
-		return nil, 0, cat(kind, "_EXEC_FAILED")
+		return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
 	}; defer {
 		p.close(input[0])
 		if input[1] >= 0 {
@@ -107,28 +100,28 @@ capture :: proc(
 		}
 	}
 	if p.pipe(&stdout) != {} {
-		return nil, 0, cat(kind, "_EXEC_FAILED")
+		return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
 	}; defer {p.close(stdout[0]); p.close(stdout[1])}
 	if p.pipe(&stderr) != {} {
-		return nil, 0, cat(kind, "_EXEC_FAILED")
+		return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
 	}; defer {p.close(stderr[0]); p.close(stderr[1])}
 	old_signal: p.sigaction_t
 	ignore: p.sigaction_t
 	ignore.sa_handler = transmute(proc "c" (_: p.Signal))uintptr(1)
 	if p.sigaction(p.Signal(p.SIGPIPE), &ignore, &old_signal) != {} {
-		return nil, 0, cat(kind, "_EXEC_FAILED")
+		return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
 	}; defer p.sigaction(p.Signal(p.SIGPIPE), &old_signal, nil)
 	pid := p.fork()
 	if pid < 0 {
-		return nil, 0, cat(kind, "_EXEC_FAILED")
+		return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
 	}
 	if pid == 0 {
 		if p.setsid() < 0 {
-			child_exit(127)
+			p._exit(127)
 		}
 
 		if p.dup2(input[0], 0) < 0 || p.dup2(stdout[1], 1) < 0 || p.dup2(stderr[1], 2) < 0 {
-			child_exit(127)
+			p._exit(127)
 		}
 
 		p.close(input[0])
@@ -138,7 +131,7 @@ capture :: proc(
 		p.close(stderr[0])
 		p.close(stderr[1])
 		_ = p.execve(cargv[0], raw_data(cargv), raw_data(cenv))
-		child_exit(127)
+		p._exit(127)
 	}
 	p.close(input[0])
 	input[0] = -1
@@ -171,7 +164,7 @@ capture :: proc(
 	}
 	for {
 		if time.tick_diff(clock(), deadline) <= 0 {
-			return nil, 0, cat(kind, "_DEADLINE")
+			return nil, 0, concatenate_strings(kind, "_DEADLINE")
 		}
 
 		alive := 0
@@ -189,7 +182,7 @@ capture :: proc(
 		if ready < 0 {
 			if p.errno() == .EINTR {
 				continue
-			}; return nil, 0, cat(kind, "_EXEC_FAILED")
+			}; return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
 		}
 
 		for &item, index in polls {
@@ -203,7 +196,7 @@ capture :: proc(
 				if n < 0 {
 					if p.errno() == .EAGAIN || p.errno() == .EINTR {
 						continue
-					}; return nil, 0, cat(kind, "_INPUT_FAILED")
+					}; return nil, 0, concatenate_strings(kind, "_INPUT_FAILED")
 				}; offset += int(n)
 				if offset == len(prompt) {
 					p.close(input[1])
@@ -217,21 +210,21 @@ capture :: proc(
 				if n < 0 {
 					if p.errno() == .EAGAIN || p.errno() == .EINTR {
 						continue
-					}; return nil, 0, cat(kind, "_EXEC_FAILED")
+					}; return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
 				}
 
 				if n == 0 {
 					item.fd = -1
 					continue
 				}; total += int(n); if total > MAX_STREAM {
-					return nil, 0, cat(kind, "_STREAM_LIMIT")
+					return nil, 0, concatenate_strings(kind, "_STREAM_LIMIT")
 				}
 
 				if index == 1 {
 					append(&collected, ..buffer[:n])
 
 					if len(collected) > MAX_OUTPUT {
-						return nil, 0, cat(kind, "_OUTPUT_LIMIT")
+						return nil, 0, concatenate_strings(kind, "_OUTPUT_LIMIT")
 					}
 				}
 			}
@@ -239,7 +232,7 @@ capture :: proc(
 	}
 	for {
 		if time.tick_diff(clock(), deadline) <= 0 {
-			return nil, 0, cat(kind, "_DEADLINE")
+			return nil, 0, concatenate_strings(kind, "_DEADLINE")
 		}
 
 		information: p.siginfo_t
@@ -247,7 +240,7 @@ capture :: proc(
 		if p.waitid(.P_PID, p.id_t(pid), &information, {.NOHANG, .NOWAIT, .EXITED}) < 0 {
 			if p.errno() == .EINTR {
 				continue
-			}; return nil, 0, cat(kind, "_EXEC_FAILED")
+			}; return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
 		}
 
 		if information.si_pid == pid {
@@ -257,14 +250,14 @@ capture :: proc(
 			}
 
 			if p.waitpid(pid, &status, {}) != pid {
-				return nil, 0, cat(kind, "_EXEC_FAILED")
+				return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
 			}; reaped = true; break
 		}
 
 		time.sleep(time.Millisecond)
 	}
 	if !p.WIFEXITED(status) {
-		return nil, 0, cat(kind, "_EXEC_FAILED")
+		return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
 	}; return collected[:], int(p.WEXITSTATUS(status)), nil
 }
 agent_run :: proc(argv: []string, prompt: []u8, seconds: int) -> (value: Value, failure: Failure) {
@@ -297,13 +290,13 @@ Report_File :: struct {
 	device: p.dev_t,
 	inode:  p.ino_t,
 }
-report_open :: proc(path: string) -> (file: Report_File, failure: Failure) {
+open_private_watch_report :: proc(path: string) -> (file: Report_File, failure: Failure) {
 	fd := p.open(strings.clone_to_cstring(path), {.NOFOLLOW, .NONBLOCK, .CLOEXEC})
 
 	if fd < 0 {
 		return {}, "WATCH_REPORT_UNSAFE"
 	}; info: p.stat_t
-	if p.fstat(fd, &info) != {} || !private_stat(info) {
+	if p.fstat(fd, &info) != {} || !is_private_state_file(info) {
 		p.close(fd)
 		return {}, "WATCH_REPORT_UNSAFE"
 	}; return {fd, info.st_dev, info.st_ino}, nil
@@ -316,7 +309,7 @@ watch_run :: proc(args: Schedule, argv: []string = nil) -> (value: Value, failur
 	info: p.stat_t
 
 	if p.lstat(strings.clone_to_cstring(path), &info) == {} {
-		previous = report_open(path) or_return
+		previous = open_private_watch_report(path) or_return
 		had_previous = true
 	}
 
@@ -338,7 +331,7 @@ watch_run :: proc(args: Schedule, argv: []string = nil) -> (value: Value, failur
 	}
 
 	summary := watch_capture(invocation) or_return
-	current := report_open(path) or_return
+	current := open_private_watch_report(path) or_return
 	defer p.close(current.fd)
 
 	if had_previous && current.device == previous.device && current.inode == previous.inode {
@@ -467,8 +460,8 @@ schedule_review :: proc(
 	}; schema, error := decode(transmute([]u8)SCHEDULE_SCHEMA); if error != "" {
 		return null(), "SCHEDULE_FAILED"
 	}; path := join(state, "result-schema.json"); atomic_json(path, schema) or_return
-	prompt := cat(#load("review-agent-prompt.md"), "\nPUBLIC REPORT JSON:\n", data)
-	review := agent(command(args.codex, args.library, path), transmute([]u8)prompt, args.budget_seconds) or_return
+	prompt := concatenate_strings(#load("review-agent-prompt.md"), "\nPUBLIC REPORT JSON:\n", data)
+	review := agent(build_review_agent_argv(args.codex, args.library, path), transmute([]u8)prompt, args.budget_seconds) or_return
 	validate_result(review) or_return
 	allowed := object()
 	for source in items(get(get(report, "observation"), "sources")) {
@@ -481,7 +474,7 @@ schedule_review :: proc(
 		put(&allowed, str(get(source, "name")), paths)
 	}
 	for finding in items(get(review, "findings")) {
-		if !truth(get(get(allowed, str(get(finding, "source"))), str(get(finding, "path")))) {
+		if !json_boolean_equals(get(get(allowed, str(get(finding, "source"))), str(get(finding, "path")))) {
 			return null(), "AGENT_SOURCE_INVALID"
 		}
 	}
@@ -498,7 +491,10 @@ schedule_review :: proc(
 		nil
 }
 library_root :: proc() -> string {
-	return strings.trim_suffix(#directory, "/tools/protocol_watch/")
+	if root, ok := os.lookup_env("OWA_LIBRARY_ROOT", context.allocator); ok && root != "" {
+		return root
+	}
+	return canonical_path(".")
 }
 xml_quote :: proc(value: string) -> string {
 	return replace(
@@ -535,7 +531,7 @@ plist :: proc(args: Schedule) -> (data: string, failure: Failure) {
 		"--codex",
 		args.codex,
 		"--budget-seconds",
-		string_number(args.budget_seconds),
+		fmt.aprint(args.budget_seconds),
 	}
 
 	builder: strings.Builder
@@ -547,20 +543,17 @@ plist :: proc(args: Schedule) -> (data: string, failure: Failure) {
 	)
 
 	for arg in argv {
-		strings.write_string(&builder, cat("<string>", xml_quote(arg), "</string>"))
+		strings.write_string(&builder, concatenate_strings("<string>", xml_quote(arg), "</string>"))
 	}
 
 	strings.write_string(
 		&builder,
-		cat(
+		concatenate_strings(
 			"</array><key>StartCalendarInterval</key><dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict><key>RunAtLoad</key><false/><key>ProcessType</key><string>Background</string><key>ExitTimeOut</key><integer>15</integer><key>WorkingDirectory</key><string>",
 			xml_quote(args.library),
 			"</string><key>StandardOutPath</key><string>/dev/null</string><key>StandardErrorPath</key><string>/dev/null</string><key>EnvironmentVariables</key><dict><key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin</string></dict><key>Umask</key><integer>63</integer></dict></plist>\n",
 		),
 	); return strings.to_string(builder), nil
-}
-string_number :: proc(value: int) -> string {
-	return encode(number(i64(value)))
 }
 write_plist :: proc(args: Schedule) -> (value: Value, failure: Failure) {
 	fd := locked_state(args.state_dir) or_return

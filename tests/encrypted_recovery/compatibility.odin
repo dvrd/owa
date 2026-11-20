@@ -5,8 +5,7 @@ import "core:bytes"
 import "core:fmt"
 import "core:os"
 
-// Same-format cross-commit compatibility only. Both roles are generated test
-// identities. This path calls no Socket/HTTP/network API and injects no faults.
+// These synthetic credentials match the prior revision’s saved prekey fixture.
 compat_credentials :: proc() -> wa.Device_Credentials {
 	local := fixture_local(96, 200)
 	bundle := fixture_bundle(local)
@@ -27,19 +26,6 @@ compat_credentials :: proc() -> wa.Device_Credentials {
 	assert(wa.device_credentials_validate(&credentials) == .None)
 
 	return credentials
-}
-
-compat_produce :: proc(directory: string) {
-	f := fixture_open(directory, true)
-	defer fixture_close(f)
-	fixture_established(f)
-	fixture_encrypt(f)
-	prekey_path := fmt.aprintf("%s/prekeys.bin", directory)
-	defer delete(prekey_path)
-	assert(wa.prekey_store_save(prekey_path, &f.prekeys).kind == .None)
-	prekeys_set(f)
-	assert(wa.state_store_save(&f.store, f.path).kind == .None)
-	fmt.println("COMPAT_PRODUCED same_format=true stable_intent=true normal_exit=true")
 }
 
 compat_verify :: proc(directory: string) {

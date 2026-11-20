@@ -16,6 +16,9 @@ import "core:time"
 // against in-memory keys; no account, network or provider is involved. The
 // peer owns group 123@g.us with two members: us (111:1) and 222 (devices 1, 2).
 Send_Peer :: struct {
+	contact_replies: []Binary_Node,
+	contact_versions: []string,
+	contact_requests: int,
 	socket:                                        Socket,
 	auth:                                          Auth_State,
 	store:                                         State_Store,
@@ -203,6 +206,22 @@ send_peer_iq :: proc(peer: ^Send_Peer, node: Binary_Node) {
 	attrs := []Binary_Node_Attribute{{"type", "result"}, {"id", id}, {"from", "s.whatsapp.net"}}
 
 	switch xmlns {
+	case "w:sync:app:state":
+		attrs[2] = {"from", "@s.whatsapp.net"}
+		if to, _ := node_attr(node, "to"); to != "@s.whatsapp.net" { peer.failed = true; return }
+		sync, _ := device_unique_child(node, "sync")
+		collection, _ := device_unique_child(sync, "collection")
+		snapshot, _ := node_attr(collection, "return_snapshot")
+		version, _ := node_attr(collection, "version")
+		name, _ := node_attr(collection, "name")
+		if peer.contact_requests >= len(peer.contact_replies) || name != "critical_unblock_low" ||
+		   version != peer.contact_versions[peer.contact_requests] || (snapshot == "true") != (version == "") {
+			peer.failed = true
+			return
+		}
+		reply := peer.contact_replies[peer.contact_requests]
+		peer.contact_requests += 1
+		send_peer_enqueue(peer, {tag = "iq", attrs = attrs, content = []Binary_Node{{tag = "sync", content = []Binary_Node{reply}}}})
 	case "w:g2":
 		peer.metadata_queries += 1
 		attrs[2] = {"from", "123@g.us"}
@@ -317,6 +336,19 @@ send_peer_message :: proc(peer: ^Send_Peer, node: Binary_Node, raw: []u8) {
 	}
 
 	stored, found := state_store_get(&loaded, .Outbound_Message, id)
+	if category, _ := node_attr(node, "category"); category == "peer" {
+		to, _ := node_attr(node, "to")
+		priority, _ := node_attr(node, "push_priority")
+		enc, e := device_unique_child(node, "enc")
+		cipher, ok := enc.content.([]u8)
+		peer.durable = found && bytes.equal(stored, raw)
+		if !ok || e.kind != .None || !peer.durable || to != "111@s.whatsapp.net" || priority != "high" { peer.failed = true; return }
+		plaintext: [512]u8
+		n, _, err := signal_session_decrypt_prekey(&peer.pairwise[0], plaintext[:], cipher, peer.local[0], peer.store.identity)
+		if err.kind != .None { peer.failed = true; return }
+		peer.last_size = copy(peer.last_plain[:], send_peer_unpad(plaintext[:n]))
+		return
+	}
 	_, group_found := state_store_get(&loaded, .Sender_Key, "123@g.us|111:1@s.whatsapp.net")
 	_, content_found := state_store_get(&loaded, .Outbound_Content, id)
 	peer.durable = found && group_found && content_found && bytes.equal(stored, raw) && loaded.revision == loaded.durable_revision

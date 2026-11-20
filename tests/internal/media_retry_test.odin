@@ -61,7 +61,7 @@ media_retry_test_socket :: proc(t: ^testing.T, socket: ^Socket, auth: ^Auth_Stat
 	testing.expect_value(t, frame_transport_init(&socket.client.frames, &socket.websocket, 4096).kind, .None)
 }
 
-// Independently pinned Baileys 6.7.23/WAProto + Node AES-GCM notification for
+// Fixed WAProto notification encrypted with Node AES-GCM for
 // key bytes 0..31, stanza ABC, nonce bytes 32..43 and direct path /new.enc.
 media_retry_test_notification :: proc(t: ^testing.T, ciphertext, nonce: []u8) -> Binary_Document {
 	node := Binary_Node {

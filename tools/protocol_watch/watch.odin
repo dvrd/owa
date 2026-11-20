@@ -1,5 +1,7 @@
 package protocol_watch
 
+import "core:slice"
+import "core:crypto/x509"
 import "core:c"
 import j "core:encoding/json"
 import "core:strings"
@@ -16,15 +18,16 @@ when ODIN_OS == .Darwin {
 foreign libc {
 	@(link_name = "flock")
 	native_flock :: proc(fd: p.FD, operation: c.int) -> c.int ---
-
-	@(link_name = "rename")
-	native_rename :: proc(old, new: cstring) -> c.int ---
 }
 Fetch :: proc(data: rawptr, url: string, timeout: time.Duration) -> (bytes: []u8, present: bool, failure: Failure)
 Network :: struct {
 	linear_key, linear_url: string,
 	allow_loopback:         bool,
 }
+// A non-nil, empty root list selects the platform certificate store in core:crypto/tls.
+@(private)
+platform_roots: [1]^x509.Certificate
+
 transport :: proc(
 	data: rawptr,
 	url: string,
@@ -35,6 +38,7 @@ transport :: proc(
 	failure: Failure,
 ) {
 	config := surf.Config {
+		tls = {root_cas = platform_roots[:0]},
 		max_body_size = MAX_BYTES,
 		timeout       = timeout,
 		max_redirects = 0,
@@ -65,13 +69,7 @@ transport :: proc(
 	if response.status < 200 || response.status >= 300 {
 		return nil, false, "UPSTREAM_HTTP_FAILED"
 	}
-	return append_clone(response.body), true, nil
-}
-append_clone :: proc(bytes: []u8) -> []u8 {
-	result := make([]u8, len(bytes))
-	copy(result, bytes)
-
-	return result
+	return slice.clone(response.body), true, nil
 }
 linear_transport :: proc(data: rawptr, query: string, variables: Value) -> (value: Value, failure: Failure) {
 	network := cast(^Network)data
@@ -100,7 +98,7 @@ linear_transport :: proc(data: rawptr, query: string, variables: Value) -> (valu
 			body = transmute([]u8)encode(object({"query", text(query)}, {"variables", variables})),
 		},
 		surf.Config {
-			max_body_size = MAX_REPORT,
+			tls = {root_cas = platform_roots[:0]},			max_body_size = MAX_REPORT,
 			timeout = 20 * time.Second,
 			max_redirects = 0,
 			allow_http = network.allow_loopback,
@@ -198,7 +196,7 @@ observe :: proc(manifest: Value, config: Observation) -> (observed: Value, failu
 		repo := str(get(source, "repository"))
 		head_bytes, present := bounded_get(
 			&settings,
-			cat("https://api.github.com/repos/", repo, "/commits/", str(get(source, "branch"))),
+			concatenate_strings("https://api.github.com/repos/", repo, "/commits/", str(get(source, "branch"))),
 		) or_return
 
 		if !present {
@@ -220,15 +218,15 @@ observe :: proc(manifest: Value, config: Observation) -> (observed: Value, failu
 
 		for path_value in items(get(source, "paths")) {
 			path := str(path_value)
-			prefix := cat("https://raw.githubusercontent.com/", repo, "/")
+			prefix := concatenate_strings("https://raw.githubusercontent.com/", repo, "/")
 			reference_bytes, reference_present := bounded_get(
 				&settings,
-				cat(prefix, str(get(source, "reference_commit")), "/", path),
+				concatenate_strings(prefix, str(get(source, "reference_commit")), "/", path),
 			) or_return
 			current_bytes, current_present := reference_bytes, reference_present
 
 			if head != str(get(source, "reference_commit")) {
-				current_bytes, current_present = bounded_get(&settings, cat(prefix, head, "/", path)) or_return
+				current_bytes, current_present = bounded_get(&settings, concatenate_strings(prefix, head, "/", path)) or_return
 			}
 
 			reference, current :=
@@ -246,7 +244,7 @@ observe :: proc(manifest: Value, config: Observation) -> (observed: Value, failu
 			)
 
 			if !equal(reference, current) {
-				assessment := assess(
+				assessment := assess_upstream_file_change(
 					object({"name", get(source, "name")}, {"repository", text(repo)}),
 					path,
 					reference_bytes,
@@ -302,9 +300,9 @@ compare :: proc(observed: Value, previous: Value = nil) -> Value {
 		}
 
 		for file in items(get(source, "files")) {
-			key := text(cat(str(get(source, "name")), ":", str(get(file, "path"))))
+			key := text(concatenate_strings(str(get(source, "name")), ":", str(get(file, "path"))))
 
-			if truth(get(file, "changed_from_reference")) {
+			if json_boolean_equals(get(file, "changed_from_reference")) {
 				append(&historical, key)
 			}; if !first && !equal(get(prior, str(get(file, "path"))), get(file, "current")) {
 				append(&changes, key)
@@ -321,7 +319,7 @@ compare :: proc(observed: Value, previous: Value = nil) -> Value {
 		{"runtime_version_changed", boolean(false)},
 	)
 }
-private_stat :: proc(info: p.stat_t) -> bool {
+is_private_state_file :: proc(info: p.stat_t) -> bool {
 	return(
 		p.S_ISREG(info.st_mode) &&
 		info.st_uid == p.geteuid() &&
@@ -333,7 +331,7 @@ private_stat :: proc(info: p.stat_t) -> bool {
 private_file :: proc(path: string) -> Failure {
 	info: p.stat_t
 
-	if p.lstat(strings.clone_to_cstring(path), &info) != {} || !private_stat(info) {
+	if p.lstat(strings.clone_to_cstring(path), &info) != {} || !is_private_state_file(info) {
 		return "STATE_FILE_UNSAFE"
 	}; return nil
 }
@@ -361,7 +359,7 @@ locked_state :: proc(path: string) -> (fd: p.FD, failure: Failure) {
 		return -1, "STATE_FILE_UNSAFE"
 	}
 
-	if p.fstat(fd, &info) != {} || !private_stat(info) {
+	if p.fstat(fd, &info) != {} || !is_private_state_file(info) {
 		p.close(fd)
 		return -1, "STATE_FILE_UNSAFE"
 	}
@@ -411,7 +409,7 @@ atomic_bytes :: proc(path: string, data: []u8) -> Failure {
 		}; offset += int(n)
 	}
 
-	if p.fsync(fd) != {} || native_rename(name, strings.clone_to_cstring(path)) != 0 {
+	if p.fsync(fd) != {} || p.rename(name, strings.clone_to_cstring(path)) != 0 {
 		return "LOCAL_STATE_FAILED"
 	}
 
@@ -429,7 +427,7 @@ atomic_json :: proc(path: string, value: Value) -> Failure {
 
 	if data == "" {
 		return "JSON_INVALID"
-	}; return atomic_bytes(path, transmute([]u8)cat(data, "\n"))
+	}; return atomic_bytes(path, transmute([]u8)concatenate_strings(data, "\n"))
 }
 check_unlocked :: proc(manifest: Value, state: string, config: Observation) -> (result: Value, failure: Failure) {
 	previous := null()
@@ -461,7 +459,7 @@ check_unlocked :: proc(manifest: Value, state: string, config: Observation) -> (
 		),
 	) or_return; return
 }
-check :: proc(manifest: Value, state: string, config: Observation) -> (result: Value, failure: Failure) {
+check_upstream_changes :: proc(manifest: Value, state: string, config: Observation) -> (result: Value, failure: Failure) {
 	fd := locked_state(state) or_return
 	defer p.close(fd)
 	result, failure = check_unlocked(manifest, state, config)

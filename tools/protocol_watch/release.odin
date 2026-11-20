@@ -4,7 +4,7 @@ import "core:strings"
 import p "core:sys/posix"
 
 REQUIRED := []string{"consumer", "noise_loopback", "protocol_review", "unit_asan"}
-source_digest :: proc(root: string) -> (digest: string, files: Value, failure: Failure) {
+hash_candidate_source_files :: proc(root: string) -> (digest: string, files: Value, failure: Failure) {
 	entries, error := os.read_directory_by_path(root, -1, context.allocator)
 
 	if error != nil {
@@ -26,7 +26,7 @@ source_digest :: proc(root: string) -> (digest: string, files: Value, failure: F
 		return "", null(), "SOURCE_SET_INVALID"
 	}; return sha256(transmute([]u8)encode(files, true)), files, nil
 }
-evidence_matches :: proc(check: Value, directory: string) -> bool {
+check_evidence_file_digest :: proc(check: Value, directory: string) -> bool {
 	name := str(get(check, "evidence_file"))
 
 	if name == "" || len(name) > 200 || strings.has_prefix(name, "/") {
@@ -56,8 +56,8 @@ evidence_matches :: proc(check: Value, directory: string) -> bool {
 	return error == "" && sha256(bytes) == str(get(check, "evidence_sha256"))
 }
 evaluate :: proc(root: string, offline, live: Value, evidence_dir: string) -> (result: Value, failure: Failure) {
-	digest, files := source_digest(root) or_return
-	failures := make_strings()
+	digest, files := hash_candidate_source_files(root) or_return
+	failures := make([dynamic]string)
 
 	if str(get(offline, "candidate_source_digest")) != digest {
 		append(&failures, "OFFLINE_SOURCE_MISMATCH")
@@ -70,8 +70,8 @@ evaluate :: proc(root: string, offline, live: Value, evidence_dir: string) -> (r
 		if str(get(check, "status")) != "PASS" ||
 		   str(get(check, "candidate_source_digest")) != digest ||
 		   !hex_valid(str(get(check, "evidence_sha256")), 64) ||
-		   !evidence_matches(check, evidence_dir) {
-			append(&failures, cat("MISSING_OR_INVALID_", strings.to_upper(name)))
+		   !check_evidence_file_digest(check, evidence_dir) {
+			append(&failures, concatenate_strings("MISSING_OR_INVALID_", strings.to_upper(name)))
 		}
 	}
 
@@ -83,11 +83,11 @@ evaluate :: proc(root: string, offline, live: Value, evidence_dir: string) -> (r
 		append(&failures, "LIVE_SOURCE_MISMATCH")
 	}
 
-	if !evidence_matches(live, evidence_dir) {
+	if !check_evidence_file_digest(live, evidence_dir) {
 		append(&failures, "LIVE_EVIDENCE_MISSING_OR_CHANGED")
 	}
 
-	complete := truth(get(live, "duplicates_reported"), false)
+	complete := json_boolean_equals(get(live, "duplicates_reported"), false)
 
 	for name in ([]string {
 			"isolated_group_verified",
@@ -96,7 +96,7 @@ evaluate :: proc(root: string, offline, live: Value, evidence_dir: string) -> (r
 			"recipient_confirmed",
 			"pdf_opened",
 			"same_ids_after_restart",
-		}) {complete = complete && truth(get(live, name))}
+		}) {complete = complete && json_boolean_equals(get(live, name))}
 	if !complete {
 		append(&failures, "LIVE_QUALIFICATION_INCOMPLETE")
 	}
@@ -110,9 +110,6 @@ evaluate :: proc(root: string, offline, live: Value, evidence_dir: string) -> (r
 			{"state_rollback_authorized", boolean(false)},
 		),
 		nil
-}
-make_strings :: proc() -> [dynamic]string {
-	return make([dynamic]string)
 }
 Scan :: proc(data: rawptr, state, approved_contract: string) -> (Value, Failure)
 ci_prepare :: proc(

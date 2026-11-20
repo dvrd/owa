@@ -2,17 +2,11 @@ package main
 
 import wa "shared:whatsapp"
 import "core:bytes"
-import "core:fmt"
 import "core:os"
 import "core:testing"
 
 unit_fixture :: proc() -> (^Fixture, string) {
-	directory, error := os.make_directory_temp("/tmp", "wa-encrypted-*", context.allocator)
-	assert(error == nil)
-	owner := fmt.aprintf("%s/owner", directory)
-	defer delete(owner)
-	assert(os.write_entire_file(owner, OWNER, {.Read_User, .Write_User}) == nil)
-
+	directory := make_owned_directory()
 	return fixture_open(directory, true), directory
 }
 

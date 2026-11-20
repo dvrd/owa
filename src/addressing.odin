@@ -1,5 +1,7 @@
 package whatsapp
 
+import endian "core:encoding/endian"
+import "core:slice"
 import "core:fmt"
 import "core:strconv"
 import "core:strings"
@@ -76,15 +78,8 @@ device_keys_response_decode :: proc(
 		}
 
 		jid, _ := node_attr(child, "jid")
-		index := -1
-
-		for requested, i in jids {
-			if requested == jid {
-				index = i
-			}
-		}
-
-		if index < 0 || seen[index] {
+		index, found := slice.linear_search_reverse(jids, jid)
+		if !found || seen[index] {
 			return 0, {kind = .Unexpected_Response}
 		}
 
@@ -130,12 +125,12 @@ device_query_response_validate :: proc(
 	request_id: string,
 	allow_device: bool,
 ) -> Device_Error {
-	if len(users) == 0 || len(users) > MAX_DEVICE_QUERY_USERS || !device_request_valid(request_id) {
+	if len(users) == 0 || len(users) > MAX_DEVICE_QUERY_USERS || !stanza_id_valid(request_id) {
 		return {kind = .Invalid_Request}
 	}
 
 	for jid in users {
-		if !device_user_valid(jid, allow_device) {
+		if !device_user_jid_valid(jid, allow_device) {
 			return {kind = .Invalid_JID}
 		}
 	}
@@ -152,12 +147,12 @@ device_bundle_decode :: proc(node: Binary_Node) -> (Signal_Prekey_Bundle, Device
 		return {}, {kind = .Server_Error}
 	}
 
-	registration, reg_err := device_child_bytes(node, "registration", 4)
+	registration, reg_err := device_read_fixed_child_bytes(node, "registration", 4)
 	if reg_err.kind != .None {
 		return {}, reg_err
 	}
 
-	identity, identity_err := device_child_bytes(node, "identity", 32)
+	identity, identity_err := device_read_fixed_child_bytes(node, "identity", 32)
 	if identity_err.kind != .None {
 		return {}, identity_err
 	}
@@ -167,25 +162,23 @@ device_bundle_decode :: proc(node: Binary_Node) -> (Signal_Prekey_Bundle, Device
 		return {}, signed_err
 	}
 
-	id, id_err := device_child_bytes(signed, "id", 3)
+	id, id_err := device_read_fixed_child_bytes(signed, "id", 3)
 	if id_err.kind != .None {
 		return {}, id_err
 	}
 
-	value, key_err := device_child_bytes(signed, "value", 32)
+	value, key_err := device_read_fixed_child_bytes(signed, "value", 32)
 	if key_err.kind != .None {
 		return {}, key_err
 	}
 
-	signature, sig_err := device_child_bytes(signed, "signature", 64)
+	signature, sig_err := device_read_fixed_child_bytes(signed, "signature", 64)
 	if sig_err.kind != .None {
 		return {}, sig_err
 	}
 
 	result: Signal_Prekey_Bundle
-	for c in registration {
-		result.registration_id = result.registration_id << 8 | cast(u32)c
-	}
+	result.registration_id = endian.unchecked_get_u32be(registration)
 	for c in id {
 		result.signed_prekey_id = result.signed_prekey_id << 8 | cast(u32)c
 	}
@@ -214,12 +207,12 @@ device_bundle_prekey_decode :: proc(node: Binary_Node, result: ^Signal_Prekey_Bu
 			return e
 		}
 
-		prekey_id, ie := device_child_bytes(key, "id", 3)
+		prekey_id, ie := device_read_fixed_child_bytes(key, "id", 3)
 		if ie.kind != .None {
 			return ie
 		}
 
-		prekey, pe := device_child_bytes(key, "value", 32)
+		prekey, pe := device_read_fixed_child_bytes(key, "value", 32)
 		if pe.kind != .None {
 			return pe
 		}
@@ -234,7 +227,7 @@ device_bundle_prekey_decode :: proc(node: Binary_Node, result: ^Signal_Prekey_Bu
 	return {}
 }
 
-device_child_bytes :: proc(node: Binary_Node, tag: string, length: int) -> ([]u8, Device_Error) {
+device_read_fixed_child_bytes :: proc(node: Binary_Node, tag: string, length: int) -> ([]u8, Device_Error) {
 	child, err := device_unique_child(node, tag)
 	if err.kind != .None {
 		return nil, err
@@ -252,7 +245,7 @@ device_child_bytes :: proc(node: Binary_Node, tag: string, length: int) -> ([]u8
 // Queries all recipient devices, including primary phones (device zero).
 // Users must be normalized PN or LID JIDs, without a device/agent suffix.
 devices_query_encode :: proc(dst: []u8, users: []string, request_id: string) -> (int, Device_Error) {
-	if !device_request_valid(request_id) || len(users) == 0 {
+	if !stanza_id_valid(request_id) || len(users) == 0 {
 		return 0, {kind = .Invalid_Request}
 	}
 
@@ -308,14 +301,12 @@ devices_query_nodes_prepare :: proc(
 	nodes: []Binary_Node,
 ) -> Device_Error {
 	for user, i in users {
-		if !device_user_valid(user, false) {
+		if !device_user_jid_valid(user, false) {
 			return {kind = .Invalid_JID}
 		}
 
-		for previous in users[:i] {
-			if user == previous {
-				return {kind = .Invalid_Request}
-			}
+		if slice.contains(users[:i], user) {
+			return {kind = .Invalid_Request}
 		}
 
 		attrs[i] = {{"jid", user}}
@@ -457,14 +448,8 @@ devices_response_children_validate :: proc(children: []Binary_Node, users: []str
 		}
 
 		jid, _ := node_attr(child, "jid")
-		index := -1
-		for user, i in users {
-			if user == jid {
-				index = i
-			}
-		}
-
-		if index < 0 || seen[index] {
+		index, found := slice.linear_search_reverse(users, jid)
+		if !found || seen[index] {
 			return 0, {kind = .Unexpected_Response}
 		}
 
@@ -486,7 +471,7 @@ devices_response_children_validate :: proc(children: []Binary_Node, users: []str
 }
 
 remote_device_jid :: proc(dst: []u8, device: Remote_Device) -> (string, Device_Error) {
-	if !device_user_valid(device.user_jid, false) || device.id >= MAX_USER_DEVICES {
+	if !device_user_jid_valid(device.user_jid, false) || device.id >= MAX_USER_DEVICES {
 		return "", {kind = .Invalid_JID}
 	}
 
@@ -512,7 +497,7 @@ remote_device_jid :: proc(dst: []u8, device: Remote_Device) -> (string, Device_E
 	return cast(string)dst[:len(text)], {}
 }
 
-device_request_valid :: proc(id: string) -> bool {
+stanza_id_valid :: proc(id: string) -> bool {
 	if len(id) == 0 || len(id) > 128 {
 		return false
 	}
@@ -525,7 +510,7 @@ device_request_valid :: proc(id: string) -> bool {
 
 	return true
 }
-device_user_valid :: proc(jid: string, allow_device: bool) -> bool {
+device_user_jid_valid :: proc(jid: string, allow_device: bool) -> bool {
 	if len(jid) > 128 || !(strings.has_suffix(jid, "@s.whatsapp.net") || strings.has_suffix(jid, "@lid")) {
 		return false
 	}
@@ -644,7 +629,7 @@ Group_Error :: struct {
 	binary:                Binary_Node_Error,
 }
 
-// Encodes the pinned Baileys groupMetadata query. Caller assigns a unique IQ
+// Encodes a group metadata query. The caller assigns a unique IQ
 // ID and routes the matching result; this function performs no network I/O.
 group_metadata_query_encode :: proc(dst: []u8, jid, request_id: string) -> (int, Group_Error) {
 	if !group_jid_valid(jid) {

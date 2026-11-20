@@ -4,6 +4,7 @@ import wa "shared:whatsapp"
 import surf "shared:surf"
 import ws "shared:websocket"
 import "core:bytes"
+import "core:crypto/hash"
 import "core:encoding/hex"
 import "core:fmt"
 import "core:net"
@@ -43,7 +44,8 @@ socket_tcp_connect :: proc(peer: ^Socket_Recovery) {
 socket_tcp_wait_replay :: proc(peer: ^Socket_Recovery) {
 	path := fmt.aprintf("%s/tcp-replay-received.bin", peer.directory)
 	defer delete(path)
-	expected := wa.sha256(peer.output[:peer.output_size])
+	expected: [32]u8
+	hash.hash_bytes_to_buffer(.SHA256, peer.output[:peer.output_size], expected[:])
 	started := time.tick_now()
 
 	for {
@@ -119,7 +121,8 @@ socket_tcp_receive :: proc(directory: string, packet: []u8, replay: bool) {
 	}
 
 	marker := "tcp-replay-received.bin" if replay else "tcp-transport-received.bin"
-	digest := wa.sha256(packet)
+	digest: [32]u8
+	hash.hash_bytes_to_buffer(.SHA256, packet, digest[:])
 	socket_owned_write(directory, marker, digest[:])
 	encoded, encoding := hex.encode(digest[:])
 	assert(encoding == nil)
@@ -139,6 +142,7 @@ socket_tcp_peer :: proc(directory, mode: string) {
 	assert(strings.has_prefix(stage, "socket-"))
 	listener, error := net.listen_tcp({net.IP4_Loopback, 0}, backlog = 1)
 	assert(error == nil)
+	assert(net.set_option(listener, .Receive_Timeout, 15 * time.Second) == .None)
 	listener_open := true
 
 	defer if listener_open {

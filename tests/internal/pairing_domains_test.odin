@@ -1,9 +1,10 @@
 package whatsapp
 
+import endian "core:encoding/endian"
 import "core:bytes"
 import "core:crypto"
 import "core:crypto/hmac"
-import "core:crypto/sha2"
+import "core:crypto/hash"
 import "core:testing"
 import "core:os"
 import "core:fmt"
@@ -183,11 +184,8 @@ pairing_domain_auth :: proc(f: ^Pairing_Domain_Fixture, account: Paired_Account)
 pairing_domain_checksum :: proc(data: []u8) {
 	// Independent fixture envelope repair, not production state mutation.
 	length := u32(len(data) - 46)
-	data[10], data[11], data[12], data[13] = u8(length >> 24), u8(length >> 16), u8(length >> 8), u8(length)
-	checksum: sha2.Context_256
-	sha2.init_256(&checksum)
-	sha2.update(&checksum, data[:len(data) - 32])
-	sha2.final(&checksum, data[len(data) - 32:])
+	endian.unchecked_put_u32be(data[10:14], length)
+	hash.hash_bytes_to_buffer(.SHA256, data[:len(data) - 32], data[len(data) - 32:])
 }
 
 pairing_domain_v1 :: proc(dst, current: []u8) -> int {

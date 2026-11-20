@@ -138,8 +138,8 @@ qr_terminal_render_matches_every_module_of_a_real_code :: proc(t: ^testing.T) {
 		for glyph in body {
 			top := glyph == '▀' || glyph == '█'
 			bottom := glyph == '▄' || glyph == '█'
-			testing.expect_value(t, top, qr_module(&code, x - QR_QUIET_ZONE, y * 2 - QR_QUIET_ZONE))
-			testing.expect_value(t, bottom, qr_module(&code, x - QR_QUIET_ZONE, y * 2 - QR_QUIET_ZONE + 1))
+			testing.expect_value(t, top, qr_module_is_dark(&code, x - QR_QUIET_ZONE, y * 2 - QR_QUIET_ZONE))
+			testing.expect_value(t, bottom, qr_module_is_dark(&code, x - QR_QUIET_ZONE, y * 2 - QR_QUIET_ZONE + 1))
 			x += 1
 		}
 

@@ -6,8 +6,6 @@ import "core:testing"
 import "core:time"
 import surf "shared:surf"
 
-// Reference: WhiskeySockets/Baileys src/Socket/messages-recv.ts handleReceipt and
-// handleCall ACK in finally; src/Utils/stanza-ack.ts preserves transport attrs.
 // These are ACKs of received stanzas, not read/view receipts, call acceptance or
 // application delivery effects. All traffic below stays in synthetic fixtures.
 ack_routing_input :: proc(f: ^Negative_Ack_Fixture, stream: ^Status_Ack_Stream, node: Binary_Node) {

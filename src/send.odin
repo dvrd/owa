@@ -1,5 +1,7 @@
 package whatsapp
 
+import endian "core:encoding/endian"
+import "core:slice"
 import "core:bytes"
 import "core:crypto"
 import "core:fmt"
@@ -25,7 +27,7 @@ socket_group_summaries_destroy :: proc(groups: ^[dynamic]Socket_Group_Summary) {
 	groups^ = {}
 }
 
-// This request matches Baileys' participating-groups IQ. The returned
+// Sends the participating-groups IQ. The returned
 // summaries own their strings and remain valid after the response is freed.
 socket_groups_participating :: proc(socket: ^Socket) -> ([dynamic]Socket_Group_Summary, Socket_Error) {
 	if socket == nil {
@@ -33,7 +35,7 @@ socket_groups_participating :: proc(socket: ^Socket) -> ([dynamic]Socket_Group_S
 	}
 
 	id_buffer: [128]u8
-	id := socket_next_id(socket, id_buffer[:])
+	id := socket_next_iq_id(socket, id_buffer[:])
 	doc, query_error := socket_query(
 		socket,
 		{
@@ -164,7 +166,7 @@ socket_group_metadata :: proc(socket: ^Socket, jid: string) -> (Socket_Group, So
 	}
 
 	id_buffer: [128]u8
-	id := socket_next_id(socket, id_buffer[:])
+	id := socket_next_iq_id(socket, id_buffer[:])
 	doc, query_err := socket_query(
 		socket,
 		{
@@ -343,7 +345,7 @@ socket_group_device_select :: proc(
 	[]string,
 	Socket_Error,
 ) {
-	if !device_user_valid(only_device, true) {
+	if !device_user_jid_valid(only_device, true) {
 		for jid in devices {
 			delete(jid)
 		}
@@ -415,8 +417,7 @@ socket_group_sender_prepare :: proc(
 		crypto.rand_bytes(id_bytes[:])
 		defer crypto.zero_explicit(&seed, size_of(seed))
 		defer crypto.zero_explicit(&signing, size_of(signing))
-		id :=
-			cast(u32)id_bytes[0] << 24 | cast(u32)id_bytes[1] << 16 | cast(u32)id_bytes[2] << 8 | cast(u32)id_bytes[3]
+		id := endian.unchecked_get_u32be(id_bytes[:])
 
 		if e := signal_group_init_sender(record, id, seed, signing); e != .None {
 			return {kind = .Group_Failed, group = e}
@@ -452,7 +453,7 @@ socket_group_distribution_pad :: proc(group: string, record: ^Signal_Group_Recor
 		return nil, {kind = .Message_Failed, message = message_err}
 	}
 
-	padded_distribution := socket_pad(distro_message[:distro_size])
+	padded_distribution := pad_outbound_message(distro_message[:distro_size])
 
 	return padded_distribution, {}
 }
@@ -688,7 +689,7 @@ socket_group_stanza_encode :: proc(
 socket_group_content_stage :: proc(socket: ^Socket, group, media_type, id: string, protobuf: []u8) -> Socket_Error {
 	// Ratchets and the exact ciphertext share one atomic transaction. Reconnect
 	// can replay this stanza without ever regenerating a used message key.
-	created := fmt.aprintf("%d", time.now()._nsec / 1_000_000_000)
+	created := fmt.aprintf("%d", time.to_unix_seconds(time.now()))
 	defer delete(created)
 	saved_content := Binary_Node {
 		tag     = "saved",
@@ -841,7 +842,7 @@ socket_group_dispatch :: proc(
 	string,
 	Socket_Error,
 ) {
-	id := socket_message_id()
+	id := generate_outbound_message_id()
 	if message_id != "" {
 		delete(id)
 		id = strings.clone(message_id)
@@ -880,7 +881,7 @@ socket_group_payload_send :: proc(
 	string,
 	Socket_Error,
 ) {
-	padded := socket_pad(protobuf)
+	padded := pad_outbound_message(protobuf)
 	defer {
 		crypto.zero_explicit(raw_data(padded), len(padded))
 		delete(padded)
@@ -1009,7 +1010,7 @@ socket_outgoing_session :: proc(socket: ^Socket, jid: string, session: ^Signal_S
 	}
 
 	id_buffer: [128]u8
-	id := socket_next_id(socket, id_buffer[:])
+	id := socket_next_iq_id(socket, id_buffer[:])
 	doc, query_err := socket_outgoing_keys_query(socket, jid, id)
 	if query_err.kind != .None {
 		return query_err
@@ -1165,20 +1166,12 @@ socket_group_users_collect :: proc(group: Group_Metadata, users: ^[dynamic]strin
 
 		normalized := fmt.aprintf("%s@%s", user, domain)
 
-		if !device_user_valid(normalized, false) {
+		if !device_user_jid_valid(normalized, false) {
 			delete(normalized)
 			return {kind = .Invalid_Config}
 		}
 
-		duplicate := false
-
-		for existing in users^ {
-			if existing == normalized {
-				duplicate = true
-			}
-		}
-
-		if duplicate {
+		if slice.contains(users^[:], normalized) {
 			delete(normalized)
 		} else {
 			append(users, normalized)
@@ -1206,15 +1199,7 @@ socket_group_devices_append :: proc(
 			continue
 		}
 
-		duplicate := false
-
-		for existing in devices^ {
-			if jid == existing {
-				duplicate = true
-			}
-		}
-
-		if !duplicate {
+		if !slice.contains(devices^[:], jid) {
 			append(devices, strings.clone(jid))
 		}
 	}
@@ -1231,7 +1216,7 @@ socket_group_devices_batch :: proc(
 	query_buffer := make([]u8, 65536)
 	defer delete(query_buffer)
 	id_buffer: [128]u8
-	id := socket_next_id(socket, id_buffer[:])
+	id := socket_next_iq_id(socket, id_buffer[:])
 	n, encoded := devices_query_encode(query_buffer, batch, id)
 	if encoded.kind != .None {
 		return {kind = .Device_Failed, device = encoded}
@@ -1264,7 +1249,7 @@ socket_group_devices_batch :: proc(
 	return socket_group_devices_append(storage[:count], devices, me, lid, have_lid)
 }
 
-socket_pad :: proc(message: []u8) -> []u8 {
+pad_outbound_message :: proc(message: []u8) -> []u8 {
 	byte: [1]u8
 	crypto.rand_bytes(byte[:])
 	n := cast(int)(byte[0] & 15) + 1
@@ -1276,19 +1261,10 @@ socket_pad :: proc(message: []u8) -> []u8 {
 
 	return result
 }
-socket_message_id :: proc() -> string {
+generate_outbound_message_id :: proc() -> string {
 	random: [9]u8
 	crypto.rand_bytes(random[:])
-	buffer: [22]u8
-	copy(buffer[:], []u8{'3', 'E', 'B', '0'})
-	digits := "0123456789ABCDEF"
-
-	for b, i in random {
-		buffer[4 + i * 2] = digits[b >> 4]
-		buffer[5 + i * 2] = digits[b & 15]
-	}
-
-	return strings.clone(cast(string)buffer[:])
+	return fmt.aprintf("3EB0%02X", string(random[:]))
 }
 
 socket_same_device :: proc(a, b: string) -> bool {

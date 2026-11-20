@@ -1,6 +1,7 @@
 package protocol_watch
 
-import "core:crypto/sha2"
+import "core:unicode/utf16"
+import "core:crypto/hash"
 import "core:encoding/hex"
 import j "core:encoding/json"
 import "core:fmt"
@@ -10,6 +11,10 @@ import "core:slice"
 import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
+
+ASCII_LETTERS :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+DECIMAL_DIGITS :: "0123456789"
+LOWER_HEX_DIGITS :: DECIMAL_DIGITS + "abcdef"
 
 MAX_BYTES :: 4 * 1024 * 1024
 MAX_REPORT :: 256 * 1024
@@ -50,11 +55,7 @@ object :: proc(pairs: ..Pair) -> Value {
 }
 array :: proc(values: ..Value) -> Value {
 	result := make(j.Array)
-
-	for value in values {
-		append(&result, value)
-	}
-
+	append(&result, ..values)
 	return result
 }
 string_array :: proc(values: []string) -> Value {
@@ -91,7 +92,7 @@ integer :: proc(value: Value) -> (i64, bool) {
 		return i64(n), true
 	}; return 0, false
 }
-truth :: proc(value: Value, expected := true) -> bool {
+json_boolean_equals :: proc(value: Value, expected := true) -> bool {
 	if b, ok := value.(j.Boolean); ok {
 		return bool(b) == expected
 	}; return false
@@ -102,19 +103,20 @@ items :: proc(value: Value) -> j.Array {
 	}; return nil
 }
 keys :: proc(value: Value) -> []string {
-	result := make([dynamic]string)
-
-	if obj, ok := value.(j.Object); ok {
-		for key in obj {
-			append(&result, key)
-		}
+	obj, ok := value.(j.Object)
+	if !ok {
+		return nil
 	}
-
+	// Callers can hold an older copy of a JSON object while adding fields.
+	// Collect the keys visited by the iterator, which can exceed the length in that copy.
+	result := make([dynamic]string, 0, len(obj))
+	for key in obj {
+		append(&result, key)
+	}
 	slice.sort(result[:])
-
 	return result[:]
 }
-fields :: proc(value: Value, wanted: []string) -> bool {
+has_exact_object_fields :: proc(value: Value, wanted: []string) -> bool {
 	actual := keys(value)
 
 	if len(actual) != len(wanted) {
@@ -122,13 +124,7 @@ fields :: proc(value: Value, wanted: []string) -> bool {
 	}
 
 	for key in wanted {
-		found := false
-
-		for s in actual {
-			if key == s {
-				found = true
-			}
-		}; if !found {
+		if !slice.contains(actual, key) {
 			return false
 		}
 	}
@@ -140,13 +136,7 @@ hex_valid :: proc(s: string, n: int) -> bool {
 		return false
 	}
 
-	for c in s {
-		if !is_hex_lower(c) {
-			return false
-		}
-	}
-
-	return true
+	return strings.trim_left(s, LOWER_HEX_DIGITS) == ""
 }
 path_valid :: proc(path: string) -> bool {
 	if len(path) == 0 || len(path) > 200 {
@@ -158,22 +148,16 @@ path_valid :: proc(path: string) -> bool {
 			return false
 		}
 
-		for c in part {
-			if !(is_alphanumeric(c) || c == '_' || c == '.' || c == '-') {
-				return false
-			}
+		if strings.trim_left(part, ASCII_LETTERS + DECIMAL_DIGITS + "_.-") != "" {
+			return false
 		}
 	}
 
 	return true
 }
 sha256 :: proc(data: []u8) -> string {
-	ctx: sha2.Context_256
-	sha2.init_256(&ctx)
-	sha2.update(&ctx, data)
 	digest: [32]u8
-	sha2.final(&ctx, digest[:])
-
+	hash.hash_bytes_to_buffer(.SHA256, data, digest[:])
 	return string(hex.encode(digest[:]))
 }
 digest :: proc(data: []u8, present: bool) -> Value {
@@ -207,8 +191,8 @@ quote :: proc(builder: ^strings.Builder, s: string) {
 				if c <= 0xffff {
 					fmt.sbprintf(builder, "\\u%04x", u32(c))
 				} else {
-					n := u32(c) - 0x10000
-					fmt.sbprintf(builder, "\\u%04x\\u%04x", 0xd800 + (n >> 10), 0xdc00 + (n & 1023))
+					high, low := utf16.encode_surrogate_pair(c)
+					fmt.sbprintf(builder, "\\u%04x\\u%04x", u32(high), u32(low))
 				}
 			} else {
 				strings.write_rune(builder, c)
@@ -323,22 +307,6 @@ decode :: proc(data: []u8, maximum := MAX_REPORT) -> (Value, string) {
 			}; depth -= 1
 		}
 
-		if token.kind == .Integer {
-			_, ok := strconv.parse_i64(token.text)
-
-			if !ok {
-				return null(), "JSON_INVALID"
-			}
-		}
-
-		if token.kind == .Float {
-			n, ok := strconv.parse_f64(token.text)
-
-			if !ok || math.is_nan(n) || math.is_inf(n) {
-				return null(), "JSON_INVALID"
-			}
-		}
-
 		previous = token.kind
 		append(&all, token)
 	}
@@ -389,14 +357,7 @@ replace :: proc(s, from, to: string) -> string {
 
 	return value
 }
-contains_string :: proc(values: []string, wanted: string) -> bool {
-	for value in values {
-		if value == wanted {
-			return true
-		}
-	}; return false
-}
-allowed_fields :: proc(value: Value, required, optional: []string) -> bool {
+has_required_and_allowed_fields :: proc(value: Value, required, optional: []string) -> bool {
 	if _, ok := value.(j.Object); !ok {
 		return false
 	}
@@ -404,13 +365,13 @@ allowed_fields :: proc(value: Value, required, optional: []string) -> bool {
 	actual := keys(value)
 
 	for key in required {
-		if !contains_string(actual, key) {
+		if !slice.contains(actual, key) {
 			return false
 		}
 	}
 
 	for key in actual {
-		if !contains_string(required, key) && !contains_string(optional, key) {
+		if !slice.contains(required, key) && !slice.contains(optional, key) {
 			return false
 		}
 	}
@@ -424,24 +385,6 @@ join :: proc(a, b: string) -> string {
 Failure :: union {
 	string,
 }
-clone :: proc(value: Value) -> Value {
-	#partial switch v in value {
-	case j.Object:
-		result := make(j.Object, max(64, len(v) + 16))
-		for key, item in v {
-			result[key] = clone(item)
-		}
-		return result
-	case j.Array:
-		result := make(j.Array)
-		for item in v {
-			append(&result, clone(item))
-		}
-		return result
-	case:
-		return value
-	}
-}
 text_limit :: proc(value: Value, minimum, maximum: int) -> bool {
 	s, ok := value.(j.String)
 
@@ -449,28 +392,18 @@ text_limit :: proc(value: Value, minimum, maximum: int) -> bool {
 		return false
 	}
 
-	length := 0
-
-	for _ in string(s) {
-		length += 1
-	}
+	length := utf8.rune_count_in_string(string(s))
 
 	return length >= minimum && length <= maximum
 }
-run_valid :: proc(run: string) -> bool {
+is_project_actions_run_url :: proc(run: string) -> bool {
 	prefix := "https://github.com/dvrd/owa/actions/runs/"
 
 	if !strings.has_prefix(run, prefix) || len(run) == len(prefix) {
 		return false
 	}
 
-	for c in run[len(prefix):] {
-		if !is_digit(c) {
-			return false
-		}
-	}
-
-	return true
+	return strings.trim_left(run[len(prefix):], DECIMAL_DIGITS) == ""
 }
 stable_uuid :: proc(seed: string) -> string {
 	bytes := (transmute([]u8)sha256(transmute([]u8)seed))[:32]
@@ -502,9 +435,6 @@ change_identity :: proc(repo, path: string, reference, current: Value) -> string
 	)
 
 	return sha256(transmute([]u8)encode(value))
-}
-sort_strings :: proc(values: []string) {
-	slice.sort(values)
 }
 
 coverage_object :: proc() -> Value {
@@ -590,12 +520,7 @@ parse_tokens :: proc(tokens: []j.Token, index: ^int, depth: int) -> (Value, bool
 		return null(), false
 	}
 }
-prefix_runes :: proc(s: string, count: int) -> string {
-	n := 0
-
-	for _, index in s {
-		if n == count {
-			return s[:index]
-		}; n += 1
-	}; return s
+unicode_prefix :: proc(s: string, count: int) -> string {
+	end := utf8.rune_offset(s, count)
+	return s[:end] if end >= 0 else s
 }

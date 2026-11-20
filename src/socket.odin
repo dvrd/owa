@@ -65,6 +65,7 @@ Socket_Error :: struct {
 	device:     Device_Error,
 }
 Socket_Config :: struct {
+	sync_contacts: bool, // Refresh the address book after login and server updates in socket_tick.
 	host, target, origin:               string,
 	port:                               int,
 	tls:                                tls.Config,
@@ -74,7 +75,7 @@ Socket_Config :: struct {
 	// Applications may reject the Noise certificate before ClientFinish is sent.
 	verify_certificate:                 Certificate_Verifier,
 	payload:                            Payload_Config,
-	qr_format:                          Pairing_QR_Format,
+	qr_write_format_bits:                          Pairing_QR_Format,
 	auth_path, prekey_path, state_path: string,
 	query_timeout:                      time.Duration,
 	observe_node:                       Protocol_Node_Observer,
@@ -124,6 +125,11 @@ socket_message_destroy :: proc(message: ^Socket_Message) {
 // Only one caller may use it. Config requires trusted CA roots. Reconnect uses
 // a fresh Socket with the SAME Auth_State, Prekey_Store and State_Store.
 Socket :: struct {
+	contact_refresh_due: bool,
+	contact_refresh_after: time.Time,
+	contact_key_requested: [128]u8,
+	contact_key_size: int,
+	contact_key_retry_after: time.Time,
 	phase:                Socket_Phase,
 	config:               Socket_Config,
 	auth:                 ^Auth_State,
@@ -182,7 +188,7 @@ socket_connect :: proc(
 		auth,
 		{
 			payload = settings.payload,
-			qr_format = settings.qr_format,
+			qr_write_format_bits = settings.qr_write_format_bits,
 			auth_path = settings.auth_path,
 			observe_node = settings.observe_node,
 			observer_data = settings.observer_data,
@@ -262,7 +268,7 @@ socket_connect_validate :: proc(
 }
 
 socket_connect_settings :: proc(config: Socket_Config) -> (Socket_Config, Socket_Error) {
-	if !pairing_qr_format_valid(config.qr_format) {
+	if !pairing_qr_format_valid(config.qr_write_format_bits) {
 		return {}, {kind = .Invalid_Config}
 	}
 
@@ -293,7 +299,7 @@ socket_connect_settings :: proc(config: Socket_Config) -> (Socket_Config, Socket
 	}
 
 	if settings.payload.version == ([3]u32{}) {
-		settings.payload = default_payload_config()
+		settings.payload = default_client_payload_config()
 	}
 
 	if len(settings.tls.root_cas) == 0 {
@@ -372,6 +378,14 @@ socket_tick :: proc(socket: ^Socket, now: time.Time) -> (Socket_Event, Socket_Er
 		}
 	}
 
+	if socket.config.sync_contacts && socket.contact_refresh_due && socket.query_depth == 0 &&
+	   socket.phase == .Online && time.diff(socket.contact_refresh_after, now) >= 0 {
+		socket.contact_refresh_after = time.time_add(now, time.Minute)
+		status, sync_err := socket_sync_contacts(socket)
+		if sync_err.kind != .None { return {}, sync_err }
+		socket.contact_refresh_due = status == .Syncing
+	}
+
 	if socket.phase == .Online && socket.query_depth == 0 && len(socket.deferred_retries) > 0 {
 		doc := socket.deferred_retries[0]
 		ordered_remove(&socket.deferred_retries, 0)
@@ -441,7 +455,7 @@ socket_receive_inner :: proc(socket: ^Socket) -> (Socket_Event, Socket_Error) {
 		process := socket.phase == .Online
 		if socket.phase == .Provisioning {
 			// The server can send offline_preview before activation
-			// finishes. Request its batch immediately, as Baileys does.
+			// finishes. Request its batch immediately.
 			switch event.node.tag {
 			case "message", "status", "receipt", "call", "notification", "ib":
 				process = true
@@ -469,7 +483,7 @@ socket_receive_inner :: proc(socket: ^Socket) -> (Socket_Event, Socket_Error) {
 socket_login_provision_start :: proc(socket: ^Socket, event: Session_Event) -> (Socket_Event, Socket_Error) {
 	socket.phase = .Provisioning
 
-	if lid, found := node_attr(event.node, "lid"); found && device_user_valid(lid, true) {
+	if lid, found := node_attr(event.node, "lid"); found && device_user_jid_valid(lid, true) {
 		if e := state_store_set(socket.store, .LID_Mapping, "self", transmute([]u8)lid); e.kind != .None {
 			return {}, socket_fail(socket, {kind = .State_Failed, state = e})
 		}
@@ -479,7 +493,7 @@ socket_login_provision_start :: proc(socket: ^Socket, event: Session_Event) -> (
 		}
 	}
 
-	id := socket_next_id(socket, socket.provision_id[:])
+	id := socket_next_iq_id(socket, socket.provision_id[:])
 	socket.provision_id_size = len(id)
 	buffer: [1024]u8
 	n, e := prekey_count_query_encode(buffer[:], id)
@@ -505,7 +519,7 @@ socket_provision :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_Event, S
 	case .Upload:
 		return socket_provision_upload(socket, node)
 	case .Active:
-		return socket_provision_active(socket, node)
+		return socket_handle_activation_response(socket, node)
 	case:
 		return {}, socket_fail(socket, {kind = .Protocol_Error})
 	}
@@ -513,14 +527,14 @@ socket_provision :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_Event, S
 
 socket_provision_count :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_Event, Socket_Error) {
 	buffer: [65536]u8
-	count, err := prekey_count_response(node, cast(string)socket.provision_id[:socket.provision_id_size])
+	count, err := decode_prekey_count_response(node, cast(string)socket.provision_id[:socket.provision_id_size])
 
 	if err.kind != .None {
 		return {}, socket_fail(socket, {kind = .Prekey_Failed, prekey = err})
 	}
 
 	if count <= PREKEY_SERVER_MIN_COUNT || socket.prekeys.pending_count > 0 {
-		id := socket_next_id(socket, socket.provision_id[:])
+		id := socket_next_iq_id(socket, socket.provision_id[:])
 		socket.provision_id_size = len(id)
 		upload_err :=
 			socket.prekeys.pending_count > 0 \
@@ -550,7 +564,7 @@ socket_provision_count :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_Ev
 		return {}, {}
 	}
 
-	return {}, socket_activate(socket)
+	return {}, socket_request_activation(socket)
 }
 
 socket_provision_upload :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_Event, Socket_Error) {
@@ -571,10 +585,10 @@ socket_provision_upload :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_E
 		return {}, {}
 	}
 
-	return {}, socket_activate(socket)
+	return {}, socket_request_activation(socket)
 }
 
-socket_provision_active :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_Event, Socket_Error) {
+socket_handle_activation_response :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_Event, Socket_Error) {
 	if e := device_response_validate(node, cast(string)socket.provision_id[:socket.provision_id_size]);
 	   e.kind != .None {
 		return {}, socket_fail(socket, {kind = .Server_Rejected})
@@ -582,6 +596,7 @@ socket_provision_active :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_E
 
 	socket.provision_stage = .None
 	socket.phase = .Online
+	socket.contact_refresh_due = socket.config.sync_contacts
 
 	if e := socket_cleanup_consumed_prekeys(socket); e.kind != .None {
 		return {}, socket_fail(socket, e)
@@ -620,8 +635,8 @@ socket_provision_active :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_E
 	return {kind = .Online}, {}
 }
 
-socket_activate :: proc(socket: ^Socket) -> Socket_Error {
-	id := socket_next_id(socket, socket.provision_id[:])
+socket_request_activation :: proc(socket: ^Socket) -> Socket_Error {
+	id := socket_next_iq_id(socket, socket.provision_id[:])
 	socket.provision_id_size = len(id)
 	buffer: [1024]u8
 	n, err := binary_node_encode(
@@ -658,10 +673,10 @@ socket_provision_write :: proc(socket: ^Socket, encoded: []u8) -> Socket_Error {
 
 	return socket_write(socket, encoded)
 }
-socket_next_id :: proc(socket: ^Socket, dst: []u8) -> string {
+socket_next_iq_id :: proc(socket: ^Socket, dst: []u8) -> string {
 	socket.sequence += 1
 
-	return fmt.bprintf(dst, "odin-%d-%d", time.now()._nsec, socket.sequence)
+	return fmt.bprintf(dst, "odin-%d-%d", time.to_unix_nanoseconds(time.now()), socket.sequence)
 }
 socket_write :: proc(socket: ^Socket, encoded: []u8) -> Socket_Error {
 	deadline_set := false
@@ -759,7 +774,7 @@ socket_control_node :: proc(socket: ^Socket, node: Binary_Node) -> Socket_Error 
 		return {}
 	}
 
-	id := socket_next_id(socket, socket.provision_id[:])
+	id := socket_next_iq_id(socket, socket.provision_id[:])
 	socket.provision_id_size = len(id)
 	buffer: [1024]u8
 	size, e := prekey_count_query_encode(buffer[:], id)
@@ -873,14 +888,14 @@ socket_query :: proc(socket: ^Socket, query: Binary_Node) -> (Binary_Document, S
 	id, has_id := node_attr(query, "id")
 
 	if has_id {
-		if !device_request_valid(id) {
+		if !stanza_id_valid(id) {
 			return {}, {kind = .Invalid_Config}
 		}
 
 		copy(buffer_id[:], transmute([]u8)id)
 		id = cast(string)buffer_id[:len(id)]
 	} else {
-		id = socket_next_id(socket, buffer_id[:])
+		id = socket_next_iq_id(socket, buffer_id[:])
 		attrs[count] = {"id", id}
 		count += 1
 	}

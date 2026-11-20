@@ -4,16 +4,18 @@ import wa "shared:whatsapp"
 import "core:bytes"
 import "core:fmt"
 import "core:os"
+import "base:runtime"
 import "core:strings"
 import "core:strconv"
 import "core:time"
+import "core:sys/posix"
 
 boundary :: proc(stage: string) {
 	fmt.printf("ENCRYPTED_BOUNDARY_READY %s\n", stage)
 
-	for {
-		time.sleep(time.Second)
-	}
+	// A failed parent must not leave a stopped fixture running indefinitely.
+	time.sleep(30 * time.Second)
+	os.exit(1)
 }
 
 stage_run :: proc(directory, stage: string) {
@@ -201,25 +203,27 @@ corrupt_load :: proc(directory, kind: string) {
 	fmt.println("ENCRYPTED_CORRUPTION_PASS live_sessions_preserved=true")
 }
 
-main :: proc() {
-	assert(len(os.args) == 4 || len(os.args) == 6)
+@(init)
+run_recovery_child :: proc "contextless" () {
+	context = runtime.default_context()
+	if len(os.args) < 2 || os.args[1] != "--recovery-fixture" {
+		return
+	}
+	args := os.args[2:]
+	assert(len(args) == 3 || len(args) == 4)
 
-	if len(os.args) == 6 {
-		assert(os.args[4] == "--tcp-port")
-		port, valid := strconv.parse_int(os.args[5])
+	if len(args) == 4 {
+		port, valid := strconv.parse_int(args[3])
 		assert(valid && port > 0 && port < 65536)
 		socket_tcp_port = port
 	}
 
-	command, directory, argument := os.args[1], os.args[2], os.args[3]
+	command, directory, argument := args[0], args[1], args[2]
 
 	switch command {
 	case "tcp-peer":
 		assert(socket_tcp_port == 0)
 		socket_tcp_peer(directory, argument)
-	case "compat-produce":
-		assert(argument == "same-format")
-		compat_produce(directory)
 	case "compat-verify":
 		assert(argument == "same-format")
 		compat_verify(directory)
@@ -233,6 +237,8 @@ main :: proc() {
 		fixture_established(f)
 		fmt.println("ENCRYPTED_BASELINE_READY")
 	case "limited-write":
+		assert(posix.signal(posix.Signal(posix.SIGXFSZ), auto_cast posix.SIG_IGN) != auto_cast posix.SIG_ERR)
+		assert(posix.setrlimit(.FSIZE, &posix.rlimit{512, 512}) == {})
 		limited_write(directory)
 	case "corrupt-load":
 		assert(argument == "corrupt" || argument == "truncated")
@@ -240,4 +246,5 @@ main :: proc() {
 	case:
 		assert(false)
 	}
+	os.exit(0)
 }

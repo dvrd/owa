@@ -108,13 +108,13 @@ linear_owned_http_redacts_and_refuses_redirect :: proc(t: ^testing.T) {
 		}
 
 		peer := Peer {
-			response = w.cat(
+			response = w.concatenate_strings(
 				"HTTP/1.1 ",
 				status,
 				"\r\n",
 				extra,
 				"Content-Length: ",
-				w.string_number(len(body)),
+				fmt.aprint(len(body)),
 				"\r\nConnection: close\r\n\r\n",
 				body,
 			),
@@ -136,7 +136,7 @@ linear_owned_http_redacts_and_refuses_redirect :: proc(t: ^testing.T) {
 		net.close(listener)
 
 		if mode == 0 {
-			testing.expect(t, failure == nil && w.truth(w.get(value, "safe")))
+			testing.expect(t, failure == nil && w.json_boolean_equals(w.get(value, "safe")))
 		} else {
 			testing.expect(t, failure == w.Failure("LINEAR_API_REJECTED" if mode == 1 else "LINEAR_REQUEST_FAILED"))
 		}

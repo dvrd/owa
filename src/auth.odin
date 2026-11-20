@@ -2,6 +2,7 @@ package whatsapp
 
 import "core:bytes"
 import "core:crypto"
+import endian "core:encoding/endian"
 import "core:mem"
 import "core:os"
 import "core:strconv"
@@ -65,7 +66,7 @@ device_credentials_generate :: proc() -> (credentials: Device_Credentials, error
 	credentials.signed_prekey_signature = signature
 	registration: [2]u8
 	crypto.rand_bytes(registration[:])
-	credentials.registration_id = (cast(u32)registration[0] << 8 | cast(u32)registration[1]) & 0x3fff
+	credentials.registration_id = u32(endian.unchecked_get_u16be(registration[:])) & 0x3fff
 	crypto.rand_bytes(credentials.adv_secret[:])
 	credentials.signed_prekey_id = 1
 	credentials.next_prekey_id = 1
@@ -236,18 +237,23 @@ auth_state_encode :: proc(dst: []u8, state: ^Auth_State) -> (n: int, error: Auth
 		return required, {kind = .Destination_Undersized}
 	}
 
-	if bytes.alias(dst[:required], mem.slice_ptr(cast([^]u8)state, size_of(Auth_State))) {
+	if bytes.alias(dst[:required], mem.ptr_to_bytes(state)) {
 		return 0, {kind = .Overlapping_Buffers}
 	}
 
 	copy(dst[:8], AUTH_STATE_MAGIC)
 	dst[8], dst[9] = 0, AUTH_STATE_VERSION
 	n = 10
-	store_put(dst, &n, cast(u64)(required - 46), 4)
-	store_put(dst, &n, cast(u64)state.credentials.registration_id, 4)
-	store_put(dst, &n, cast(u64)state.credentials.signed_prekey_id, 4)
-	store_put(dst, &n, cast(u64)state.credentials.next_prekey_id, 4)
-	store_put(dst, &n, cast(u64)state.credentials.first_unuploaded_prekey_id, 4)
+	endian.unchecked_put_u32be(dst[n:][:4], u32(required - 46))
+	n += 4
+	endian.unchecked_put_u32be(dst[n:][:4], state.credentials.registration_id)
+	n += 4
+	endian.unchecked_put_u32be(dst[n:][:4], state.credentials.signed_prekey_id)
+	n += 4
+	endian.unchecked_put_u32be(dst[n:][:4], state.credentials.next_prekey_id)
+	n += 4
+	endian.unchecked_put_u32be(dst[n:][:4], state.credentials.first_unuploaded_prekey_id)
+	n += 4
 	dst[n] = state.credentials.registered ? 1 : 0
 	n += 1
 	secrets := [7][]u8 {
@@ -276,7 +282,8 @@ auth_state_encode :: proc(dst: []u8, state: ^Auth_State) -> (n: int, error: Auth
 
 auth_account_encode :: proc(dst: []u8, state: ^Auth_State, at: ^int) {
 	if state.account.valid {
-		store_put(dst, at, cast(u64)state.account.key_index, 4)
+		endian.unchecked_put_u32be(dst[at^:][:4], state.account.key_index)
+		at^ += 4
 		dst[at^] = state.account.hosted ? 1 : 0
 		at^ += 1
 		dst[at^] = u8(state.account.signature_policy)
@@ -289,7 +296,7 @@ auth_account_encode :: proc(dst: []u8, state: ^Auth_State, at: ^int) {
 		}
 
 		for part in parts {
-			dst[at^], dst[at^ + 1] = cast(u8)(len(part) >> 8), cast(u8)len(part)
+			endian.unchecked_put_u16be(dst[at^:][:2], u16(len(part)))
 			at^ += 2
 			at^ += copy(dst[at^:], part)
 		}
@@ -312,10 +319,14 @@ auth_state_decode :: proc(dst: ^Auth_State, src: []u8) -> Auth_Store_Error {
 
 	next: Auth_State
 	defer auth_state_clear(&next)
-	next.credentials.registration_id = cast(u32)store_get(src, &at, 4)
-	next.credentials.signed_prekey_id = cast(u32)store_get(src, &at, 4)
-	next.credentials.next_prekey_id = cast(u32)store_get(src, &at, 4)
-	next.credentials.first_unuploaded_prekey_id = cast(u32)store_get(src, &at, 4)
+	next.credentials.registration_id = endian.unchecked_get_u32be(src[at:][:4])
+	at += 4
+	next.credentials.signed_prekey_id = endian.unchecked_get_u32be(src[at:][:4])
+	at += 4
+	next.credentials.next_prekey_id = endian.unchecked_get_u32be(src[at:][:4])
+	at += 4
+	next.credentials.first_unuploaded_prekey_id = endian.unchecked_get_u32be(src[at:][:4])
+	at += 4
 	if src[at] > 1 {
 		return {kind = .Invalid_Format}
 	}
@@ -374,10 +385,8 @@ auth_state_header_validate :: proc(src: []u8) -> (int, Auth_Store_Error) {
 	if src[8] != 0 || (src[9] != 1 && src[9] != AUTH_STATE_VERSION) {
 		return 0, {kind = .Unsupported_Version}
 	}
-
-	at := 10
-
-	if cast(int)cast(u32)store_get(src, &at, 4) != len(src) - 46 {
+	header_size :: 14
+	if int(endian.unchecked_get_u32be(src[10:header_size])) != len(src) - header_size - 32 {
 		return 0, {kind = .Invalid_Format}
 	}
 
@@ -387,7 +396,7 @@ auth_state_header_validate :: proc(src: []u8) -> (int, Auth_Store_Error) {
 		return 0, {kind = .Checksum_Mismatch}
 	}
 
-	return at, {}
+	return header_size, {}
 }
 
 auth_account_decode :: proc(next: ^Auth_State, src: []u8, at: ^int, end: int, version: u8) -> Auth_Store_Error {
@@ -396,7 +405,8 @@ auth_account_decode :: proc(next: ^Auth_State, src: []u8, at: ^int, end: int, ve
 			return {kind = .Invalid_Format}
 		}
 
-		next.account.key_index = cast(u32)store_get(src, at, 4)
+		next.account.key_index = endian.unchecked_get_u32be(src[at^:][:4])
+		at^ += 4
 		if src[at^] > 1 {
 			return {kind = .Invalid_Format}
 		}
@@ -428,7 +438,7 @@ auth_account_decode :: proc(next: ^Auth_State, src: []u8, at: ^int, end: int, ve
 				return {kind = .Invalid_Format}
 			}
 
-			size := cast(int)src[at^] << 8 | cast(int)src[at^ + 1]
+			size := int(endian.unchecked_get_u16be(src[at^:][:2]))
 			at^ += 2
 
 			if size > len(slot) || size > end - at^ {
@@ -467,7 +477,7 @@ auth_state_save :: proc(path: string, state: ^Auth_State) -> Auth_Store_Error {
 		return {kind = .Entropy_Unavailable}
 	}
 	// session_checkpoint permits a pairing reply only after this returns.
-	step, io_err := durable_write(path, buffer[:size])
+	step, io_err := replace_file_durably(path, buffer[:size])
 	kinds := [Durable_Write_Step]Auth_Store_Error_Kind {
 		.None      = .None,
 		.Write     = .Write_Failed,
@@ -494,7 +504,7 @@ auth_state_load :: proc(path: string, state: ^Auth_State) -> Auth_Store_Error {
 	defer os.close(file)
 	buffer: [MAX_AUTH_STATE_SIZE + 1]u8
 	defer crypto.zero_explicit(&buffer, size_of(buffer))
-	used, read_err := bounded_read(file, buffer[:])
+	used, read_err := read_file_into_bounded_buffer(file, buffer[:])
 
 	if read_err != nil {
 		return {kind = .Read_Failed, io = read_err}
@@ -737,8 +747,7 @@ prekey_upload_retry :: proc(store: ^Prekey_Store, request_id: string) -> Prekey_
 	return {}
 }
 
-// Pinned Baileys Utils/signal.js getNextPreKeysNode, with the request ID
-// appended by Socket/socket.js query. Only public material is serialized.
+// The upload includes the request ID and serializes only public key material.
 prekey_upload_encode :: proc(
 	dst: []u8,
 	store: ^Prekey_Store,
@@ -752,16 +761,14 @@ prekey_upload_encode :: proc(
 	}
 
 	registration: [4]u8
-	for i in 0 ..< 4 {
-		registration[i] = cast(u8)(credentials.registration_id >> cast(uint)(24 - i * 8))
-	}
+	endian.unchecked_put_u32be(registration[:], credentials.registration_id)
 	bundle_type := [?]u8{5}
 	identity := store.identity_public
 	ids: [MAX_PREKEY_UPLOAD_COUNT][3]u8
 	key_fields: [MAX_PREKEY_UPLOAD_COUNT][2]Binary_Node
 	key_nodes: [MAX_PREKEY_UPLOAD_COUNT]Binary_Node
 	at := prekey_upload_nodes_prepare(store, ids[:], key_fields[:], key_nodes[:])
-	signed_id := prekey_id_bytes(credentials.signed_prekey_id)
+	signed_id := encode_prekey_id_u24(credentials.signed_prekey_id)
 	signed_fields := [?]Binary_Node {
 		{tag = "id", content = signed_id[:]},
 		{tag = "value", content = credentials.signed_prekey_public[:]},
@@ -806,7 +813,7 @@ prekey_upload_nodes_prepare :: proc(
 			continue
 		}
 
-		ids[at] = prekey_id_bytes(key.id)
+		ids[at] = encode_prekey_id_u24(key.id)
 		key_fields[at] = {
 			Binary_Node{tag = "id", content = ids[at][:]},
 			Binary_Node{tag = "value", content = key.public[:]},
@@ -904,7 +911,7 @@ prekey_count_query_encode :: proc(dst: []u8, request_id: string) -> (int, Prekey
 	return size, {}
 }
 
-prekey_count_response :: proc(response: Binary_Node, request_id: string) -> (int, Prekey_Error) {
+decode_prekey_count_response :: proc(response: Binary_Node, request_id: string) -> (int, Prekey_Error) {
 	if err := prekey_response_validate(response, request_id); err.kind != .None {
 		return 0, err
 	}
@@ -963,28 +970,30 @@ prekey_store_encode :: proc(dst: []u8, store: ^Prekey_Store) -> (int, Prekey_Err
 	}
 
 	at := copy(dst, transmute([]u8)PREKEY_STORE_MAGIC)
-	store_put(dst, &at, PREKEY_STORE_VERSION, 2)
+	endian.unchecked_put_u16be(dst[at:][:2], PREKEY_STORE_VERSION)
+	at += 2
 	at += copy(dst[at:], store.identity_public[:])
-	store_put(dst, &at, cast(u64)store.next_id, 4)
-	store_put(dst, &at, store.revision, 8)
-	store_put(dst, &at, cast(u64)store.count, 2)
-	store_put(dst, &at, cast(u64)store.pending_first_id, 4)
-	store_put(dst, &at, cast(u64)store.pending_count, 2)
-	store_put(dst, &at, cast(u64)store.pending_request_id_size, 2)
+	endian.unchecked_put_u32be(dst[at:][:4], store.next_id)
+	at += 4
+	endian.unchecked_put_u64be(dst[at:][:8], store.revision)
+	at += 8
+	endian.unchecked_put_u16be(dst[at:][:2], u16(store.count))
+	at += 2
+	endian.unchecked_put_u32be(dst[at:][:4], store.pending_first_id)
+	at += 4
+	endian.unchecked_put_u16be(dst[at:][:2], u16(store.pending_count))
+	at += 2
+	endian.unchecked_put_u16be(dst[at:][:2], u16(store.pending_request_id_size))
+	at += 2
 	at += copy(dst[at:], store.pending_request_id[:store.pending_request_id_size])
 
-	for key in store.keys[:store.count] {
-		store_put(dst, &at, cast(u64)key.id, 4)
+	for &key in store.keys[:store.count] {
+		endian.unchecked_put_u32be(dst[at:][:4], key.id)
+		at += 4
 		dst[at] = cast(u8)key.status
 		at += 1
-		for value, i in key.private {
-			dst[at + i] = value
-		}
-		at += 32
-		for value, i in key.public {
-			dst[at + i] = value
-		}
-		at += 32
+		at += copy(dst[at:][:32], key.private[:])
+		at += copy(dst[at:][:32], key.public[:])
 	}
 
 	hash := sha256(dst[:at])
@@ -1004,7 +1013,9 @@ prekey_store_decode :: proc(store: ^Prekey_Store, src: []u8, credentials: ^Devic
 
 	at := 8
 
-	if store_get(src, &at, 2) != PREKEY_STORE_VERSION {
+	version := endian.unchecked_get_u16be(src[at:][:2])
+	at += 2
+	if version != PREKEY_STORE_VERSION {
 		return {kind = .Unsupported_Version}
 	}
 
@@ -1012,12 +1023,18 @@ prekey_store_decode :: proc(store: ^Prekey_Store, src: []u8, credentials: ^Devic
 	defer prekey_store_clear(&next)
 	next.initialized = true
 	at += copy(next.identity_public[:], src[at:][:32])
-	next.next_id = cast(u32)store_get(src, &at, 4)
-	next.revision = store_get(src, &at, 8)
-	next.count = cast(int)store_get(src, &at, 2)
-	next.pending_first_id = cast(u32)store_get(src, &at, 4)
-	next.pending_count = cast(int)store_get(src, &at, 2)
-	next.pending_request_id_size = cast(int)store_get(src, &at, 2)
+	next.next_id = endian.unchecked_get_u32be(src[at:][:4])
+	at += 4
+	next.revision = endian.unchecked_get_u64be(src[at:][:8])
+	at += 8
+	next.count = cast(int)endian.unchecked_get_u16be(src[at:][:2])
+	at += 2
+	next.pending_first_id = endian.unchecked_get_u32be(src[at:][:4])
+	at += 4
+	next.pending_count = cast(int)endian.unchecked_get_u16be(src[at:][:2])
+	at += 2
+	next.pending_request_id_size = cast(int)endian.unchecked_get_u16be(src[at:][:2])
+	at += 2
 	if next.count > MAX_STORED_PREKEYS ||
 	   next.pending_count > MAX_PREKEY_UPLOAD_COUNT ||
 	   next.pending_request_id_size > MAX_PREKEY_REQUEST_ID_SIZE {
@@ -1031,7 +1048,8 @@ prekey_store_decode :: proc(store: ^Prekey_Store, src: []u8, credentials: ^Devic
 	at += copy(next.pending_request_id[:next.pending_request_id_size], src[at:][:next.pending_request_id_size])
 
 	for &key in next.keys[:next.count] {
-		key.id = cast(u32)store_get(src, &at, 4)
+		key.id = endian.unchecked_get_u32be(src[at:][:4])
+		at += 4
 		key.status = cast(Prekey_Status)src[at]
 		at += 1
 		at += copy(key.private[:], src[at:][:32])
@@ -1086,7 +1104,7 @@ prekey_store_save :: proc(path: string, store: ^Prekey_Store) -> Prekey_Error {
 	when !crypto.HAS_RAND_BYTES {
 		return {kind = .Entropy_Unavailable}
 	}
-	step, io_err := durable_write(path, buffer[:size])
+	step, io_err := replace_file_durably(path, buffer[:size])
 
 	if step != .None {
 		kinds := [Durable_Write_Step]Prekey_Error_Kind {
@@ -1120,7 +1138,7 @@ prekey_store_load :: proc(path: string, store: ^Prekey_Store, credentials: ^Devi
 	defer os.close(file)
 	buffer: [MAX_PREKEY_STORE_SIZE + 1]u8
 	defer crypto.zero_explicit(&buffer, size_of(buffer))
-	used, read_err := bounded_read(file, buffer[:])
+	used, read_err := read_file_into_bounded_buffer(file, buffer[:])
 
 	if read_err != nil {
 		return {kind = .Read_Failed, io = read_err}
@@ -1355,7 +1373,7 @@ prekey_response_validate :: proc(response: Binary_Node, request_id: string) -> P
 	return {}
 }
 
-prekey_id_bytes :: proc(id: u32) -> [3]u8 {
+encode_prekey_id_u24 :: proc(id: u32) -> [3]u8 {
 	return {cast(u8)(id >> 16), cast(u8)(id >> 8), cast(u8)id}
 }
 

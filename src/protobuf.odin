@@ -1,14 +1,16 @@
 package whatsapp
 
+import endian "core:encoding/endian"
+import "core:math/bits"
+import "core:strconv"
 import "core:bytes"
-import "core:crypto/legacy/md5"
+import "core:crypto/hash"
 import "core:unicode/utf8"
 
 // Protobuf fields, login payloads and pairing codecs.
 
-// Field numbers match Baileys 6.7.23 WAProto/WAProto.proto, HandshakeMessage
-// and CertChain. This deliberately implements only these small wire messages;
-// field semantics and Noise cryptographic lengths belong to the handshake.
+// Decode the WAProto HandshakeMessage and CertChain wire fields here.
+// The handshake validates their meaning and cryptographic lengths.
 MAX_PROTOBUF_MESSAGE_SIZE :: MAX_FRAME_PAYLOAD
 
 Protobuf_Error :: enum {
@@ -483,14 +485,7 @@ protobuf_varint_read :: proc(src: []u8, at: ^int) -> (value: u64, error: Protobu
 }
 
 protobuf_varint_size :: proc(value: u64) -> int {
-	n, remaining := 1, value
-
-	for remaining >= 0x80 {
-		remaining >>= 7
-		n += 1
-	}
-
-	return n
+	return max(1, (bits.len_u64(value) + 6) / 7)
 }
 
 protobuf_varint_write :: proc(dst: []u8, at: ^int, value: u64) {
@@ -536,9 +531,8 @@ Payload_Error :: enum {
 	Overlapping_Buffers,
 }
 
-// Matches the pinned Baileys 6.7.23 validate-connection.js registration
-// ClientPayload. The bounded staging buffer guarantees dst is unchanged on
-// every validation/size/alias error. Inputs contain public key material only.
+// Encodes the registration ClientPayload. A bounded staging buffer keeps dst
+// unchanged on validation, size, or alias errors. All key material is public.
 registration_payload_encode :: proc(
 	dst: []u8,
 	config: Payload_Config,
@@ -566,18 +560,10 @@ registration_payload_encode :: proc(
 		return 0, props_err
 	}
 
-	build_hash := registration_build_hash(config.version)
-	registration_id := [4]u8 {
-		cast(u8)(keys.registration_id >> 24),
-		cast(u8)(keys.registration_id >> 16),
-		cast(u8)(keys.registration_id >> 8),
-		cast(u8)keys.registration_id,
-	}
-	prekey_id := [3]u8 {
-		cast(u8)(keys.signed_prekey_id >> 16),
-		cast(u8)(keys.signed_prekey_id >> 8),
-		cast(u8)keys.signed_prekey_id,
-	}
+	build_hash := registration_version_md5(config.version)
+	registration_id: [4]u8
+	endian.unchecked_put_u32be(registration_id[:], keys.registration_id)
+	prekey_id := encode_prekey_id_u24(keys.signed_prekey_id)
 	key_type := [?]u8{5}
 	pairing_buffer: [2048]u8
 	pairing := Protobuf_Writer {
@@ -592,18 +578,18 @@ registration_payload_encode :: proc(
 	protobuf_write_bytes(&pairing, 7, build_hash[:])
 	protobuf_write_bytes(&pairing, 8, device_props[:props_size])
 	if pairing.err != .None {
-		return 0, payload_write_error(&pairing)
+		return 0, client_payload_error_from_writer(&pairing)
 	}
 
 	staging: [MAX_CLIENT_PAYLOAD_SIZE]u8
 	writer := Protobuf_Writer {
 		dst = staging[:],
 	}
-	payload_common(&writer, config, false, 0, 0, pairing_buffer[:pairing.at])
+	write_common_client_payload_fields(&writer, config, false, 0, 0, pairing_buffer[:pairing.at])
 	return payload_copy_result(dst, config, "", &writer)
 }
 
-registration_build_hash :: proc(version: [3]u32) -> [16]u8 {
+registration_version_md5 :: proc(version: [3]u32) -> [16]u8 {
 	version_text: [32]u8
 	version_size := 0
 
@@ -613,15 +599,12 @@ registration_build_hash :: proc(version: [3]u32) -> [16]u8 {
 			version_size += 1
 		}
 
-		version_size += payload_decimal(version_text[version_size:], value)
+		version_size += len(strconv.write_uint(version_text[version_size:], u64(value), 10))
 	}
 
 	// Protocol build identifier, not a password hash: MD5(version.join('.')).
 	build_hash: [16]u8
-	hash: md5.Context
-	md5.init(&hash)
-	md5.update(&hash, version_text[:version_size])
-	md5.final(&hash, build_hash[:])
+	hash.hash_bytes_to_buffer(.Insecure_MD5, version_text[:version_size], build_hash[:])
 
 	return build_hash
 }
@@ -648,25 +631,20 @@ login_payload_encode :: proc(
 		return 0, .Invalid_Username
 	}
 
-	username: u64
 	for c in user {
 		if !is_digit(c) {
 			return 0, .Invalid_Username
 		}
-
-		digit := cast(u64)(c - '0')
-
-		if username > (0xffff_ffff_ffff_ffff - digit) / 10 {
-			return 0, .Invalid_Username
-		}
-
-		username = username * 10 + digit
+	}
+	username, valid := strconv.parse_u64(user, 10)
+	if !valid {
+		return 0, .Invalid_Username
 	}
 	staging: [MAX_CLIENT_PAYLOAD_SIZE]u8
 	writer := Protobuf_Writer {
 		dst = staging[:],
 	}
-	payload_common(&writer, config, true, username, device, nil, include_device)
+	write_common_client_payload_fields(&writer, config, true, username, device, nil, include_device)
 	return payload_copy_result(dst, config, user, &writer)
 }
 
@@ -701,7 +679,7 @@ device_props_encode :: proc(dst: []u8, config: Payload_Config) -> (n: int, error
 	}
 
 	protobuf_write_string(&writer, 1, config.browser_os)
-	protobuf_write_uint(&writer, 3, cast(u64)payload_platform(config.browser_name))
+	protobuf_write_uint(&writer, 3, cast(u64)browser_platform_code(config.browser_name))
 	protobuf_write_uint(&writer, 4, cast(u64)config.sync_full_history)
 	protobuf_write_bytes(&writer, 5, history_buffer[:history.at])
 
@@ -815,7 +793,7 @@ protobuf_write_string :: proc(writer: ^Protobuf_Writer, number: u32, value: stri
 	protobuf_write_bytes(writer, number, transmute([]u8)value)
 }
 
-payload_write_error :: proc(writer: ^Protobuf_Writer) -> Payload_Error {
+client_payload_error_from_writer :: proc(writer: ^Protobuf_Writer) -> Payload_Error {
 	switch writer.err {
 	case .None:
 		return .None
@@ -829,7 +807,7 @@ payload_write_error :: proc(writer: ^Protobuf_Writer) -> Payload_Error {
 	return .None
 }
 
-payload_common :: proc(
+write_common_client_payload_fields :: proc(
 	writer: ^Protobuf_Writer,
 	config: Payload_Config,
 	login: bool,
@@ -930,7 +908,7 @@ payload_config_validate :: proc(config: Payload_Config) -> Payload_Error {
 	return .None
 }
 
-payload_platform :: proc(browser: string) -> u32 {
+browser_platform_code :: proc(browser: string) -> u32 {
 	names := [?]string {
 		"CHROME",
 		"FIREFOX",
@@ -997,7 +975,7 @@ payload_copy_result :: proc(
 	Payload_Error,
 ) {
 	if writer.err != .None {
-		return 0, payload_write_error(writer)
+		return 0, client_payload_error_from_writer(writer)
 	}
 
 	if len(dst) < writer.at {
@@ -1014,28 +992,7 @@ payload_copy_result :: proc(
 	return writer.at, .None
 }
 
-payload_decimal :: proc(dst: []u8, value: u32) -> int {
-	remaining := value
-	reversed: [10]u8
-	size := 0
 
-	for {
-		reversed[size] = '0' + cast(u8)(remaining % 10)
-		size += 1
-		remaining /= 10
-		if remaining == 0 {
-			break
-		}
-	}
-
-	for i in 0 ..< size {
-		dst[i] = reversed[size - 1 - i]
-	}
-
-	return size
-}
-
-// ADV* field numbers from the pinned Baileys 6.7.23 WAProto schema.
 // All decoded byte strings borrow src, including the signed raw details.
 Pairing_Device_Identity_HMAC :: struct {
 	details, hmac:                           []u8,
@@ -1271,7 +1228,7 @@ pairing_signed_identity_encode :: proc(
 	return written, .None
 }
 
-// Baileys 6.7.23 WAProto.proto: Message, ExtendedTextMessage, ContextInfo,
+// Supported WAProto types include Message, ExtendedTextMessage, ContextInfo,
 // FutureProofMessage and Message.SenderKeyDistributionMessage. This codec
 // deliberately ignores other message kinds; it does not implement media.
 MAX_MESSAGE_NESTING :: 8

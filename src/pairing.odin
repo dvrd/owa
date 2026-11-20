@@ -90,7 +90,7 @@ Pairing_QR_Format :: enum {
 
 Session_Config :: struct {
 	payload:            Payload_Config,
-	qr_format:          Pairing_QR_Format,
+	qr_write_format_bits:          Pairing_QR_Format,
 	// Empty leaves persistence to the caller; otherwise checkpoint before
 	// starting registration and before acknowledging successful pairing.
 	auth_path:          string,
@@ -144,14 +144,14 @@ Session :: struct {
 
 // The compiled version is the last-resort fallback of web_version_discover: the
 // client_revision published by web.whatsapp.com/sw.js on 2026-11-17, not a claim
-// of the current service version. The browser identity is the current Baileys
-// default, Browsers.macOS('Chrome'): DeviceProps.os "Mac OS", platform CHROME.
+// of the current service version. The default browser identity sets
+// DeviceProps.os to "Mac OS" and the platform to CHROME.
 // Applications may use official discovery or supply an explicit version.
 WA_WEB_VERSION_PINNED :: [3]u32{2, 3000, 1054981628}
 WA_WEB_BROWSER_OS :: "Mac OS"
 WA_WEB_BROWSER_NAME :: "Chrome"
 
-default_payload_config :: proc() -> Payload_Config {
+default_client_payload_config :: proc() -> Payload_Config {
 	return {
 		version = WA_WEB_VERSION_PINNED,
 		browser_os = WA_WEB_BROWSER_OS,
@@ -169,7 +169,7 @@ session_init :: proc(session: ^Session, client: ^Client, auth: ^Auth_State, conf
 		return {kind = .Invalid_State}
 	}
 
-	if !pairing_qr_format_valid(config.qr_format) {
+	if !pairing_qr_format_valid(config.qr_write_format_bits) {
 		return {kind = .Invalid_Config}
 	}
 
@@ -239,7 +239,7 @@ session_start :: proc(session: ^Session, now: time.Time) -> Session_Error {
 // Read one decrypted binary node. The return borrows the session's decoded
 // document; consume the event before the next read/process or session_close.
 session_read :: proc(session: ^Session, now: time.Time) -> (event: Session_Event, error: Session_Error) {
-	if !session_receiving(session) {
+	if !session_can_receive(session) {
 		return {}, session_state_error(session)
 	}
 
@@ -269,7 +269,7 @@ session_process :: proc(
 	event: Session_Event,
 	error: Session_Error,
 ) {
-	if !session_receiving(session) {
+	if !session_can_receive(session) {
 		return {}, session_state_error(session)
 	}
 
@@ -470,7 +470,7 @@ session_pair_device :: proc(session: ^Session, node: Binary_Node, now: time.Time
 		&session.qr_state,
 		now,
 		session.qr[:],
-		session.config.qr_format,
+		session.config.qr_write_format_bits,
 		session.config.payload.browser_os,
 		session.config.payload.browser_name,
 	)
@@ -513,7 +513,7 @@ session_pair_success :: proc(session: ^Session, node: Binary_Node) -> (Session_E
 }
 
 session_tick :: proc(session: ^Session, now: time.Time) -> (event: Session_Event, error: Session_Error) {
-	if !session_receiving(session) {
+	if !session_can_receive(session) {
 		return {}, session_state_error(session)
 	}
 
@@ -526,7 +526,7 @@ session_tick :: proc(session: ^Session, now: time.Time) -> (event: Session_Event
 	}
 
 	if now._nsec >= session.next_ping._nsec {
-		if err := session_keepalive(session); err.kind != .None {
+		if err := session_send_keepalive_ping(session); err.kind != .None {
 			return {}, session_fail(session, err)
 		}
 
@@ -538,7 +538,7 @@ session_tick :: proc(session: ^Session, now: time.Time) -> (event: Session_Event
 			&session.qr_state,
 			now,
 			session.qr[:],
-			session.config.qr_format,
+			session.config.qr_write_format_bits,
 			session.config.payload.browser_os,
 			session.config.payload.browser_name,
 		)
@@ -627,7 +627,7 @@ session_checkpoint :: proc(session: ^Session) -> Session_Error {
 	return {}
 }
 
-session_receiving :: proc(session: ^Session) -> bool {
+session_can_receive :: proc(session: ^Session) -> bool {
 	if session == nil {
 		return false
 	}
@@ -659,7 +659,7 @@ session_fail :: proc(session: ^Session, err: Session_Error) -> Session_Error {
 	return err
 }
 
-session_keepalive :: proc(session: ^Session) -> Session_Error {
+session_send_keepalive_ping :: proc(session: ^Session) -> Session_Error {
 	if session.ping_sequence == max(u64) {
 		return {kind = .Invalid_State}
 	}
@@ -1072,7 +1072,7 @@ pairing_qr_clear :: proc(state: ^Pairing_QR_State) {
 }
 
 // Validates the account HMAC and Signal signatures before changing account.
-// Reply contains pair-device-sign and omits accountSignatureKey, like Baileys.
+// The reply contains pair-device-sign and omits accountSignatureKey.
 pairing_success_handle :: proc(
 	account: ^Paired_Account,
 	iq: Binary_Node,
@@ -1595,7 +1595,7 @@ qr_encode :: proc(text: string) -> (code: QR_Code, err: QR_Error) {
 	for ; version <= 40; version += 1 {
 		count_bits := version < 10 ? 8 : 16
 
-		if len(text) < 1 << cast(uint)count_bits && 4 + count_bits + len(text) * 8 <= qr_data_words(version) * 8 {
+		if len(text) < 1 << cast(uint)count_bits && 4 + count_bits + len(text) * 8 <= qr_data_codeword_count(version) * 8 {
 			break
 		}
 	}
@@ -1609,7 +1609,7 @@ qr_encode :: proc(text: string) -> (code: QR_Code, err: QR_Error) {
 	qr_data_encode(data[:], text, version)
 	qr_interleave(data[:], version, interleaved[:])
 	functions: [QR_MAX_SIZE * QR_MAX_SIZE]bool
-	qr_functions(&code, &functions)
+	qr_draw_function_patterns(&code, &functions)
 	bit := 0
 
 	for right := code.size - 1; right >= 1; right -= 2 {
@@ -1623,7 +1623,7 @@ qr_encode :: proc(text: string) -> (code: QR_Code, err: QR_Error) {
 				y := ((right + 1) & 2) == 0 ? code.size - 1 - vert : vert
 				index := y * code.size + x
 
-				if !functions[index] && bit < qr_raw_modules(version) / 8 * 8 {
+				if !functions[index] && bit < qr_count_raw_data_modules(version) / 8 * 8 {
 					code.modules[index] = (interleaved[bit / 8] >> cast(uint)(7 - bit % 8)) & 1 != 0
 					bit += 1
 				}
@@ -1634,8 +1634,8 @@ qr_encode :: proc(text: string) -> (code: QR_Code, err: QR_Error) {
 	best_penalty := max(int)
 
 	for mask in 0 ..< 8 {
-		qr_mask(&code, &functions, mask)
-		qr_format(&code, &functions, mask)
+		qr_apply_data_mask(&code, &functions, mask)
+		qr_write_format_bits(&code, &functions, mask)
 		penalty := qr_penalty(&code)
 
 		if penalty < best_penalty {
@@ -1643,11 +1643,11 @@ qr_encode :: proc(text: string) -> (code: QR_Code, err: QR_Error) {
 			code.mask = mask
 		}
 
-		qr_mask(&code, &functions, mask)
+		qr_apply_data_mask(&code, &functions, mask)
 	}
 
-	qr_mask(&code, &functions, code.mask)
-	qr_format(&code, &functions, code.mask)
+	qr_apply_data_mask(&code, &functions, code.mask)
+	qr_write_format_bits(&code, &functions, code.mask)
 
 	return code, .None
 }
@@ -1659,7 +1659,7 @@ qr_data_encode :: proc(data: []u8, text: string, version: int) {
 	for i in 0 ..< len(text) {
 		qr_bits_write(data, &bits, cast(u32)text[i], 8)
 	}
-	capacity := qr_data_words(version) * 8
+	capacity := qr_data_codeword_count(version) * 8
 	qr_bits_write(data, &bits, 0, min(4, capacity - bits))
 	qr_bits_write(data, &bits, 0, (8 - bits % 8) % 8)
 	pad: u32 = 0xec
@@ -1670,7 +1670,7 @@ qr_data_encode :: proc(data: []u8, text: string, version: int) {
 	}
 }
 
-qr_module :: proc(code: ^QR_Code, x, y: int) -> bool {
+qr_module_is_dark :: proc(code: ^QR_Code, x, y: int) -> bool {
 	if code == nil || code.size < 21 || code.size > QR_MAX_SIZE || x < 0 || y < 0 || x >= code.size || y >= code.size {
 		return false
 	}
@@ -1703,7 +1703,7 @@ qr_terminal_render :: proc(code: ^QR_Code, allocator := context.allocator) -> (s
 	for row in 0 ..< rows {
 		for col in 0 ..< width {
 			x, y := col - QR_QUIET_ZONE, row * 2 - QR_QUIET_ZONE
-			size += qr_module(code, x, y) || qr_module(code, x, y + 1) ? 3 : 1
+			size += qr_module_is_dark(code, x, y) || qr_module_is_dark(code, x, y + 1) ? 3 : 1
 		}
 	}
 
@@ -1719,7 +1719,7 @@ qr_terminal_render :: proc(code: ^QR_Code, allocator := context.allocator) -> (s
 
 		for col in 0 ..< width {
 			x, y := col - QR_QUIET_ZONE, row * 2 - QR_QUIET_ZONE
-			top, bottom := qr_module(code, x, y), qr_module(code, x, y + 1)
+			top, bottom := qr_module_is_dark(code, x, y), qr_module_is_dark(code, x, y + 1)
 			glyph := " "
 
 			if top && bottom {
@@ -1748,7 +1748,7 @@ qr_bits_write :: proc(data: []u8, at: ^int, value: u32, count: int) {
 		at^ += 1
 	}
 }
-qr_raw_modules :: proc(version: int) -> int {
+qr_count_raw_data_modules :: proc(version: int) -> int {
 	result := (16 * version + 128) * version + 64
 
 	if version >= 2 {
@@ -1761,10 +1761,10 @@ qr_raw_modules :: proc(version: int) -> int {
 
 	return result
 }
-qr_data_words :: proc(version: int) -> int {
-	return qr_raw_modules(version) / 8 - QR_ECC_PER_BLOCK[version] * QR_BLOCKS[version]
+qr_data_codeword_count :: proc(version: int) -> int {
+	return qr_count_raw_data_modules(version) / 8 - QR_ECC_PER_BLOCK[version] * QR_BLOCKS[version]
 }
-qr_multiply :: proc(x, y: u8) -> u8 {
+qr_gf256_multiply :: proc(x, y: u8) -> u8 {
 	z: u8
 
 	for i := 7; i >= 0; i -= 1 {
@@ -1776,7 +1776,7 @@ qr_multiply :: proc(x, y: u8) -> u8 {
 }
 qr_interleave :: proc(data: []u8, version: int, result: []u8) {
 	blocks, ecc_size := QR_BLOCKS[version], QR_ECC_PER_BLOCK[version]
-	raw_words, data_size := qr_raw_modules(version) / 8, qr_data_words(version)
+	raw_words, data_size := qr_count_raw_data_modules(version) / 8, qr_data_codeword_count(version)
 	short_blocks := blocks - raw_words % blocks
 	short_data_size := raw_words / blocks - ecc_size
 	divisor: [30]u8
@@ -1785,14 +1785,14 @@ qr_interleave :: proc(data: []u8, version: int, result: []u8) {
 
 	for _ in 0 ..< ecc_size {
 		for j in 0 ..< ecc_size {
-			divisor[j] = qr_multiply(divisor[j], root)
+			divisor[j] = qr_gf256_multiply(divisor[j], root)
 
 			if j + 1 < ecc_size {
 				divisor[j] ~= divisor[j + 1]
 			}
 		}
 
-		root = qr_multiply(root, 2)
+		root = qr_gf256_multiply(root, 2)
 	}
 
 	at := 0
@@ -1808,7 +1808,7 @@ qr_interleave :: proc(data: []u8, version: int, result: []u8) {
 			}
 			ecc[ecc_size - 1] = 0
 			for j in 0 ..< ecc_size {
-				ecc[j] ~= qr_multiply(divisor[j], factor)
+				ecc[j] ~= qr_gf256_multiply(divisor[j], factor)
 			}
 		}
 
@@ -1837,7 +1837,7 @@ qr_set_function :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]b
 	index := y * code.size + x
 	code.modules[index], functions[index] = dark, true
 }
-qr_functions :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]bool) {
+qr_draw_function_patterns :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]bool) {
 	for i in 0 ..< code.size {
 		qr_set_function(code, functions, 6, i, i % 2 == 0)
 		qr_set_function(code, functions, i, 6, i % 2 == 0)
@@ -1883,7 +1883,7 @@ qr_functions :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]bool
 		}
 	}
 
-	qr_format(code, functions, 0)
+	qr_write_format_bits(code, functions, 0)
 
 	if code.version >= 7 {
 		remainder := code.version
@@ -1900,7 +1900,7 @@ qr_functions :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]bool
 		}
 	}
 }
-qr_format :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]bool, mask: int) {
+qr_write_format_bits :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]bool, mask: int) {
 	data := 1 << 3 | mask // ECC-L format selector = 1.
 	remainder := data
 	for _ in 0 ..< 10 {
@@ -1927,7 +1927,7 @@ qr_format :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]bool, m
 
 	qr_set_function(code, functions, 8, code.size - 8, true)
 }
-qr_mask :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]bool, mask: int) {
+qr_apply_data_mask :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]bool, mask: int) {
 	for y in 0 ..< code.size {
 		for x in 0 ..< code.size {
 			index := y * code.size + x
@@ -1975,7 +1975,7 @@ qr_penalty :: proc(code: ^QR_Code) -> int {
 					x, y = y, x
 				}
 
-				current := qr_module(code, x, y)
+				current := qr_module_is_dark(code, x, y)
 
 				if current == color {
 					run += 1
@@ -2010,16 +2010,16 @@ qr_penalty :: proc(code: ^QR_Code) -> int {
 
 	for y in 0 ..< code.size {
 		for x in 0 ..< code.size {
-			c := qr_module(code, x, y)
+			c := qr_module_is_dark(code, x, y)
 			if c {
 				dark += 1
 			}
 
 			if x + 1 < code.size &&
 			   y + 1 < code.size &&
-			   c == qr_module(code, x + 1, y) &&
-			   c == qr_module(code, x, y + 1) &&
-			   c == qr_module(code, x + 1, y + 1) {
+			   c == qr_module_is_dark(code, x + 1, y) &&
+			   c == qr_module_is_dark(code, x, y + 1) &&
+			   c == qr_module_is_dark(code, x + 1, y + 1) {
 				score += 3
 			}
 		}
@@ -2174,11 +2174,11 @@ web_version_revision :: proc(src: []u8) -> (revision: u32, err: Version_Error) {
 	last := len(src) - len(key)
 
 	for i in 0 ..= last {
-		matches, escaped := revision_key_at(src, i)
+		matches, escaped := match_client_revision_key_at(src, i)
 		if !matches {
 			continue
 		}
-		value, ok, invalid := revision_digits(src, i + len(key), escaped)
+		value, ok, invalid := parse_client_revision_digits(src, i + len(key), escaped)
 		if invalid {
 			return 0, {kind = .Invalid_Version}
 		}
@@ -2199,7 +2199,7 @@ web_version_revision :: proc(src: []u8) -> (revision: u32, err: Version_Error) {
 	return 0, {kind = .Missing_Version}
 }
 
-revision_key_at :: proc(src: []u8, i: int) -> (matches, escaped: bool) {
+match_client_revision_key_at :: proc(src: []u8, i: int) -> (matches, escaped: bool) {
 	key := CLIENT_REVISION_KEY
 	if i < 1 || i + len(key) > len(src) {
 		return false, false
@@ -2227,7 +2227,7 @@ revision_key_at :: proc(src: []u8, i: int) -> (matches, escaped: bool) {
 	return true, escaped
 }
 
-revision_digits :: proc(src: []u8, at: int, escaped: bool) -> (value: u32, ok, invalid: bool) {
+parse_client_revision_digits :: proc(src: []u8, at: int, escaped: bool) -> (value: u32, ok, invalid: bool) {
 	i := at
 
 	if escaped {

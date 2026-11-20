@@ -248,8 +248,8 @@ linked_device_qr_session_initial_and_timer_events_honor_selected_format :: proc(
 		f := qr_profile_fixture()
 		defer qr_profile_destroy(f)
 		config := Session_Config {
-			payload   = default_payload_config(),
-			qr_format = format,
+			payload   = default_client_payload_config(),
+			qr_write_format_bits = format,
 		}
 
 		config.payload.browser_os = "Windows"
@@ -309,7 +309,7 @@ linked_device_qr_invalid_configuration_is_rejected_before_initialization :: proc
 		&f.socket.session,
 		&f.socket.client,
 		&f.auth,
-		{payload = default_payload_config(), qr_format = Pairing_QR_Format(255)},
+		{payload = default_client_payload_config(), qr_write_format_bits = Pairing_QR_Format(255)},
 	)
 	testing.expect_value(t, error.kind, .Invalid_Config)
 	testing.expect_value(t, f.socket.session.phase, .Uninitialized)
@@ -323,7 +323,7 @@ linked_device_qr_invalid_configuration_is_rejected_before_initialization :: proc
 		&f.auth,
 		&f.prekeys,
 		&f.store,
-		{prekey_path = "synthetic-prekeys", state_path = "synthetic-state", qr_format = Pairing_QR_Format(255)},
+		{prekey_path = "synthetic-prekeys", state_path = "synthetic-state", qr_write_format_bits = Pairing_QR_Format(255)},
 	)
 	testing.expect_value(t, socket_error.kind, .Invalid_Config)
 	testing.expect_value(t, fresh.phase, .Uninitialized)

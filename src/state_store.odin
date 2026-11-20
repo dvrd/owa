@@ -2,9 +2,10 @@ package whatsapp
 
 import "core:bytes"
 import "core:crypto"
-import "core:crypto/sha2"
+import "core:crypto/hash"
 import "core:fmt"
 import "core:io"
+import endian "core:encoding/endian"
 import "core:mem"
 import "core:os"
 import "core:path/filepath"
@@ -27,6 +28,11 @@ State_Record_Kind :: enum u8 {
 	Outbound_Content,
 	Retry_Count,
 	Captured_Message,
+	Contact_Name,
+	Contact_Profile,
+	Contact_Sync_Key,
+	Contact_Index_MAC,
+	Contact_Sync_State,
 }
 State_Record :: struct {
 	kind: State_Record_Kind,
@@ -159,7 +165,7 @@ state_store_set :: proc(store: ^State_Store, kind: State_Record_Kind, name: stri
 		return {kind = .Revision_Exhausted}
 	}
 
-	index, index_error := state_store_set_index(store, kind, name, data)
+	index, index_error := state_store_find_upsert_index(store, kind, name, data)
 	if index_error.kind != .None {
 		return index_error
 	}
@@ -202,7 +208,7 @@ state_store_set :: proc(store: ^State_Store, kind: State_Record_Kind, name: stri
 	return {}
 }
 
-state_store_set_index :: proc(
+state_store_find_upsert_index :: proc(
 	store: ^State_Store,
 	kind: State_Record_Kind,
 	name: string,
@@ -261,15 +267,21 @@ state_store_encode :: proc(dst: []u8, store: ^State_Store) -> (int, State_Error)
 	}
 
 	at := copy(dst, transmute([]u8)STATE_STORE_MAGIC)
-	store_put(dst, &at, 1, 2)
+	endian.unchecked_put_u16be(dst[at:][:2], 1)
+	at += 2
 	at += copy(dst[at:], store.identity[:])
-	store_put(dst, &at, store.revision, 8)
-	store_put(dst, &at, cast(u64)len(store.records), 4)
+	endian.unchecked_put_u64be(dst[at:][:8], store.revision)
+	at += 8
+	endian.unchecked_put_u32be(dst[at:][:4], u32(len(store.records)))
+	at += 4
 
 	for record in store.records {
-		store_put(dst, &at, cast(u64)record.kind, 1)
-		store_put(dst, &at, cast(u64)len(record.name), 2)
-		store_put(dst, &at, cast(u64)len(record.data), 4)
+		dst[at] = u8(record.kind)
+		at += 1
+		endian.unchecked_put_u16be(dst[at:][:2], u16(len(record.name)))
+		at += 2
+		endian.unchecked_put_u32be(dst[at:][:4], u32(len(record.data)))
+		at += 4
 		at += copy(dst[at:], transmute([]u8)record.name)
 		at += copy(dst[at:], record.data)
 	}
@@ -404,7 +416,9 @@ state_store_decode_header :: proc(source: []u8, identity: [32]u8) -> (revision: 
 
 	position := 8
 
-	if store_get(source, &position, 2) != 1 {
+	version := endian.unchecked_get_u16be(source[position:][:2])
+	position += 2
+	if version != 1 {
 		return 0, 0, {kind = .Invalid_Format}
 	}
 
@@ -415,8 +429,10 @@ state_store_decode_header :: proc(source: []u8, identity: [32]u8) -> (revision: 
 	}
 
 	position += 32
-	revision = store_get(source, &position, 8)
-	record_count := store_get(source, &position, 4)
+	revision = endian.unchecked_get_u64be(source[position:][:8])
+	position += 8
+	record_count := endian.unchecked_get_u32be(source[position:][:4])
+	position += 4
 
 	if revision == 0 || record_count > MAX_STATE_RECORDS {
 		return 0, 0, {kind = .Invalid_Format}
@@ -444,9 +460,12 @@ state_store_decode_records :: proc(store: ^State_Store, source: []u8, count: int
 			return {kind = .Invalid_Format}
 		}
 
-		kind := cast(State_Record_Kind)store_get(source, &position, 1)
-		name_size := cast(int)store_get(source, &position, 2)
-		data_size := cast(int)store_get(source, &position, 4)
+		kind := cast(State_Record_Kind)source[position]
+		position += 1
+		name_size := cast(int)endian.unchecked_get_u16be(source[position:][:2])
+		position += 2
+		data_size := cast(int)endian.unchecked_get_u32be(source[position:][:4])
+		position += 4
 
 		if name_size > 512 || data_size > MAX_STATE_RECORD_SIZE || name_size + data_size > end - position {
 			return {kind = .Invalid_Format}
@@ -543,10 +562,10 @@ state_store_save :: proc(store: ^State_Store, path: string) -> State_Error {
 	return {}
 }
 
-// Writes data to path with durable_write semantics (exclusive temporary file,
-// fsync, atomic rename, directory fsync), reporting the failing step as a State_Error.
+// Replace the file using a synced temporary file and sync its directory.
+// Report the failing step as a State_Error.
 state_atomic_write :: proc(path: string, data: []u8) -> State_Error {
-	step, io_error := durable_write(path, data)
+	step, io_error := replace_file_durably(path, data)
 
 	if step == .None {
 		return {}
@@ -592,7 +611,7 @@ state_store_load :: proc(store: ^State_Store, path: string, identity: [32]u8) ->
 		delete(buffer)
 	}
 
-	used, read_err := bounded_read(file, buffer)
+	used, read_err := read_file_into_bounded_buffer(file, buffer)
 
 	if read_err != nil {
 		return {kind = .Read_Failed, io = read_err}
@@ -608,7 +627,7 @@ state_store_load :: proc(store: ^State_Store, path: string, identity: [32]u8) ->
 }
 
 state_record_valid :: proc(kind: State_Record_Kind, name: string, data: []u8) -> bool {
-	if cast(u8)kind > cast(u8)State_Record_Kind.Captured_Message ||
+	if cast(u8)kind > cast(u8)State_Record_Kind.Contact_Sync_State ||
 	   len(name) == 0 ||
 	   len(name) > 512 ||
 	   len(data) > MAX_STATE_RECORD_SIZE {
@@ -618,6 +637,28 @@ state_record_valid :: proc(kind: State_Record_Kind, name: string, data: []u8) ->
 	for c in name {
 		if c < 33 || c > 126 {
 			return false
+		}
+	}
+
+	#partial switch kind {
+	case .Contact_Name:
+		contact, ok := decode_saved_contact(name, data)
+		return ok && device_user_jid_valid(name, false) && contact_name_valid(contact.full_name) &&
+			contact_name_valid(contact.first_name) && (contact.alternate_jid == "" || device_user_jid_valid(contact.alternate_jid, false))
+	case .Contact_Profile:
+		return device_user_jid_valid(name, false) && contact_name_valid(string(data))
+	case .Contact_Index_MAC, .Contact_Sync_Key:
+		if len(data) != 32 || len(name) > 256 || len(name) % 2 != 0 ||
+		   (kind == .Contact_Index_MAC && len(name) != 64) { return false }
+		for c in name {
+			if !is_digit(c) && (c < 'a' || c > 'f') { return false }
+		}
+	case .Contact_Sync_State:
+		switch name {
+		case "ready": return len(data) == 1 && data[0] == 1
+		case "cursor": return len(data) == 136
+		case "required-version": return len(data) == 8
+		case: return false
 		}
 	}
 
@@ -636,7 +677,7 @@ Durable_Write_Step :: enum {
 // directory fsync: flushing the file protects its contents, but the directory
 // entry must be durable too. Reports the step that failed. Serialize writers;
 // this is a local single-process store, not a multi-writer database.
-durable_write :: proc(path: string, data: []u8) -> (Durable_Write_Step, os.Error) {
+replace_file_durably :: proc(path: string, data: []u8) -> (Durable_Write_Step, os.Error) {
 	random: [8]u8
 	crypto.rand_bytes(random[:])
 	tmp := fmt.aprintf("%s.tmp-%016x", path, transmute(u64)random)
@@ -697,7 +738,7 @@ durable_write :: proc(path: string, data: []u8) -> (Durable_Write_Step, os.Error
 
 // Reads until EOF or a full buffer. Callers size the buffer one byte past
 // their limit so an oversized file is detected instead of truncated.
-bounded_read :: proc(file: ^os.File, buffer: []u8) -> (used: int, err: os.Error) {
+read_file_into_bounded_buffer :: proc(file: ^os.File, buffer: []u8) -> (used: int, err: os.Error) {
 	for used < len(buffer) {
 		n, read_err := os.read(file, buffer[used:])
 		used += n
@@ -718,26 +759,7 @@ bounded_read :: proc(file: ^os.File, buffer: []u8) -> (used: int, err: os.Error)
 }
 
 sha256 :: proc(src: []u8) -> [32]u8 {
-	ctx: sha2.Context_256
-	sha2.init_256(&ctx)
-	sha2.update(&ctx, src)
 	digest: [32]u8
-	sha2.final(&ctx, digest[:])
-
+	hash.hash_bytes_to_buffer(.SHA256, src, digest[:])
 	return digest
-}
-store_put :: proc(dst: []u8, at: ^int, value: u64, size: int) {
-	for i in 0 ..< size {
-		dst[at^ + i] = cast(u8)(value >> cast(uint)((size - 1 - i) * 8))
-	}
-	at^ += size
-}
-store_get :: proc(src: []u8, at: ^int, size: int) -> u64 {
-	value: u64
-	for i in 0 ..< size {
-		value = value << 8 | cast(u64)src[at^ + i]
-	}
-	at^ += size
-
-	return value
 }

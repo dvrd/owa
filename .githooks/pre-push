@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+work=$(mktemp -d "${TMPDIR:-/tmp}/whatsapp-pre-push.XXXXXX")
+trap 'rm -rf -- "$work"' EXIT
+trap 'exit 1' HUP INT TERM
+
+while read -r local_ref local_oid remote_ref _; do
+    [[ "$local_ref" != "(delete)" ]] || continue
+    # A tag may point directly to a tree or blob, with no commit to test.
+    commit=$(git rev-parse --verify --quiet "$local_oid^{commit}") || {
+        [[ "$local_ref" == refs/tags/* ]] && continue
+        exit 1
+    }
+    [[ ! -d "$work/$commit" ]] || continue
+    mkdir "$work/$commit"
+    git archive "$commit" | tar -xf - -C "$work/$commit"
+    printf 'Testing %s (%s) before push\n' "$remote_ref" "$commit"
+    (cd "$work/$commit" && task check </dev/null)
+done

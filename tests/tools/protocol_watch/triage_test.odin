@@ -119,7 +119,7 @@ triage_cases :: proc(t: ^testing.T, suffix: string) {
 			before, after := w.get(test, "before"), w.get(test, "after")
 			_, bp := before.(j.String)
 			_, ap := after.(j.String)
-			actual := w.assess(
+			actual := w.assess_upstream_file_change(
 				w.get(test, "source"),
 				w.str(w.get(test, "path")),
 				fixture_blob(blobs, before),
@@ -136,7 +136,7 @@ triage_cases :: proc(t: ^testing.T, suffix: string) {
 			}
 		} else {
 			actual := w.validate_approved_contract(w.get(test, "assessment"), root)
-			testing.expect_value(t, actual, w.truth(expected))
+			testing.expect_value(t, actual, w.json_boolean_equals(expected))
 		}
 
 		removed := os.remove_all(root)
@@ -270,7 +270,7 @@ triage_real_owned_dictionary :: proc(t: ^testing.T) {
 		return
 	}
 
-	values, _, table_error := w.table(tokens.tokens[:], "odin")
+	values, _, table_error := w.extract_single_byte_token_table(tokens.tokens[:], "odin")
 	testing.expect_value(t, table_error, "")
 	testing.expect_value(t, len(values), 236)
 }

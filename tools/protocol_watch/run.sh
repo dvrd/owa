@@ -1,7 +1,8 @@
 #!/bin/sh
 set -eu
 umask 077
-here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
+export OWA_LIBRARY_ROOT="${OWA_LIBRARY_ROOT:-$(cd "$here/../.." && pwd -P)}"
 mode=${1-}
 [ "$#" -gt 0 ] || { printf '%s\n' 'PROTOCOL_COMMAND_REQUIRED' >&2; exit 2; }
 shift
@@ -18,12 +19,6 @@ if [ -z "$shared" ]; then shared=${WEBTOOLS_SHARED:-$HOME/dev/oss/Odin/shared}; 
 [ -x "$odin" ] || command -v "$odin" >/dev/null 2>&1 || { printf '%s\n' 'ODIN_COMPILER_REQUIRED' >&2; exit 2; }
 [ -d "$shared/surf" ] && [ -d "$shared/http" ] || { printf '%s\n' 'SHARED_DEPENDENCIES_REQUIRED' >&2; exit 2; }
 case $mode in
- test)
-  [ "$#" -eq 0 ] || exit 2
-  work=$(mktemp -d "${TMPDIR:-/tmp}/owa-protocol-tests.XXXXXX")
-  trap 'rm -rf "$work"' EXIT HUP INT TERM
-  "$odin" test "$here/../../tests/tools/protocol_watch" "-collection:shared=$shared" -thread-count:1 -vet -warnings-as-errors -define:ODIN_TEST_THREADS=1 -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true "-out:$work/tests"
-  ;;
  build|watch|ci|linear|promotion|schedule)
   if [ -z "$binary" ]; then
    [ "$mode" != build ] || { printf '%s\n' 'BUILD_BINARY_PATH_REQUIRED' >&2; exit 2; }

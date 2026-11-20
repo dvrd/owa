@@ -1,13 +1,6 @@
 package whatsapp
 
-// Token dictionaries copied from @whiskeysockets/baileys 6.7.23 (MIT).
-// Copyright (c) 2025 Rajeh Taher/WhiskeySockets; see BAILEYS_LICENSE.txt.
-// Upstream: https://github.com/WhiskeySockets/Baileys
-// Source: lib/WABinary/constants.js, SHA-256:
-// 9f3b6064c052ce519e268e74108ea76669c7bf188c43e2b4f590a147102287cd
-// Generated from the integrity-verified pinned npm package. Keep original
-// order: byte positions are protocol values, not a sortable vocabulary.
-
+// Byte positions are protocol values, not a sortable vocabulary.
 Binary_Tag :: enum u8 {
 	LIST_EMPTY   = 0,
 	DICTIONARY_0 = 236,

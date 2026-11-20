@@ -1,5 +1,6 @@
 package whatsapp
 
+import endian "core:encoding/endian"
 import network_client "shared:surf"
 import "core:crypto"
 import "core:crypto/x25519"
@@ -168,7 +169,7 @@ client_init :: proc(
 	return {}
 }
 
-// Runs Baileys' ClientHello -> ServerHello -> ClientFinish exchange. The
+// Runs the ClientHello -> ServerHello -> ClientFinish exchange. The
 // payload is an already encoded WAProto.ClientPayload; registration/login
 // construction belongs to the credentials/pairing layer above this package.
 client_handshake :: proc(client: ^Client, client_payload: []u8) -> Client_Error {
@@ -333,7 +334,7 @@ client_handshake_server_static_decrypt :: proc(
 	return client_noise_mix_dh(client, client.ephemeral_private[:], server_static)
 }
 
-client_handshake_certificate_verify :: proc(
+client_decrypt_and_verify_server_certificate :: proc(
 	client: ^Client,
 	server: Handshake_Message,
 	server_static: ^[32]u8,
@@ -350,7 +351,7 @@ client_handshake_certificate_verify :: proc(
 
 	verify := client.config.verify_certificate
 	if verify == nil {
-		verify = strict_certificate_policy
+		verify = verify_whatsapp_server_certificate
 	}
 
 	if err := verify(certificate, server_static^); err != .None {
@@ -433,7 +434,7 @@ client_handshake_exchange :: proc(client: ^Client, client_payload: []u8, finish_
 	if static_error := client_handshake_server_static_decrypt(client, server, server_static[:]); static_error.kind != .None {
 		return static_error
 	}
-	if certificate_error := client_handshake_certificate_verify(client, server, &server_static); certificate_error.kind != .None {
+	if certificate_error := client_decrypt_and_verify_server_certificate(client, server, &server_static); certificate_error.kind != .None {
 		return certificate_error
 	}
 	encrypted_static: [48]u8
@@ -444,8 +445,8 @@ client_handshake_exchange :: proc(client: ^Client, client_payload: []u8, finish_
 	return client_handshake_payload_send(client, client_payload, encrypted_static[:], finish_size)
 }
 
-// Trust anchor independently matches pinned Whatsmeow c88388f983b4bc43 and
-// Baileys 81345beb67ca3fb0. SHA256: 8f5c9b62980545504f24221417a5ebd8
+// Trust anchor matches pinned Whatsmeow c88388f983b4bc43.
+// SHA256: 8f5c9b62980545504f24221417a5ebd8
 // 0fafd0c4f85f0b33e3aed78445a0cd7d. These are Signal Curve25519 signing keys.
 NOISE_CERTIFICATE_ROOT := [32]u8 {
 	0x14,
@@ -482,17 +483,17 @@ NOISE_CERTIFICATE_ROOT := [32]u8 {
 	0x6b,
 }
 
-strict_certificate_policy :: proc(payload: []u8, server_static: [32]u8) -> Certificate_Error {
-	return strict_certificate_policy_at(payload, server_static, time.now())
+verify_whatsapp_server_certificate :: proc(payload: []u8, server_static: [32]u8) -> Certificate_Error {
+	return verify_whatsapp_server_certificate_at(payload, server_static, time.now())
 }
 
 // The controlled clock permits deterministic qualification of genuine captures.
 // The only production root is pinned above; a custom verifier remains explicit.
-strict_certificate_policy_at :: proc(payload: []u8, server_static: [32]u8, now: time.Time) -> Certificate_Error {
-	return strict_certificate_chain_verify(payload, server_static, now, NOISE_CERTIFICATE_ROOT)
+verify_whatsapp_server_certificate_at :: proc(payload: []u8, server_static: [32]u8, now: time.Time) -> Certificate_Error {
+	return verify_certificate_chain_against_root(payload, server_static, now, NOISE_CERTIFICATE_ROOT)
 }
 
-strict_certificate_chain_verify :: proc(
+verify_certificate_chain_against_root :: proc(
 	payload: []u8,
 	server_static: [32]u8,
 	now: time.Time,
@@ -508,11 +509,11 @@ strict_certificate_chain_verify :: proc(
 	if !chain.has_leaf {
 		return .Missing_Leaf
 	}
-	intermediate, intermediate_error := strict_certificate_details(chain.intermediate, true)
+	intermediate, intermediate_error := decode_and_validate_certificate_details(chain.intermediate, true)
 	if intermediate_error != .None {
 		return intermediate_error
 	}
-	leaf, leaf_error := strict_certificate_details(chain.leaf, false)
+	leaf, leaf_error := decode_and_validate_certificate_details(chain.leaf, false)
 	if leaf_error != .None {
 		return leaf_error
 	}
@@ -531,13 +532,13 @@ strict_certificate_chain_verify :: proc(
 	if crypto.compare_constant_time(leaf.key, observed_static[:]) != 1 {
 		return .Static_Key_Mismatch
 	}
-	if error := strict_certificate_time(intermediate, now); error != .None {
+	if error := check_certificate_validity_at(intermediate, now); error != .None {
 		return error
 	}
-	return strict_certificate_time(leaf, now)
+	return check_certificate_validity_at(leaf, now)
 }
 
-strict_certificate_details :: proc(
+decode_and_validate_certificate_details :: proc(
 	certificate: Noise_Certificate,
 	intermediate: bool,
 ) -> (
@@ -573,12 +574,12 @@ strict_certificate_details :: proc(
 	return details, .None
 }
 
-strict_certificate_time :: proc(details: Certificate_Details, now: time.Time) -> Certificate_Error {
+check_certificate_validity_at :: proc(details: Certificate_Details, now: time.Time) -> Certificate_Error {
 	if now._nsec < 0 {
 		return .Invalid_Validity
 	}
 
-	seconds := u64(now._nsec / i64(time.Second))
+	seconds := u64(time.to_unix_seconds(now))
 
 	if seconds < details.not_before {
 		return .Certificate_Not_Yet_Valid
@@ -588,32 +589,6 @@ strict_certificate_time :: proc(details: Certificate_Details, now: time.Time) ->
 	// As in the pinned primary policy, the exact end instant itself is valid.
 	if seconds > details.not_after || seconds == details.not_after && now._nsec % i64(time.Second) != 0 {
 		return .Certificate_Expired
-	}
-
-	return .None
-}
-
-// Explicit compatibility-only policy for old synthetic handshake fixtures.
-// Matches the pinned Baileys policy exactly: the intermediate must name root
-// issuer serial zero. Signatures and validity times are not verified here.
-baileys_certificate_policy :: proc(payload: []u8, server_static: [32]u8) -> Certificate_Error {
-	chain, err := cert_chain_decode(payload)
-	if err != .None {
-		return .Invalid_Certificate_Chain
-	}
-
-	if !chain.has_intermediate || !chain.intermediate.has_details {
-		return .Missing_Intermediate
-	}
-
-	details, details_err := certificate_details_decode(chain.intermediate.details)
-
-	if details_err != .None {
-		return .Invalid_Intermediate_Details
-	}
-
-	if !details.has_issuer_serial || details.issuer_serial != 0 {
-		return .Unexpected_Issuer_Serial
 	}
 
 	return .None
@@ -994,9 +969,8 @@ frame_transport_send :: proc(state: ^Frame_Transport, payload: []u8) -> Frame_Tr
 	defer delete(wire, state.allocator)
 
 	if intro_size != 0 {
-		for value, i in FRAME_INTRO {
-			wire[i] = value
-		}
+		intro := FRAME_INTRO
+		copy(wire[:intro_size], intro[:])
 	}
 
 	_, frame_err := frame_encode(wire[intro_size:], payload)
@@ -1240,8 +1214,8 @@ Noise_State :: struct {
 	failure:                     Noise_Error,
 }
 
-// Match Baileys 6.7.23's exact initialization: no initial empty-payload hash.
-// Unlike generic Noise libraries, its 32-byte protocol name includes four NULs.
+// Initialization skips the empty-payload hash. The 32-byte protocol name
+// includes four trailing NULs.
 // The initial ck/keys remain the protocol name while h mixes header then e.
 noise_init :: proc(state: ^Noise_State, ephemeral_public: [32]u8) -> Noise_Error {
 	if state == nil || state.phase != .Uninitialized {
@@ -1263,7 +1237,7 @@ noise_init :: proc(state: ^Noise_State, ephemeral_public: [32]u8) -> Noise_Error
 	return .None
 }
 
-// Baileys authenticate() becomes a no-op after transport keys are installed.
+// Stop updating the handshake hash once the transport keys are installed.
 noise_mix_hash :: proc(state: ^Noise_State, data: []u8) -> Noise_Error {
 	if err := noise_state_validate(state); err != .None {
 		return err
@@ -1441,21 +1415,9 @@ noise_clear :: proc(state: ^Noise_State) {
 }
 
 noise_nonce :: proc(counter: u64) -> [12]u8 {
-	// Baileys generateIV uses DataView.setUint32(8, counter), big-endian.
-	return {
-		0,
-		0,
-		0,
-		0,
-		0,
-		0,
-		0,
-		0,
-		cast(u8)(counter >> 24),
-		cast(u8)(counter >> 16),
-		cast(u8)(counter >> 8),
-		cast(u8)counter,
-	}
+	nonce: [12]u8
+	endian.unchecked_put_u32be(nonce[8:], u32(counter))
+	return nonce
 }
 
 noise_state_validate :: proc(state: ^Noise_State) -> Noise_Error {

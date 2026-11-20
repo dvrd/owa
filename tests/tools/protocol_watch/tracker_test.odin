@@ -114,11 +114,11 @@ replay_call :: proc(data: rawptr, query: string, variables: w.Value) -> (w.Value
 	}
 
 	result := w.get(expected, "result")
-	if w.truth(w.get(result, "$invalid")) {
+	if w.json_boolean_equals(w.get(result, "$invalid")) {
 		return w.null(), "LINEAR_RESPONSE_INVALID"
 	}
 
-	return w.clone(result), nil
+	return j.clone_value(result), nil
 }
 
 tracker_dispatch :: proc(
@@ -150,7 +150,7 @@ tracker_dispatch :: proc(
 			api.started = time.tick_add(time.tick_now(), -121 * time.Second)
 		}
 
-		return w.track(args[0], w.str(args[1]), root, &api)
+		return w.sync_review_findings(args[0], w.str(args[1]), root, &api)
 	case "snapshot":
 		fingerprint, changed := w.snapshot(args[0]) or_return
 
@@ -163,7 +163,7 @@ tracker_dispatch :: proc(
 	case "findings":
 		return w.findings(args[0], root)
 	case "ticket":
-		id, marker, payload := w.ticket(args[0], w.str(args[1]), root) or_return
+		id, marker, payload := w.build_review_ticket(args[0], w.str(args[1]), root) or_return
 		return w.array(w.text(id), w.text(marker), payload), nil
 	case "v2_coverage":
 		return w.v2_coverage(w.str(args[0]), root)
@@ -181,12 +181,12 @@ tracker_dispatch :: proc(
 	case "assessment":
 		verify := true
 		if len(args) > 2 {
-			verify = w.truth(args[2])
+			verify = w.json_boolean_equals(args[2])
 		}
 
 		if kw, ok := w.get(test_case, "kwargs").(j.Object); ok {
 			if flag, present := kw["verify_contract"]; present {
-				verify = w.truth(flag)
+				verify = w.json_boolean_equals(flag)
 			}
 		}
 

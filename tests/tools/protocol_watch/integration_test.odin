@@ -1,4 +1,7 @@
 package protocol_watch_test
+import "core:fmt"
+import "core:slice"
+import j "core:encoding/json"
 import w "../../../tools/protocol_watch"
 import "core:mem"
 import "core:os"
@@ -21,7 +24,7 @@ observe_get :: proc(data: rawptr, url: string, timeout: time.Duration) -> ([]u8,
 	return fixture.before if strings.contains(url, fixture.reference) else fixture.after, true, nil
 }
 integrated_observation :: proc(root, path, before, after: string) -> w.Value {
-	source := w.clone(w.items(w.get(w.default_manifest(), "sources"))[0])
+	source := j.clone_value(w.items(w.get(w.default_manifest(), "sources"))[0])
 	w.put(&source, "paths", w.array(w.text(path)))
 	manifest := w.object({"schema", w.number(1)}, {"sources", w.array(source)})
 	fixture := Observe_Bytes{transmute([]u8)before, transmute([]u8)after, w.str(w.get(source, "reference_commit"))}
@@ -59,18 +62,18 @@ integration_case :: proc(t: ^testing.T, mode: int) {
 		old, current := make([]string, 236), make([]string, 236)
 
 		for &value, i in old {
-			value = w.cat("token-", w.string_number(i))
+			value = w.concatenate_strings("token-", fmt.aprint(i))
 			current[i] = value
 		}
 
 		current[7] = "replacement"
-		before = w.cat("export const SINGLE_BYTE_TOKENS = ", w.encode(w.value_strings(old)), ";\n")
-		after = w.cat("export const SINGLE_BYTE_TOKENS = ", w.encode(w.value_strings(current)), ";\n")
+		before = w.concatenate_strings("export const SINGLE_BYTE_TOKENS = ", w.encode(w.value_strings(old)), ";\n")
+		after = w.concatenate_strings("export const SINGLE_BYTE_TOKENS = ", w.encode(w.value_strings(current)), ";\n")
 		// Odin table syntax differs from the upstream JavaScript array.
 		assert(
 			os.write_entire_file(
 				w.join(root, "binary_tokens.odin"),
-				w.cat(
+				w.concatenate_strings(
 					"package whatsapp\nSINGLE_BYTE_TOKENS := [236]string {",
 					strings.trim_suffix(strings.trim_prefix(w.encode(w.value_strings(old)), "["), "]"),
 					"}\n",
@@ -86,7 +89,7 @@ integration_case :: proc(t: ^testing.T, mode: int) {
 	if mode == 0 {
 		testing.expect(
 			t,
-			w.truth(w.get(file, "changed_from_reference")) &&
+			w.json_boolean_equals(w.get(file, "changed_from_reference")) &&
 			!w.equal(w.get(w.get(file, "reference"), "sha256"), w.get(w.get(file, "current"), "sha256")) &&
 			w.str(w.get(assessment, "kind")) == "NO_ACTION",
 		)
@@ -105,7 +108,7 @@ integration_case :: proc(t: ^testing.T, mode: int) {
 			len(w.items(w.get(assessment, "local_targets"))) == 4 &&
 			len(w.items(w.get(assessment, "checks"))) > 0 &&
 			len(w.items(w.get(assessment, "acceptance"))) > 0 &&
-			w.truth(w.get(w.get(assessment, "evidence"), "server_compatibility_proven"), false),
+			w.json_boolean_equals(w.get(w.get(assessment, "evidence"), "server_compatibility_proven"), false),
 		)
 	}
 
@@ -120,7 +123,7 @@ integration_case :: proc(t: ^testing.T, mode: int) {
 	if mode == 3 {
 		testing.expect(
 			t,
-			w.truth(w.get(file, "changed_from_reference"), false) && !w.contains_string(w.keys(file), "assessment"),
+			w.json_boolean_equals(w.get(file, "changed_from_reference"), false) && !slice.contains(w.keys(file), "assessment"),
 		)
 	}
 }
@@ -187,7 +190,7 @@ integration_source_reference_presence_is_strict :: proc(t: ^testing.T) {
 		{"repository", w.text("WhiskeySockets/Baileys")},
 		{"reference_commit", w.null()},
 	)
-	value := w.assess(
+	value := w.assess_upstream_file_change(
 		source,
 		"src/Socket/socket.ts",
 		transmute([]u8)string("x"),
@@ -205,14 +208,14 @@ integration_watch_runner_forwards_contract_without_execution :: proc(t: ^testing
 	root, error := os.make_directory_temp("", "owa-integration-*", context.allocator)
 	assert(error == nil)
 	defer os.remove_all(root)
-	args := args_for(root)
+	args := schedule_options_for_test(root)
 	fd, failure := w.locked_state(args.state_dir)
 	assert(failure == nil)
 	p.close(fd)
 	marker := w.join(root, "must-not-exist")
-	args.approved_contract = w.cat("tools/protocol_watch/contracts/$(touch ", marker, ").json")
+	args.approved_contract = w.concatenate_strings("tools/protocol_watch/contracts/$(touch ", marker, ").json")
 	args.executable = w.join(root, "watcher")
-	script := w.cat(
+	script := w.concatenate_strings(
 		"#!/bin/sh\nset -eu\ntest \"$6\" = --approved-contract\ntest \"$7\" = '",
 		args.approved_contract,
 		"'\nprintf '%s\\n' '{\"status\":\"NO_MONITORED_DRIFT\",\"observation\":{}}' > \"$5/new.json\"\nchmod 600 \"$5/new.json\"\nmv \"$5/new.json\" \"$5/report.json\"\nprintf '%s\\n' '{\"status\":\"NO_MONITORED_DRIFT\"}'\n",

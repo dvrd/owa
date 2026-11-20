@@ -186,6 +186,7 @@ send_reaction_validates_state_key_and_text :: proc(t: ^testing.T) {
 }
 
 Download_State :: struct {
+	url_storage:    [MAX_MEDIA_URL_SIZE]u8,
 	encrypted:      []u8,
 	status:         int,
 	calls:          int,
@@ -202,7 +203,8 @@ download_http :: proc(
 ) {
 	state := cast(^Download_State)context.user_ptr
 	state.calls += 1
-	state.url = request.url
+	n := copy(state.url_storage[:], transmute([]u8)request.url)
+	state.url = string(state.url_storage[:n])
 	state.redirects_seen = config.max_redirects
 
 	if state.status != 0 {

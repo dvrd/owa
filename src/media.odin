@@ -17,7 +17,7 @@ import "core:sync"
 import "core:thread"
 import "core:time"
 
-// Baileys6.7.23 messages-media.js: full-file image/document encryption.
+// Encrypts complete images and documents.
 // Audio/video and ranged downloads are outside this module's scope.
 DEFAULT_MAX_MEDIA_SIZE :: 16 << 20
 MAX_MEDIA_SIZE_LIMIT :: 64 << 20
@@ -27,6 +27,8 @@ Media_Kind :: enum {
 	None,
 	Image,
 	Document,
+	App_State,
+	History,
 }
 Media_Keys :: struct {
 	iv:                                 [16]u8,
@@ -107,6 +109,10 @@ media_keys_derive :: proc(kind: Media_Kind, media_key: [32]u8) -> (keys: Media_K
 		info = "WhatsApp Image Keys"
 	case .Document:
 		info = "WhatsApp Document Keys"
+	case .App_State:
+		info = "WhatsApp App State Keys"
+	case .History:
+		info = "WhatsApp History Keys"
 	case:
 		return {}, {kind = .Invalid_Kind}
 	}
@@ -184,7 +190,7 @@ media_encrypt :: proc(
 		aes.encrypt_ecb(&ctx, dst[at:at + 16], block[:])
 		copy(previous[:], dst[at:at + 16])
 	}
-	mac := media_mac(keys, dst[:cipher_size])
+	mac := compute_media_authentication_tag(keys, dst[:cipher_size])
 	defer crypto.zero_explicit(&mac, 32)
 	copy(dst[cipher_size:required], mac[:MEDIA_MAC_SIZE])
 	metadata.media_key = media_key
@@ -263,7 +269,7 @@ media_ciphertext_authenticate :: proc(encrypted: []u8, details: ^Media_Metadata,
 	}
 
 	cipher_size := len(encrypted) - MEDIA_MAC_SIZE
-	mac := media_mac(keys^, encrypted[:cipher_size])
+	mac := compute_media_authentication_tag(keys^, encrypted[:cipher_size])
 	defer crypto.zero_explicit(&mac, 32)
 
 	if crypto.compare_constant_time(mac[:MEDIA_MAC_SIZE], encrypted[cipher_size:]) != 1 {
@@ -323,7 +329,7 @@ media_plaintext_validate :: proc(
 	return {}
 }
 
-media_mac :: proc(keys: Media_Keys, ciphertext: []u8) -> [32]u8 {
+compute_media_authentication_tag :: proc(keys: Media_Keys, ciphertext: []u8) -> [32]u8 {
 	key := keys
 	defer media_keys_clear(&key)
 	ctx: hmac.Context
@@ -365,7 +371,7 @@ Reaction_Message :: struct {
 }
 
 media_metadata_from_message :: proc(message: Media_Message) -> (metadata: Media_Metadata, err: Media_Error) {
-	if message.kind != .Image && message.kind != .Document {
+	if message.kind != .Image && message.kind != .Document && message.kind != .App_State && message.kind != .History {
 		return {}, {kind = .Invalid_Kind}
 	}
 
@@ -384,9 +390,8 @@ media_metadata_from_message :: proc(message: Media_Message) -> (metadata: Media_
 	return metadata, {}
 }
 
-// Match Baileys' download routing: only the canonical CDN URL is accepted;
-// otherwise a valid directPath is attached to mmg.whatsapp.net. No arbitrary
-// sender-selected host is returned for the caller's HTTP downloader.
+// Accept the canonical CDN URL or build one from a valid directPath on
+// mmg.whatsapp.net so the sender cannot choose the download host.
 media_download_url :: proc(dst: []u8, message: Media_Message) -> (url: string, err: Media_Error) {
 	if bytes.alias(dst, transmute([]u8)message.url) || bytes.alias(dst, transmute([]u8)message.direct_path) {
 		return "", {kind = .Overlapping_Buffers}
@@ -449,7 +454,7 @@ media_message_encode :: proc(dst: []u8, message: Media_Message) -> (int, Media_E
 
 	media_emit_envelope(&measure, message)
 	if measure.err != .None {
-		return 0, media_write_error(&measure)
+		return 0, media_error_from_protobuf_writer(&measure)
 	}
 
 	if len(dst) < measure.at {
@@ -462,7 +467,7 @@ media_message_encode :: proc(dst: []u8, message: Media_Message) -> (int, Media_E
 
 	media_emit_envelope(&writer, message)
 
-	return writer.at, media_write_error(&writer)
+	return writer.at, media_error_from_protobuf_writer(&writer)
 }
 
 media_message_decode :: proc(src: []u8) -> (message: Media_Message, err: Media_Error) {
@@ -666,7 +671,7 @@ reaction_message_encode :: proc(dst: []u8, message: Reaction_Message) -> (int, M
 
 	reaction_emit_envelope(&measure, message)
 	if measure.err != .None {
-		return 0, media_write_error(&measure)
+		return 0, media_error_from_protobuf_writer(&measure)
 	}
 
 	if len(dst) < measure.at {
@@ -679,7 +684,7 @@ reaction_message_encode :: proc(dst: []u8, message: Reaction_Message) -> (int, M
 
 	reaction_emit_envelope(&writer, message)
 
-	return writer.at, media_write_error(&writer)
+	return writer.at, media_error_from_protobuf_writer(&writer)
 }
 
 reaction_message_decode :: proc(src: []u8) -> (message: Reaction_Message, err: Media_Error) {
@@ -740,7 +745,7 @@ reaction_message_field_decode :: proc(message: ^Reaction_Message, field: Protobu
 	}
 
 	if field.number == 1 {
-		message.key, err = media_key_decode(field.data)
+		message.key, err = decode_reaction_target_message_key(field.data)
 		if err.kind != .None {
 			return err
 		}
@@ -781,7 +786,7 @@ reaction_checkmark_encode :: proc(dst: []u8, key: Message_Key, sender_timestamp_
 	)
 }
 
-media_write_error :: proc(writer: ^Protobuf_Writer) -> Media_Error {
+media_error_from_protobuf_writer :: proc(writer: ^Protobuf_Writer) -> Media_Error {
 	switch writer.err {
 	case .None:
 		return {}
@@ -1199,7 +1204,7 @@ media_context_decode :: proc(src: []u8) -> (context_info: Message_Context, err: 
 	return context_info, {}
 }
 
-media_key_decode :: proc(src: []u8) -> (key: Message_Key, err: Media_Error) {
+decode_reaction_target_message_key :: proc(src: []u8) -> (key: Message_Key, err: Media_Error) {
 	at := 0
 	seen: u8
 
@@ -1381,7 +1386,7 @@ media_connection_decode :: proc(
 		}
 
 		hostname, _ := node_attr(host, "hostname")
-		length, _ := media_host_limit(host)
+		length, _ := read_media_host_upload_limit(host)
 		storage[at] = {hostname, length}
 		at += 1
 	}
@@ -1440,7 +1445,7 @@ media_connection_hosts_validate :: proc(hosts: []Binary_Node) -> (int, Media_Err
 		}
 
 		hostname, _ := node_attr(host, "hostname")
-		_, valid_limit := media_host_limit(host)
+		_, valid_limit := read_media_host_upload_limit(host)
 
 		if !media_hostname_valid(hostname) || !valid_limit || count >= MAX_MEDIA_HOSTS {
 			return 0, {kind = .Invalid_Connection}
@@ -1458,7 +1463,7 @@ media_connection_hosts_validate :: proc(hosts: []Binary_Node) -> (int, Media_Err
 	return count, {}
 }
 
-media_host_limit :: proc(host: Binary_Node) -> (u64, bool) {
+read_media_host_upload_limit :: proc(host: Binary_Node) -> (u64, bool) {
 	text, present := node_attr(host, "maxContentLengthBytes")
 	if !present {
 		return 0, true
@@ -1503,7 +1508,7 @@ media_upload_url :: proc(
 			c = '_'
 		}
 	}
-	// encodeURIComponent's exact unescaped alphabet, as used by pinned Baileys.
+	// Use the same unescaped characters as encodeURIComponent.
 	scratch: [MAX_MEDIA_URL_SIZE]u8
 	at := 0
 	pieces := []string{"https://", hostname, path, cast(string)token[:43], "?auth="}
@@ -1833,11 +1838,6 @@ media_download :: proc(
 	int,
 	Media_Error,
 ) {
-	exchange := execute
-	if exchange == nil {
-		exchange = media_http_native
-	}
-
 	if max_size < 0 || max_size > MAX_MEDIA_SIZE_LIMIT {
 		return 0, {kind = .Invalid_Limit}
 	}
@@ -1856,31 +1856,33 @@ media_download :: proc(
 		return cast(int)metadata.file_length, {kind = .Destination_Undersized}
 	}
 
+	response, fetch_err := fetch_media_ciphertext(message, config, metadata.file_length, execute)
+	if fetch_err.kind != .None { return 0, fetch_err }
+	defer network_client.response_destroy(&response)
+	return media_decrypt(dst, response.body, message.kind, metadata, max_size)
+}
+
+@(private)
+fetch_media_ciphertext :: proc(message: Media_Message, config: network_client.Config, max_plaintext: u64, execute: Media_HTTP_Execute) -> (network_client.Response, Media_Error) {
+	exchange := execute
+	if exchange == nil {
+		exchange = media_http_native
+	}
+
 	url_buffer: [MAX_MEDIA_URL_SIZE]u8
 	url, validation := media_download_url(url_buffer[:], message)
-	if validation.kind != .None {
-		return 0, validation
-	}
-
-	settings, settings_error := media_download_settings(config, &metadata)
-	if settings_error.kind != .None {
-		return 0, settings_error
-	}
-
-	response, he := exchange(
-		{method = .GET, url = url, headers = []http.Header{{"Origin", "https://web.whatsapp.com"}}},
-		settings,
-	)
-	if he.kind != .None {
-		return 0, {kind = .HTTP_Failed, http = he}
-	}
-
-	defer network_client.response_destroy(&response)
+	if validation.kind != .None { return {}, validation }
+	limit := Media_Metadata{file_length = max_plaintext}
+	settings, settings_error := media_download_settings(config, &limit)
+	if settings_error.kind != .None { return {}, settings_error }
+	response, he := exchange({method = .GET, url = url, headers = []http.Header{{"Origin", "https://web.whatsapp.com"}}}, settings)
+	if he.kind != .None { return {}, {kind = .HTTP_Failed, http = he} }
 	if response.status != 200 {
-		return 0, {kind = .HTTP_Status, status = response.status}
+		status := response.status
+		network_client.response_destroy(&response)
+		return {}, {kind = .HTTP_Status, status = status}
 	}
-
-	return media_decrypt(dst, response.body, message.kind, metadata, max_size)
+	return response, {}
 }
 
 media_download_settings :: proc(
@@ -1993,10 +1995,10 @@ media_retry_request_with_nonce :: proc(
 	}
 	protobuf_write_string(&writer, 1, key.id)
 	if writer.err != .None {
-		return 0, media_write_error(&writer)
+		return 0, media_error_from_protobuf_writer(&writer)
 	}
 
-	retry_key := media_retry_key(media_key)
+	retry_key := derive_media_retry_key(media_key)
 	defer crypto.zero_explicit(&retry_key, 32)
 	ctx: aes.Context_GCM
 	aes.init_gcm(&ctx, retry_key[:])
@@ -2202,7 +2204,7 @@ media_retry_decrypt :: proc(
 
 	scratch: [8192]u8
 	defer crypto.zero_explicit(&scratch, size_of(scratch))
-	retry_key := media_retry_key(media_key)
+	retry_key := derive_media_retry_key(media_key)
 	defer crypto.zero_explicit(&retry_key, 32)
 	ctx: aes.Context_GCM
 	aes.init_gcm(&ctx, retry_key[:])
@@ -2234,7 +2236,7 @@ media_retry_decrypt :: proc(
 	return media_retry_notification_decode(dst[:n])
 }
 
-media_retry_key :: proc(media_key: [32]u8) -> [32]u8 {
+derive_media_retry_key :: proc(media_key: [32]u8) -> [32]u8 {
 	key := media_key
 	defer crypto.zero_explicit(&key, 32)
 	result: [32]u8
@@ -2696,7 +2698,7 @@ socket_send_reaction :: proc(socket: ^Socket, key: Message_Key, text: string = "
 	}
 
 	if !group_jid_valid(key.remote_jid) ||
-	   !device_request_valid(key.id) ||
+	   !stanza_id_valid(key.id) ||
 	   len(text) > 64 ||
 	   !utf8.valid_string(text) {
 		return "", {kind = .Invalid_Config}
@@ -2902,7 +2904,7 @@ socket_media_upload :: proc(
 	Socket_Error,
 ) {
 	id_buffer: [128]u8
-	id := socket_next_id(socket, id_buffer[:])
+	id := socket_next_iq_id(socket, id_buffer[:])
 	query_buffer: [512]u8
 	qn, qe := media_connection_query_encode(query_buffer[:], id)
 	if qe.kind != .None {
@@ -2970,7 +2972,7 @@ socket_media_message_send :: proc(
 		file_enc_sha256         = metadata.file_enc_sha256[:],
 		file_length             = metadata.file_length,
 		has_file_length         = true,
-		media_key_timestamp     = time.now()._nsec / cast(i64)time.Second,
+		media_key_timestamp     = time.to_unix_seconds(time.now()),
 		has_media_key_timestamp = true,
 	}
 	required, measure := media_message_encode(nil, message)
@@ -3004,7 +3006,7 @@ socket_media_message_send :: proc(
 // one authenticated request to the primary phone and one fresh download. No
 // fallback removes integrity checks, changes the media key, or follows redirects.
 // Offline-batch messages reach the client during Provisioning (socket_receive handles
-// them before activation, as Baileys does). Their CDN download needs no socket query,
+// them before activation). Their CDN download needs no socket query,
 // so it runs then too; refusing it made the application reconnect once per backlog
 // media message.
 socket_download_media :: proc(socket: ^Socket, message: ^Socket_Message, dst: []u8) -> (int, Socket_Error) {
@@ -3012,7 +3014,7 @@ socket_download_media :: proc(socket: ^Socket, message: ^Socket_Message, dst: []
 		return 0, {kind = .Invalid_State}
 	}
 
-	if message == nil || !group_jid_valid(message.group) || !device_request_valid(message.id) {
+	if message == nil || !group_jid_valid(message.group) || !stanza_id_valid(message.id) {
 		return 0, {kind = .Invalid_Config}
 	}
 
@@ -3158,7 +3160,7 @@ socket_media_owner_jid :: proc(dst: []u8, auth: ^Auth_State) -> (string, Socket_
 	n += copy(dst[n:], transmute([]u8)suffix)
 	owner := cast(string)dst[:n]
 
-	if !device_user_valid(owner, false) {
+	if !device_user_jid_valid(owner, false) {
 		return "", {kind = .Invalid_Config}
 	}
 

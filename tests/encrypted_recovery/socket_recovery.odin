@@ -4,6 +4,7 @@ import wa "shared:whatsapp"
 import surf "shared:surf"
 import ws "shared:websocket"
 import "core:bytes"
+import "core:crypto/hash"
 import "core:fmt"
 import "core:os"
 import "core:net"
@@ -109,7 +110,8 @@ socket_state_witness :: proc(peer: ^Socket_Recovery) -> [160]u8 {
 	result: [160]u8
 
 	for value, index in ([]([]u8){session, group, members, content, prekeys}) {
-		digest := wa.sha256(value)
+		digest: [32]u8
+		hash.hash_bytes_to_buffer(.SHA256, value, digest[:])
 		copy(result[index * 32:][:32], digest[:])
 	}
 

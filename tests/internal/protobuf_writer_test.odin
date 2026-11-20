@@ -270,3 +270,35 @@ writer_payload_error_precedence_is_preserved :: proc(t: ^testing.T) {
 	_, media_err := media_message_encode(media_out[:], writer_golden_media(.Image, &[4][32]u8{}))
 	testing.expect_value(t, media_err.kind, Media_Error_Kind.Destination_Undersized)
 }
+
+@(test)
+protobuf_varint_preserves_u64_limits_and_cursor :: proc(t: ^testing.T) {
+	values := [?]u64{0, 127, 128, max(u64)}
+	for value in values {
+		buffer: [12]u8
+		written := 1
+		protobuf_varint_write(buffer[:], &written, value)
+		testing.expect_value(t, written - 1, protobuf_varint_size(value))
+		read := 1
+		got, err := protobuf_varint_read(buffer[:written], &read)
+		testing.expect_value(t, err, Protobuf_Error.None)
+		testing.expect_value(t, got, value)
+		testing.expect_value(t, read, written)
+	}
+
+	buffer := [?]u8{0, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0, 1}
+	for end in 1 ..< 11 {
+		read := 1
+		_, err := protobuf_varint_read(buffer[:end], &read)
+		testing.expect_value(t, err, Protobuf_Error.Truncated_Varint)
+		testing.expect_value(t, read, end)
+	}
+	overflow_bytes := [?]u8{2, 0x80, 0xff}
+	for last in overflow_bytes {
+		buffer[10] = last
+		read := 1
+		_, err := protobuf_varint_read(buffer[:], &read)
+		testing.expect_value(t, err, Protobuf_Error.Varint_Overflow)
+		testing.expect_value(t, read, 11)
+	}
+}

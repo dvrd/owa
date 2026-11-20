@@ -1,5 +1,6 @@
 package whatsapp
 
+import "core:slice"
 import "core:bytes"
 import "core:crypto"
 import subtle "core:crypto/_subtle"
@@ -8,9 +9,9 @@ import "core:crypto/hkdf"
 import "core:crypto/hmac"
 import field "core:crypto/_fiat/field_curve25519"
 import "core:crypto/x25519"
+import endian "core:encoding/endian"
 import "core:mem"
 
-// Pinned Baileys 6.7.23 lib/Signal/Group and WAProto SenderKey* messages.
 // Each record belongs to ONE (group JID, sender device) tuple. The caller must
 // authenticate that tuple before processing a distribution (normally pairwise
 // Signal). Distribution messages themselves carry no signature or identity.
@@ -140,7 +141,7 @@ signal_group_distribution_encode :: proc(
 		return 0, .Destination_Undersized
 	}
 
-	if group_record_alias(record, dst[:required]) {
+	if group_record_overlaps_buffer(record, dst[:required]) {
 		return 0, .Overlapping_Buffers
 	}
 
@@ -216,7 +217,7 @@ signal_group_distribution_decode :: proc(src: []u8) -> (d: Signal_Group_Distribu
 
 				copy(d.signing_public[:], f.data[1:])
 
-				if !group_public_valid(d.signing_public) {
+				if !group_signing_public_key_valid(d.signing_public) {
 					return {}, .Invalid_Key
 				}
 			}
@@ -381,7 +382,7 @@ signal_group_message_encode :: proc(
 		return 0, .Entropy_Unavailable
 	}
 
-	written = group_message_header(dst, id, iteration, len(ciphertext))
+	written = write_group_message_header(dst, id, iteration, len(ciphertext))
 	written += copy(dst[written:], ciphertext)
 	signature, e := signal_curve_sign(signing_private, dst[:written])
 
@@ -441,8 +442,8 @@ signal_group_encrypt :: proc(
 	}
 
 	if bytes.alias(dst[:size], plaintext) ||
-	   group_record_alias(record, dst[:size]) ||
-	   group_record_alias(record, plaintext) {
+	   group_record_overlaps_buffer(record, dst[:size]) ||
+	   group_record_overlaps_buffer(record, plaintext) {
 		return 0, .Overlapping_Buffers
 	}
 
@@ -482,7 +483,7 @@ group_message_sign :: proc(
 	written: int,
 	error: Signal_Group_Error,
 ) {
-	written = group_message_header(dst, s.id, cast(u32)iteration, cipher_size) + cipher_size
+	written = write_group_message_header(dst, s.id, cast(u32)iteration, cipher_size) + cipher_size
 	signature, se := signal_curve_sign(s.signing_private, dst[:written])
 	if se != .None {
 		return 0, .Signature_Failed
@@ -509,7 +510,7 @@ signal_group_decrypt :: proc(
 		return 0, e
 	}
 
-	if bytes.alias(dst, wire) || group_record_alias(record, dst) || group_record_alias(record, wire) {
+	if bytes.alias(dst, wire) || group_record_overlaps_buffer(record, dst) || group_record_overlaps_buffer(record, wire) {
 		return 0, .Overlapping_Buffers
 	}
 
@@ -617,7 +618,7 @@ group_state_append :: proc(record: ^Signal_Group_Record, state: ^Signal_Group_St
 	record.states[record.count] = state^
 	record.count += 1
 }
-group_public_valid :: proc(public: [32]u8) -> bool {
+group_signing_public_key_valid :: proc(public: [32]u8) -> bool {
 	// Strict verifier validates the public point before reading R/S. Deliberately
 	// invalid R makes this a public-point check without duplicating curve code.
 	zero: [64]u8
@@ -633,7 +634,7 @@ group_record_validate :: proc(record: ^Signal_Group_Record) -> Signal_Group_Erro
 		if s.next_iteration > cast(u64)max(u32) + 1 ||
 		   s.skipped_count < 0 ||
 		   s.skipped_count > MAX_GROUP_SKIPPED_KEYS ||
-		   !group_public_valid(s.signing_public) {
+		   !group_signing_public_key_valid(s.signing_public) {
 			return .Invalid_State
 		}
 
@@ -666,7 +667,7 @@ group_record_validate :: proc(record: ^Signal_Group_Record) -> Signal_Group_Erro
 
 	return .None
 }
-group_record_alias :: proc(record: ^Signal_Group_Record, src: []u8) -> bool {
+group_record_overlaps_buffer :: proc(record: ^Signal_Group_Record, src: []u8) -> bool {
 	return bytes.alias((cast(^[size_of(Signal_Group_Record)]u8)record)[:], src)
 }
 group_uint_write :: proc(dst: []u8, at: ^int, field: u32, value: u64) {
@@ -684,7 +685,7 @@ group_message_header_size :: proc(id, iteration: u32, size: int) -> int {
 		protobuf_varint_size(cast(u64)size) \
 	)
 }
-group_message_header :: proc(dst: []u8, id, iteration: u32, size: int) -> int {
+write_group_message_header :: proc(dst: []u8, id, iteration: u32, size: int) -> int {
 	dst[0] = SIGNAL_GROUP_VERSION
 	at := 1
 	group_uint_write(dst, &at, 1, cast(u64)id)
@@ -711,26 +712,33 @@ signal_group_record_encode :: proc(dst: []u8, record: ^Signal_Group_Record) -> (
 		return 0, .Destination_Undersized
 	}
 
-	if group_record_alias(record, dst[:size]) {
+	if group_record_overlaps_buffer(record, dst[:size]) {
 		return 0, .Overlapping_Buffers
 	}
 
 	copy(dst, []u8{'O', 'D', 'G', 'R', 'O', 'U', 'P', 0})
 	at := 8
-	store_put(dst, &at, 1, 2)
-	store_put(dst, &at, cast(u64)record.count, 1)
+	endian.unchecked_put_u16be(dst[at:][:2], 1)
+	at += 2
+	dst[at] = u8(record.count)
+	at += 1
 
 	for &s in record.states[:record.count] {
-		store_put(dst, &at, cast(u64)s.id, 4)
-		store_put(dst, &at, s.next_iteration, 8)
+		endian.unchecked_put_u32be(dst[at:][:4], s.id)
+		at += 4
+		endian.unchecked_put_u64be(dst[at:][:8], s.next_iteration)
+		at += 8
 		at += copy(dst[at:], s.chain_seed[:])
 		at += copy(dst[at:], s.signing_public[:])
 		at += copy(dst[at:], s.signing_private[:])
-		store_put(dst, &at, (s.has_private ? 1 : 0), 1)
-		store_put(dst, &at, cast(u64)s.skipped_count, 2)
+		dst[at] = s.has_private ? 1 : 0
+		at += 1
+		endian.unchecked_put_u16be(dst[at:][:2], u16(s.skipped_count))
+		at += 2
 
 		for &key in s.skipped[:s.skipped_count] {
-			store_put(dst, &at, cast(u64)key.iteration, 4)
+			endian.unchecked_put_u32be(dst[at:][:4], key.iteration)
+			at += 4
 			at += copy(dst[at:], key.seed[:])
 		}
 	}
@@ -754,7 +762,7 @@ signal_group_record_decode :: proc(record: ^Signal_Group_Record, src: []u8) -> S
 		return .Invalid_Snapshot
 	}
 
-	if group_record_alias(record, src) {
+	if group_record_overlaps_buffer(record, src) {
 		return .Overlapping_Buffers
 	}
 
@@ -767,7 +775,9 @@ signal_group_record_decode :: proc(record: ^Signal_Group_Record, src: []u8) -> S
 
 	at := 8
 
-	if store_get(src, &at, 2) != 1 {
+	version := endian.unchecked_get_u16be(src[at:][:2])
+	at += 2
+	if version != 1 {
 		return .Invalid_Snapshot
 	}
 
@@ -782,7 +792,8 @@ signal_group_record_decode :: proc(record: ^Signal_Group_Record, src: []u8) -> S
 		free(next, allocator)
 	}
 
-	next.count = cast(int)store_get(src, &at, 1)
+	next.count = cast(int)src[at]
+	at += 1
 
 	if next.count > MAX_GROUP_KEY_STATES {
 		return .Invalid_Snapshot
@@ -811,25 +822,30 @@ group_snapshot_states_decode :: proc(next: ^Signal_Group_Record, src: []u8, at: 
 			return .Invalid_Snapshot
 		}
 
-		s.id = cast(u32)store_get(src, at, 4)
-		s.next_iteration = store_get(src, at, 8)
+		s.id = endian.unchecked_get_u32be(src[at^:][:4])
+		at^ += 4
+		s.next_iteration = endian.unchecked_get_u64be(src[at^:][:8])
+		at^ += 8
 		at^ += copy(s.chain_seed[:], src[at^:][:32])
 		at^ += copy(s.signing_public[:], src[at^:][:32])
 		at^ += copy(s.signing_private[:], src[at^:][:32])
-		flag := store_get(src, at, 1)
+		flag := src[at^]
+		at^ += 1
 		if flag > 1 {
 			return .Invalid_Snapshot
 		}
 
 		s.has_private = flag == 1
-		s.skipped_count = cast(int)store_get(src, at, 2)
+		s.skipped_count = cast(int)endian.unchecked_get_u16be(src[at^:][:2])
+		at^ += 2
 
 		if s.skipped_count > MAX_GROUP_SKIPPED_KEYS || s.skipped_count * 36 > end - at^ {
 			return .Invalid_Snapshot
 		}
 
 		for &key in s.skipped[:s.skipped_count] {
-			key.iteration = cast(u32)store_get(src, at, 4)
+			key.iteration = endian.unchecked_get_u32be(src[at^:][:4])
+			at^ += 4
 			at^ += copy(key.seed[:], src[at^:][:32])
 		}
 	}
@@ -844,7 +860,7 @@ group_bytes_write :: proc(dst: []u8, at: ^int, field: u32, value: []u8) {
 }
 
 // Wire-compatible crypto labels/layouts from libsignal-node
-// bcea72df9ec34d9d9140ab30619cf479c7c144c7 and Baileys 6.7.23 Group keys.
+// bcea72df9ec34d9d9140ab30619cf479c7c144c7.
 // This module is stateless: callers commit chain/counter changes only after
 // authenticating/decrypting successfully, and must erase returned key structs.
 MAX_SIGNAL_PLAINTEXT_SIZE :: 1 << 20
@@ -1317,9 +1333,8 @@ signal_initiator_bundle_validate :: proc(bundle: Signal_Prekey_Bundle) -> Signal
 
 	signed: [33]u8
 	signed[0] = 5
-	for value, i in bundle.signed_prekey_public {
-		signed[1 + i] = value
-	}
+	public := bundle.signed_prekey_public
+	copy(signed[1:], public[:])
 	prekey_signature := bundle.signed_prekey_signature
 
 	if err := signal_curve_verify(bundle.identity_public, signed[:], prekey_signature[:]); err != .None {
@@ -1336,9 +1351,7 @@ signal_initiator_root_derive :: proc(
 ) -> Signal_Session_Error {
 	material: [160]u8
 	defer crypto.zero_explicit(&material, size_of(material))
-	for i in 0 ..< 32 {
-		material[i] = 0xff
-	}
+	slice.fill(material[:32], 0xff)
 	if err := signal_agreement(material[32:64], identity, bundle.signed_prekey_public); err.kind != .None {
 		return err
 	}
@@ -1647,7 +1660,7 @@ signal_session_encrypt :: proc(
 		return {}, required, {kind = .Destination_Undersized}
 	}
 
-	if bytes.alias(dst[:required], plaintext) || signal_session_alias(session, dst[:required]) {
+	if bytes.alias(dst[:required], plaintext) || signal_session_overlaps_buffer(session, dst[:required]) {
 		return {}, 0, {kind = .Overlapping_Buffers}
 	}
 
@@ -1778,7 +1791,7 @@ signal_session_decrypt :: proc(
 		return 0, err
 	}
 
-	if bytes.alias(dst, wire) || signal_session_alias(session, dst) {
+	if bytes.alias(dst, wire) || signal_session_overlaps_buffer(session, dst) {
 		return 0, {kind = .Overlapping_Buffers}
 	}
 
@@ -1816,7 +1829,7 @@ signal_session_decrypt_prekey :: proc(
 		return 0, 0, {kind = .Invalid_State}
 	}
 
-	if bytes.alias(dst, wire) || signal_session_alias(session, dst) {
+	if bytes.alias(dst, wire) || signal_session_overlaps_buffer(session, dst) {
 		return 0, 0, {kind = .Overlapping_Buffers}
 	}
 
@@ -1893,9 +1906,7 @@ signal_session_init_recipient :: proc(
 
 	material: [160]u8
 	defer crypto.zero_explicit(&material, size_of(material))
-	for i in 0 ..< 32 {
-		material[i] = 0xff
-	}
+	slice.fill(material[:32], 0xff)
 	if err := signal_agreement(material[32:64], local.signed_prekey_private, message.identity_public);
 	   err.kind != .None {
 		return err
@@ -2177,7 +2188,7 @@ signal_receiving_chain_find :: proc(session: ^Signal_Session, public: [32]u8) ->
 }
 
 signal_receiving_chain_slot :: proc(session: ^Signal_Session) -> int {
-	for chain, i in session.receiving {
+	for &chain, i in session.receiving {
 		if !chain.in_use {
 			return i
 		}
@@ -2222,8 +2233,8 @@ signal_session_ready :: proc(session: ^Signal_Session, trusted: [32]u8) -> Signa
 	return {}
 }
 
-signal_session_alias :: proc(session: ^Signal_Session, data: []u8) -> bool {
-	return bytes.alias(data, mem.slice_ptr(cast(^u8)session, size_of(Signal_Session)))
+signal_session_overlaps_buffer :: proc(session: ^Signal_Session, data: []u8) -> bool {
+	return bytes.alias(data, mem.ptr_to_bytes(session))
 }
 
 signal_session_put_uint :: proc(dst: []u8, at: ^int, field: u8, value: u32) {
@@ -2234,9 +2245,8 @@ signal_session_put_uint :: proc(dst: []u8, at: ^int, field: u8, value: u32) {
 
 signal_session_put_public :: proc(dst: []u8, at: ^int, field: u8, public: [32]u8) {
 	dst[at^], dst[at^ + 1], dst[at^ + 2] = field << 3 | 2, 33, 5
-	for value, i in public {
-		dst[at^ + 3 + i] = value
-	}
+	public_bytes := public
+	copy(dst[at^ + 3:][:32], public_bytes[:])
 	at^ += 35
 }
 
@@ -2277,7 +2287,7 @@ signal_session_validate :: proc(session: ^Signal_Session) -> Signal_Session_Erro
 signal_session_chains_validate :: proc(session: ^Signal_Session) -> Signal_Session_Error {
 	active := 0
 
-	for chain, i in session.receiving {
+	for &chain, i in session.receiving {
 		if !chain.in_use {
 			continue
 		}
@@ -2307,7 +2317,7 @@ signal_session_chains_validate :: proc(session: ^Signal_Session) -> Signal_Sessi
 
 	count := 0
 
-	for key, i in session.skipped {
+	for &key, i in session.skipped {
 		if !key.in_use {
 			continue
 		}
@@ -2360,7 +2370,7 @@ signal_session_encode :: proc(dst: []u8, session: ^Signal_Session) -> (written: 
 		return required, {kind = .Destination_Undersized}
 	}
 
-	if signal_session_alias(session, dst[:required]) {
+	if signal_session_overlaps_buffer(session, dst[:required]) {
 		return 0, {kind = .Overlapping_Buffers}
 	}
 
@@ -2385,9 +2395,12 @@ signal_session_encode :: proc(dst: []u8, session: ^Signal_Session) -> (written: 
 
 	written = 11
 	signal_session_keys_encode(dst, session, &written)
-	store_put(dst, &written, cast(u64)(session.send_counter + 1), 8)
-	store_put(dst, &written, cast(u64)chains, 1)
-	store_put(dst, &written, cast(u64)session.skipped_count, 2)
+	endian.unchecked_put_u64be(dst[written:][:8], u64(session.send_counter + 1))
+	written += 8
+	dst[written] = u8(chains)
+	written += 1
+	endian.unchecked_put_u16be(dst[written:][:2], u16(session.skipped_count))
+	written += 2
 	signal_session_chains_encode(dst, session, &written)
 	assert(written + 32 == required)
 	checksum := sha256(dst[:written])
@@ -2406,7 +2419,8 @@ signal_session_keys_encode :: proc(dst: []u8, session: ^Signal_Session, at: ^int
 	}
 
 	for value in metadata {
-		store_put(dst, at, cast(u64)value, 4)
+		endian.unchecked_put_u32be(dst[at^:][:4], value)
+		at^ += 4
 	}
 	parts := [?][]u8 {
 		session.local_identity_public[:],
@@ -2425,7 +2439,7 @@ signal_session_keys_encode :: proc(dst: []u8, session: ^Signal_Session, at: ^int
 }
 
 signal_session_chains_encode :: proc(dst: []u8, session: ^Signal_Session, at: ^int) {
-	for chain, i in session.receiving {
+	for &chain, i in session.receiving {
 		if !chain.in_use {
 			continue
 		}
@@ -2433,33 +2447,27 @@ signal_session_chains_encode :: proc(dst: []u8, session: ^Signal_Session, at: ^i
 		dst[at^], dst[at^ + 1] = cast(u8)i, chain.closed ? 1 : 0
 		at^ += 2
 
-		for value in chain.ratchet_public {
-			dst[at^] = value
-			at^ += 1
-		}
+		at^ += copy(dst[at^:][:32], chain.ratchet_public[:])
 
-		for value in chain.chain_key {
-			dst[at^] = value
-			at^ += 1
-		}
+		at^ += copy(dst[at^:][:32], chain.chain_key[:])
 
-		store_put(dst, at, cast(u64)(chain.counter + 1), 8)
+		endian.unchecked_put_u64be(dst[at^:][:8], u64(chain.counter + 1))
+		at^ += 8
 	}
 
-	for key, i in session.skipped {
+	for &key, i in session.skipped {
 		if !key.in_use {
 			continue
 		}
 
-		store_put(dst, at, cast(u64)i, 2)
+		endian.unchecked_put_u16be(dst[at^:][:2], u16(i))
+		at^ += 2
 		dst[at^] = cast(u8)key.chain_index
 		at^ += 1
-		store_put(dst, at, cast(u64)key.counter, 4)
+		endian.unchecked_put_u32be(dst[at^:][:4], key.counter)
+		at^ += 4
 
-		for value in key.seed {
-			dst[at^] = value
-			at^ += 1
-		}
+		at^ += copy(dst[at^:][:32], key.seed[:])
 	}
 }
 
@@ -2483,15 +2491,18 @@ signal_session_decode :: proc(session: ^Signal_Session, src: []u8) -> Signal_Ses
 	defer signal_session_clear(&next)
 	at := 11
 	signal_session_keys_decode(&next, src, &at)
-	counter := store_get(src, &at, 8)
+	counter := endian.unchecked_get_u64be(src[at:][:8])
+	at += 8
 
 	if counter > cast(u64)max(u32) + 1 {
 		return {kind = .Invalid_Format}
 	}
 
 	next.send_counter = cast(i64)counter - 1
-	chains := cast(int)store_get(src, &at, 1)
-	skipped := cast(int)store_get(src, &at, 2)
+	chains := cast(int)src[at]
+	at += 1
+	skipped := cast(int)endian.unchecked_get_u16be(src[at:][:2])
+	at += 2
 	if chains > MAX_SIGNAL_RECEIVING_CHAINS ||
 	   skipped > MAX_SIGNAL_SKIPPED_KEYS ||
 	   len(src) != 330 + chains * 74 + skipped * 39 {
@@ -2513,11 +2524,16 @@ signal_session_decode :: proc(session: ^Signal_Session, src: []u8) -> Signal_Ses
 }
 
 signal_session_keys_decode :: proc(next: ^Signal_Session, src: []u8, at: ^int) {
-	next.local_registration_id = cast(u32)store_get(src, at, 4)
-	next.remote_registration_id = cast(u32)store_get(src, at, 4)
-	next.pending_signed_prekey_id = cast(u32)store_get(src, at, 4)
-	next.pending_prekey_id = cast(u32)store_get(src, at, 4)
-	next.previous_counter = cast(u32)store_get(src, at, 4)
+	next.local_registration_id = endian.unchecked_get_u32be(src[at^:][:4])
+	at^ += 4
+	next.remote_registration_id = endian.unchecked_get_u32be(src[at^:][:4])
+	at^ += 4
+	next.pending_signed_prekey_id = endian.unchecked_get_u32be(src[at^:][:4])
+	at^ += 4
+	next.pending_prekey_id = endian.unchecked_get_u32be(src[at^:][:4])
+	at^ += 4
+	next.previous_counter = endian.unchecked_get_u32be(src[at^:][:4])
+	at^ += 4
 	parts := [?][]u8 {
 		next.local_identity_public[:],
 		next.remote_identity_public[:],
@@ -2581,7 +2597,8 @@ signal_session_chains_decode :: proc(
 		at^ += 32
 		copy(chain.chain_key[:], src[at^:at^ + 32])
 		at^ += 32
-		stored_counter := store_get(src, at, 8)
+		stored_counter := endian.unchecked_get_u64be(src[at^:][:8])
+		at^ += 8
 
 		if stored_counter > cast(u64)max(u32) + 1 {
 			return {kind = .Invalid_Format}
@@ -2590,7 +2607,8 @@ signal_session_chains_decode :: proc(
 		chain.counter = cast(i64)stored_counter - 1
 	}
 	for _ in 0 ..< skipped {
-		index := cast(int)store_get(src, at, 2)
+		index := cast(int)endian.unchecked_get_u16be(src[at^:][:2])
+		at^ += 2
 		chain_index := cast(u16)src[at^]
 		at^ += 1
 
@@ -2600,7 +2618,8 @@ signal_session_chains_decode :: proc(
 
 		key := &next.skipped[index]
 		key.in_use, key.chain_index = true, chain_index
-		key.counter = cast(u32)store_get(src, at, 4)
+		key.counter = endian.unchecked_get_u32be(src[at^:][:4])
+		at^ += 4
 		copy(key.seed[:], src[at^:at^ + 32])
 		at^ += 32
 	}

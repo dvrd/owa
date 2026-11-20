@@ -1,5 +1,7 @@
 package protocol_watch
 
+import "core:slice"
+import "core:unicode/utf16"
 Owner :: struct {
 	source, path:    string,
 	targets, checks: []string,
@@ -61,7 +63,7 @@ OWNERS := [?]Owner {
 		"baileys",
 		"src/Defaults/baileys-version.json",
 		[]string{"pairing.odin", "connection.odin"},
-		[]string{"tests/tools/live_qualification/internal/offline_test.odin"},
+		[]string{"tests/internal/version_discovery_test.odin"},
 		"Does this advertised version require a payload change, or only a separately qualified version choice?",
 	},
 	{
@@ -104,7 +106,6 @@ OWNERS := [?]Owner {
 		"pair.go",
 		[]string{"pairing.odin", "protobuf.odin", "auth.odin"},
 		[]string {
-			"tests/tools/live_qualification/internal/offline_test.odin",
 			"tests/internal/pairing_domains_test.odin",
 			"tests/internal/pairing_qr_profile_test.odin",
 		},
@@ -128,7 +129,7 @@ OWNERS := [?]Owner {
 		"whatsmeow",
 		"store/clientpayload.go",
 		[]string{"pairing.odin", "protobuf.odin"},
-		[]string{"tests/tools/live_qualification/internal/offline_test.odin"},
+		[]string{"tests/internal/protobuf_writer_test.odin"},
 		"Which advertised client payload field changed, and does the local encoder emit it?",
 	},
 	{
@@ -233,10 +234,10 @@ reference_commit :: proc(source: string) -> string {
 	return ""
 }
 identifier_start :: proc(c: u8) -> bool {
-	return is_alpha(c) || c == '_' || c == '$'
+	return strings.index_byte(ASCII_LETTERS + "_$", c) >= 0
 }
-identifier_part :: proc(c: u8) -> bool {
-	return identifier_start(c) || is_digit(c)
+is_identifier_continuation :: proc(c: u8) -> bool {
+	return identifier_start(c) || strings.index_byte(DECIMAL_DIGITS, c) >= 0
 }
 sensitive_comment :: proc(comment: string) -> bool {
 	lower := strings.to_lower(comment)
@@ -275,8 +276,8 @@ sensitive_comment :: proc(comment: string) -> bool {
 			}
 
 			end := start + len(word)
-			if (start == 0 || !identifier_part(lower[start - 1])) &&
-			   (end == len(lower) || !identifier_part(lower[end])) {
+			if (start == 0 || !is_identifier_continuation(lower[start - 1])) &&
+			   (end == len(lower) || !is_identifier_continuation(lower[end])) {
 				return true
 			}
 		}
@@ -291,7 +292,7 @@ sensitive_comment :: proc(comment: string) -> bool {
 		strings.has_prefix(lower, "/*line") \
 	)
 }
-number_end :: proc(s: string, at: int) -> int {
+find_numeric_token_end :: proc(s: string, at: int) -> int {
 	i := at
 	if i + 2 < len(s) &&
 	   s[i] == '0' &&
@@ -309,8 +310,8 @@ number_end :: proc(s: string, at: int) -> int {
 			if c == '_' ||
 			   c == '0' ||
 			   c == '1' ||
-			   (radix == 'o' || radix == 'O') && is_octal_digit(c) ||
-			   (radix == 'x' || radix == 'X') && is_hex_digit(c) {
+			   (radix == 'o' || radix == 'O') && (c >= '0' && c <= '7') ||
+			   (radix == 'x' || radix == 'X') && strings.index_byte(LOWER_HEX_DIGITS + "ABCDEF", c) >= 0 {
 				i += 1
 			} else {
 				break
@@ -322,14 +323,14 @@ number_end :: proc(s: string, at: int) -> int {
 		return i
 	}
 
-	for i < len(s) && (is_digit(s[i]) || s[i] == '_') {
+	for i < len(s) && strings.index_byte(DECIMAL_DIGITS + "_", s[i]) >= 0 {
 		i += 1
 	}
 
 	if i < len(s) && s[i] == '.' {
 		i += 1
 
-		for i < len(s) && (is_digit(s[i]) || s[i] == '_') {
+		for i < len(s) && strings.index_byte(DECIMAL_DIGITS + "_", s[i]) >= 0 {
 			i += 1
 		}
 	}
@@ -340,7 +341,7 @@ number_end :: proc(s: string, at: int) -> int {
 		if end < len(s) && (s[end] == '+' || s[end] == '-') {
 			end += 1
 		}; start := end
-		for end < len(s) && (is_digit(s[end]) || s[end] == '_') {
+		for end < len(s) && strings.index_byte(DECIMAL_DIGITS + "_", s[end]) >= 0 {
 			end += 1
 		}
 
@@ -472,14 +473,15 @@ lex :: proc(data: []u8, language: string) -> (Lexed, string) {
 		}
 
 		if identifier_start(c) {
-			start := i; i += 1; for i < len(s) && identifier_part(s[i]) {i += 1}
+			start := i; i += 1; for i < len(s) && is_identifier_continuation(s[i]) {i += 1}
 			append(&result.tokens, Token{"identifier", s[start:i]}); continue
 		}
 
-		if is_digit(c) || c == '.' && i + 1 < len(s) && is_digit(s[i + 1]) {
-			start := i; i = number_end(s, i)
+		if strings.index_byte(DECIMAL_DIGITS, c) >= 0 ||
+		   c == '.' && i + 1 < len(s) && strings.index_byte(DECIMAL_DIGITS, s[i + 1]) >= 0 {
+			start := i; i = find_numeric_token_end(s, i)
 
-			if i < len(s) && identifier_part(s[i]) {
+			if i < len(s) && is_identifier_continuation(s[i]) {
 				return {}, "NUMBER_BOUNDARY"
 			}
 
@@ -490,7 +492,8 @@ lex :: proc(data: []u8, language: string) -> (Lexed, string) {
 			return {}, "SLASH_OR_HTML_AMBIGUITY"
 		}
 
-		if language == "ts" && strings.has_prefix(s[i:], "?.") && i + 2 < len(s) && is_digit(s[i + 2]) {
+		if language == "ts" && strings.has_prefix(s[i:], "?.") &&
+		   i + 2 < len(s) && strings.index_byte(DECIMAL_DIGITS, s[i + 2]) >= 0 {
 			return {}, "OPTIONAL_CHAIN_DECIMAL_AMBIGUITY"
 		}
 
@@ -604,7 +607,8 @@ literal_string :: proc(token: Token) -> (string, string) {
 					return "", "STRING_ESCAPE"
 				}
 
-				i += 6; n = 0x10000 + ((n - 0xd800) << 10) + (low - 0xdc00)
+				i += 6
+				n = u64(utf16.decode_surrogate_pair(rune(n), rune(low)))
 			} else if n >= 0xdc00 && n <= 0xdfff {
 				return "", "STRING_ESCAPE"
 			}
@@ -619,7 +623,7 @@ literal_string :: proc(token: Token) -> (string, string) {
 		return "", "TABLE_STRING_LIMIT"
 	}; return result, ""
 }
-table :: proc(tokens: []Token, language: string) -> ([]string, []Token, string) {
+extract_single_byte_token_table :: proc(tokens: []Token, language: string) -> ([]string, []Token, string) {
 	significant := make([dynamic]int)
 
 	for t, i in tokens {
@@ -754,7 +758,7 @@ owned_bytes :: proc(root, relative, prefix, suffix: string) -> ([]u8, string) {
 	return data, ""
 }
 record_bound :: proc(root: string, record: Value, prefix, suffix: string) -> string {
-	if !fields(record, []string{"path", "sha256"}) || !hex_valid(str(get(record, "sha256")), 64) {
+	if !has_exact_object_fields(record, []string{"path", "sha256"}) || !hex_valid(str(get(record, "sha256")), 64) {
 		return "CONTRACT_RECORD"
 	}
 
@@ -769,34 +773,7 @@ record_bound :: proc(root: string, record: Value, prefix, suffix: string) -> str
 	}; return ""
 }
 value_strings :: proc(values: []string) -> Value {return string_array(values)}
-strings_equal :: proc(a, b: []string) -> bool {
-	if len(a) != len(b) {
-		return false
-	}; for v, i in a {
-		if v != b[i] {
-			return false
-		}
-	}; return true
-}
-tokens_equal :: proc(a, b: []Token) -> bool {
-	if len(a) != len(b) {
-		return false
-	}; for v, i in a {
-		if v != b[i] {
-			return false
-		}
-	}; return true
-}
-comments_equal :: proc(a, b: []Comment) -> bool {
-	if len(a) != len(b) {
-		return false
-	}; for v, i in a {
-		if v != b[i] {
-			return false
-		}
-	}; return true
-}
-finish :: proc(input: Value, kind, reason, summary: string) -> Value {
+finish_change_assessment :: proc(input: Value, kind, reason, summary: string) -> Value {
 	result := input
 	put(&result, "kind", text(kind)); put(&result, "reason", text(reason))
 	put(&result, "summary", text(summary)); return result
@@ -812,7 +789,7 @@ approved_metadata :: proc(assessment: Value, root, path: string) -> (Value, stri
 		return null(), parse_error
 	}
 
-	if !allowed_fields(
+	if !has_required_and_allowed_fields(
 		contract,
 		[]string{"schema", "source", "path", "target_table_sha256", "requirement"},
 		[]string{"fixture"},
@@ -839,7 +816,7 @@ approved_metadata :: proc(assessment: Value, root, path: string) -> (Value, stri
 	   str(get(evidence, "local_table_sha256")) != str(get(evidence, "reference_table_sha256")) ||
 	   str(get(evidence, "local_table_matches")) != "reference" ||
 	   count != 236 ||
-	   !truth(get(evidence, "outside_tokens_equal")) {
+	   !json_boolean_equals(get(evidence, "outside_tokens_equal")) {
 		return null(), "CONTRACT_COUNTEREXAMPLE"
 	}
 
@@ -883,7 +860,7 @@ approved_metadata :: proc(assessment: Value, root, path: string) -> (Value, stri
 				return null(), lex_error
 			}
 
-			values, _, table_error := table(local.tokens[:], "odin")
+			values, _, table_error := extract_single_byte_token_table(local.tokens[:], "odin")
 			if table_error != "" ||
 			   sha256(transmute([]u8)encode(value_strings(values))) != str(get(evidence, "reference_table_sha256")) {
 				return null(), "CONTRACT_LOCAL_TABLE"
@@ -938,7 +915,7 @@ validate_approved_contract :: proc(assessment: Value, root: string) -> bool {
 
 	return error == "" && equal(actual, expected)
 }
-assess :: proc(
+assess_upstream_file_change :: proc(
 	source: Value,
 	path: string,
 	before, after: []u8,
@@ -956,7 +933,7 @@ assess :: proc(
 		bound =
 			bound &&
 			str(get(source, "repository")) == repository(name) &&
-			(!contains_string(keys(source), "reference_commit") || provided == reference_commit(name))
+			(!slice.contains(keys(source), "reference_commit") || provided == reference_commit(name))
 	}
 	evidence := object(
 		{"reference", digest(before, before_present)},
@@ -999,7 +976,7 @@ assess :: proc(
 
 		if error != "" {
 			put(&result, "local_targets", targets)
-			return finish(
+			return finish_change_assessment(
 				result,
 				"SPIKE",
 				"LOCAL_OWNER_UNAVAILABLE",
@@ -1011,7 +988,7 @@ assess :: proc(
 	}
 	put(&result, "local_targets", targets)
 	if !before_present || !after_present || len(before) > MAX_BYTES || len(after) > MAX_BYTES {
-		return finish(
+		return finish_change_assessment(
 			result,
 			"SPIKE",
 			"INPUT_UNAVAILABLE",
@@ -1019,7 +996,7 @@ assess :: proc(
 		)
 	}
 	if string(before) == string(after) {
-		return finish(
+		return finish_change_assessment(
 			result,
 			"NO_ACTION",
 			"BYTE_IDENTICAL",
@@ -1030,7 +1007,7 @@ assess :: proc(
 		a, ae := decode(before, MAX_BYTES); b, be := decode(after, MAX_BYTES)
 
 		if ae != "" || be != "" {
-			return finish(
+			return finish_change_assessment(
 				result,
 				"SPIKE",
 				"LEXICAL_PROOF_UNAVAILABLE",
@@ -1039,7 +1016,7 @@ assess :: proc(
 		}
 
 		if equal(a, b) {
-			return finish(
+			return finish_change_assessment(
 				result,
 				"NO_ACTION",
 				"JSON_NORMALIZED_EQUIVALENT",
@@ -1047,7 +1024,7 @@ assess :: proc(
 			)
 		}
 
-		return finish(
+		return finish_change_assessment(
 			result,
 			"SPIKE",
 			"BEHAVIOR_CHANGE_UNRESOLVED",
@@ -1057,23 +1034,23 @@ assess :: proc(
 	language := "ts" if strings.has_suffix(path, ".ts") else "go" if strings.has_suffix(path, ".go") else "proto"
 	old, old_error := lex(before, language); next, next_error := lex(after, language)
 	if old_error != "" || next_error != "" {
-		return finish(
+		return finish_change_assessment(
 			result,
 			"SPIKE",
 			"LEXICAL_PROOF_UNAVAILABLE",
 			"Syntax, slash or literal ambiguity prevents a safe lexical equivalence proof.",
 		)
 	}
-	if !comments_equal(old.sensitive[:], next.sensitive[:]) {
-		return finish(
+	if !slice.equal(old.sensitive[:], next.sensitive[:]) {
+		return finish_change_assessment(
 			result,
 			"SPIKE",
 			"DIRECTIVE_OR_LICENSE_CHANGED",
 			"A directive or license-bearing comment changed and must not be stripped as formatting.",
 		)
 	}
-	if tokens_equal(old.tokens[:], next.tokens[:]) {
-		return finish(
+	if slice.equal(old.tokens[:], next.tokens[:]) {
+		return finish_change_assessment(
 			result,
 			"NO_ACTION",
 			"LEXICALLY_EQUIVALENT",
@@ -1081,58 +1058,58 @@ assess :: proc(
 		)
 	}
 	if name != "baileys" || path != "src/WABinary/constants.ts" {
-		return finish(
+		return finish_change_assessment(
 			result,
 			"SPIKE",
 			"BEHAVIOR_CHANGE_UNRESOLVED",
 			"Tokens changed; resolve the named local contract question with a synthetic regression.",
 		)
 	}
-	reference, outside_old, re := table(old.tokens[:], "ts")
-	current, outside_new, ce := table(next.tokens[:], "ts")
+	reference, outside_old, re := extract_single_byte_token_table(old.tokens[:], "ts")
+	current, outside_new, ce := extract_single_byte_token_table(next.tokens[:], "ts")
 	local_bytes, le := read_file(join(owner_root(root, "binary_tokens.odin"), "binary_tokens.odin"))
 	local_lex, lxe := lex(local_bytes, "odin")
-	local_values, _, lte := table(local_lex.tokens[:], "odin")
+	local_values, _, lte := extract_single_byte_token_table(local_lex.tokens[:], "odin")
 	if re != "" ||
 	   ce != "" ||
 	   le != "" ||
 	   lxe != "" ||
 	   lte != "" ||
 	   sha256(local_bytes) != str(get(targets[0], "sha256")) {
-		return finish(
+		return finish_change_assessment(
 			result,
 			"SPIKE",
 			"TABLE_PROOF_UNAVAILABLE",
 			"Only one strict 236-string constant array per source and a bound local array can prove this edit.",
 		)
 	}
-	if !tokens_equal(outside_old, outside_new) {
-		return finish(
+	if !slice.equal(outside_old, outside_new) {
+		return finish_change_assessment(
 			result,
 			"SPIKE",
 			"TABLE_OUTSIDE_CHANGE",
 			"Tokens outside the dictionary changed; table drift alone cannot classify this observation.",
 		)
 	}
-	if strings_equal(reference, current) {
-		return finish(
+	if slice.equal(reference, current) {
+		return finish_change_assessment(
 			result,
 			"NO_ACTION",
 			"LEXICALLY_EQUIVALENT",
 			"The strict table values and outside tokens are unchanged.",
 		)
 	}
-	if strings_equal(local_values, current) {
+	if slice.equal(local_values, current) {
 		put(&evidence, "local_table_matches", text("current"))
-		return finish(
+		return finish_change_assessment(
 			result,
 			"NO_ACTION",
 			"ALREADY_IMPLEMENTED",
 			"The local 236-entry dictionary already matches the supplied current table.",
 		)
 	}
-	if !strings_equal(local_values, reference) {
-		return finish(
+	if !slice.equal(local_values, reference) {
+		return finish_change_assessment(
 			result,
 			"SPIKE",
 			"LOCAL_BASELINE_UNKNOWN",
@@ -1194,7 +1171,7 @@ assess :: proc(
 		),
 	)
 	if approved_contract == "" {
-		return finish(
+		return finish_change_assessment(
 			result,
 			"SPIKE",
 			"LOCAL_DICTIONARY_CONTRACT_DRIFT",
@@ -1203,7 +1180,7 @@ assess :: proc(
 	}
 	approval, error := approved_metadata(result, root, approved_contract)
 	if error != "" {
-		return finish(
+		return finish_change_assessment(
 			result,
 			"SPIKE",
 			"APPROVED_CONTRACT_UNAVAILABLE",
@@ -1211,7 +1188,7 @@ assess :: proc(
 		)
 	}
 	put(&evidence, "approved_contract", approval); put(&result, "acceptance", plan)
-	return finish(
+	return finish_change_assessment(
 		result,
 		"FIX",
 		"APPROVED_DICTIONARY_CONTRACT_GAP",

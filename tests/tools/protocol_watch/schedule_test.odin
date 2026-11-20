@@ -1,4 +1,6 @@
 package protocol_watch_test
+import "core:fmt"
+import "core:slice"
 import w "../../../tools/protocol_watch"
 import "core:mem"
 import "core:os"
@@ -6,14 +8,14 @@ import "core:strings"
 import p "core:sys/posix"
 import "core:testing"
 import "core:time"
-good :: proc() -> w.Value {
+valid_agent_result :: proc() -> w.Value {
 	return w.object(
 		{"status", w.text("NO_ACTION")},
 		{"summary", w.text("No compatibility approval from hashes.")},
 		{"findings", w.array()},
 	)
 }
-args_for :: proc(root: string) -> w.Schedule {
+schedule_options_for_test :: proc(root: string) -> w.Schedule {
 	return w.Schedule {
 		state_dir = w.join(root, "state"),
 		manifest = w.join(w.library_root(), "tools/protocol_watch/sources.json"),
@@ -35,7 +37,7 @@ schedule_command_explicit_read_only :: proc(t: ^testing.T) {
 	arena := setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
 	context.allocator = mem.dynamic_arena_allocator(&arena)
-	argv := w.command("/fake/codex", "/public/library", "/private/schema")
+	argv := w.build_review_agent_argv("/fake/codex", "/public/library", "/private/schema")
 	testing.expect(
 		t,
 		argv[1] == "exec" &&
@@ -44,7 +46,7 @@ schedule_command_explicit_read_only :: proc(t: ^testing.T) {
 		argv[4] == "--ephemeral" &&
 		argv[len(argv) - 1] == "-",
 	)
-	testing.expect(t, !w.contains_string(argv, "--model") && !w.contains_string(argv, "--add-dir"))
+	testing.expect(t, !slice.contains(argv, "--model") && !slice.contains(argv, "--add-dir"))
 }
 @(test)
 schedule_plist_daily_no_install :: proc(t: ^testing.T) {
@@ -54,7 +56,7 @@ schedule_plist_daily_no_install :: proc(t: ^testing.T) {
 	root, error := os.make_directory_temp("", "owa-schedule-*", context.allocator)
 	assert(error == nil)
 	defer os.remove_all(root)
-	args := args_for(root)
+	args := schedule_options_for_test(root)
 	data, failure := w.plist(args)
 	testing.expect(
 		t,
@@ -65,7 +67,7 @@ schedule_plist_daily_no_install :: proc(t: ^testing.T) {
 	)
 	result: w.Value
 	result, failure = w.write_plist(args)
-	testing.expect(t, failure == nil && w.truth(w.get(result, "installed"), false))
+	testing.expect(t, failure == nil && w.json_boolean_equals(w.get(result, "installed"), false))
 	testing.expect(t, w.private_file(w.join(args.state_dir, "review-agent/daily-review.plist")) == nil)
 	args.budget_seconds = 601; _, failure = w.plist(args)
 	testing.expect(t, failure == w.Failure("BUDGET_INVALID"))
@@ -75,10 +77,10 @@ schedule_result_schema_bounded :: proc(t: ^testing.T) {
 	arena := setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
 	context.allocator = mem.dynamic_arena_allocator(&arena)
-	testing.expect(t, w.validate_result(good()) == nil)
+	testing.expect(t, w.validate_result(valid_agent_result()) == nil)
 
 	for mode in 0 ..< 4 {
-		value := good()
+		value := valid_agent_result()
 		switch mode {case 0:
 			w.put(&value, "extra", w.text("untrusted"))
 		case 1:
@@ -103,13 +105,13 @@ schedule_real_child_stdin_schema :: proc(t: ^testing.T) {
 	arena := setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
 	context.allocator = mem.dynamic_arena_allocator(&arena)
-	script := w.cat(
+	script := w.concatenate_strings(
 		"value=$(cat); test \"$value\" = 'public report' || exit 8; printf '%s\\n' '",
-		w.encode(good()),
+		w.encode(valid_agent_result()),
 		"'",
 	)
 	result, failure := w.agent_run(shell_argv(script), transmute([]u8)string("public report"), 3)
-	testing.expect(t, failure == nil && w.equal(result, good()))
+	testing.expect(t, failure == nil && w.equal(result, valid_agent_result()))
 }
 @(test)
 schedule_nonreading_stdin_deadline :: proc(t: ^testing.T) {
@@ -159,7 +161,7 @@ watch_fail :: proc(args: w.Schedule) -> (w.Value, w.Failure) {
 agent_ok :: proc(argv: []string, prompt: []u8, seconds: int) -> (w.Value, w.Failure) {
 	assert(strings.contains(string(prompt), "PUBLIC REPORT JSON:") && !strings.contains(string(prompt), "auth_dir"))
 
-	return good(), nil
+	return valid_agent_result(), nil
 }
 agent_forbidden :: proc(argv: []string, prompt: []u8, seconds: int) -> (w.Value, w.Failure) {
 	panic("agent must not run")
@@ -172,11 +174,11 @@ schedule_watch_then_agent_never_approves_drift :: proc(t: ^testing.T) {
 	root, error := os.make_directory_temp("", "owa-schedule-*", context.allocator)
 	assert(error == nil)
 	defer os.remove_all(root)
-	args := args_for(root)
+	args := schedule_options_for_test(root)
 	result, failure := w.schedule_run(args, watch_ok, agent_ok)
 	testing.expect(t, failure == nil)
 	testing.expect_value(t, w.str(w.get(result, "status")), "REVIEW_REQUIRED")
-	testing.expect(t, w.truth(w.get(result, "compatibility_approved"), false))
+	testing.expect(t, w.json_boolean_equals(w.get(result, "compatibility_approved"), false))
 	testing.expect(t, w.private_file(w.join(args.state_dir, "review-agent/agent-review.json")) == nil)
 	testing.expect(t, os.exists(w.join(args.state_dir, "review-agent/alert.json")))
 }
@@ -188,7 +190,7 @@ schedule_watcher_failure_skips_agent :: proc(t: ^testing.T) {
 	root, error := os.make_directory_temp("", "owa-schedule-*", context.allocator)
 	assert(error == nil)
 	defer os.remove_all(root)
-	result, failure := w.schedule_run(args_for(root), watch_fail, agent_forbidden)
+	result, failure := w.schedule_run(schedule_options_for_test(root), watch_fail, agent_forbidden)
 	testing.expect(t, failure == nil && w.str(w.get(result, "status")) == "FAILED")
 }
 @(test)
@@ -199,7 +201,7 @@ schedule_singleton_excludes_parallel_jobs :: proc(t: ^testing.T) {
 	root, error := os.make_directory_temp("", "owa-schedule-*", context.allocator)
 	assert(error == nil)
 	defer os.remove_all(root)
-	args := args_for(root)
+	args := schedule_options_for_test(root)
 	fd, failure := w.locked_state(args.state_dir)
 	assert(failure == nil)
 	p.close(fd)
@@ -217,9 +219,9 @@ schedule_sanitizes_environment :: proc(t: ^testing.T) {
 	for entry in w.agent_environment(
 		
 	) {testing.expect(t, !strings.has_prefix(entry, "LINEAR_API=") && !strings.has_prefix(entry, "AWS_SECRET_ACCESS_KEY="))}
-	script := w.cat(
+	script := w.concatenate_strings(
 		"test -z \"$LINEAR_API\" && test -z \"$AWS_SECRET_ACCESS_KEY\" || exit 9; cat >/dev/null; printf '%s\\n' '",
-		w.encode(good()),
+		w.encode(valid_agent_result()),
 		"'",
 	); _, failure := w.agent_run(shell_argv(script), nil, 3); testing.expect(t, failure == nil)
 }
@@ -248,7 +250,7 @@ watcher_argv :: proc(state: string, report: w.Value, write: bool, code: int, sum
 
 	if write {
 		script = "printf '%s\\n' \"$2\" > \"$1/new.json\"; chmod 600 \"$1/new.json\"; mv \"$1/new.json\" \"$1/report.json\"; "
-	}; script = w.cat(script, "printf '%s\\n' \"$3\"; exit ", w.string_number(code))
+	}; script = w.concatenate_strings(script, "printf '%s\\n' \"$3\"; exit ", fmt.aprint(code))
 	values := []string{"/bin/sh", "-c", script, "sh", state, w.encode(report), w.encode(without)}
 	out := make([]string, len(values))
 	copy(out, values)
@@ -263,7 +265,7 @@ schedule_fresh_report_and_summary_match :: proc(t: ^testing.T) {
 	root, error := os.make_directory_temp("", "owa-schedule-*", context.allocator)
 	assert(error == nil)
 	defer os.remove_all(root)
-	args := args_for(root)
+	args := schedule_options_for_test(root)
 	fd, failure := w.locked_state(args.state_dir)
 	assert(failure == nil)
 	p.close(fd)
@@ -290,7 +292,7 @@ schedule_failed_watcher_preserves_report :: proc(t: ^testing.T) {
 	root, error := os.make_directory_temp("", "owa-schedule-*", context.allocator)
 	assert(error == nil)
 	defer os.remove_all(root)
-	args := args_for(root)
+	args := schedule_options_for_test(root)
 	fd, failure := w.locked_state(args.state_dir)
 	assert(failure == nil)
 	p.close(fd)
@@ -321,7 +323,7 @@ schedule_exit_three_only_review_required :: proc(t: ^testing.T) {
 	root, error := os.make_directory_temp("", "owa-schedule-*", context.allocator)
 	assert(error == nil)
 	defer os.remove_all(root)
-	args := args_for(root)
+	args := schedule_options_for_test(root)
 	fd, failure := w.locked_state(args.state_dir)
 	assert(failure == nil)
 	p.close(fd)

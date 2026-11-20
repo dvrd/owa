@@ -1,5 +1,6 @@
 package whatsapp
 
+import endian "core:encoding/endian"
 import "core:bytes"
 import "core:fmt"
 import "core:mem"
@@ -87,9 +88,8 @@ binary_document_destroy :: proc(document: ^Binary_Document) {
 	document^ = {}
 }
 
-// Canonical uncompressed encoding matching Baileys 6.7.23's dictionary,
-// nibble/hex, JID, attribute order, and content list decisions. Validation and
-// sizing happen before touching dst. dst must not alias node strings/content.
+// Encodes a node in canonical uncompressed form. Validation and sizing happen
+// before touching dst. dst must not alias node strings or content.
 // Optional max_payload remains <=24 bits.
 binary_node_encode :: proc(
 	dst: []u8,
@@ -336,8 +336,13 @@ binary_write_bytes :: proc(writer: ^Binary_Writer, data: []u8) {
 }
 
 binary_write_integer :: proc(writer: ^Binary_Writer, value: u32, bytes: int) {
-	for i := bytes - 1; i >= 0; i -= 1 {
-		binary_write_byte(writer, cast(u8)(value >> cast(uint)(i * 8)))
+	encoded: [4]u8
+	endian.unchecked_put_u32be(encoded[:], value)
+	for _ in 4 ..< bytes {
+		binary_write_byte(writer, 0)
+	}
+	for b in encoded[4 - clamp(bytes, 0, 4):] {
+		binary_write_byte(writer, b)
 	}
 }
 
@@ -510,8 +515,8 @@ binary_write_string :: proc(writer: ^Binary_Writer, value: string, depth: int) {
 }
 
 binary_write_token :: proc(writer: ^Binary_Writer, value: string) -> bool {
-	// TOKEN_MAP in Baileys is last-write-wins: doubles override singles and
-	// later duplicate dictionary slots override earlier ones.
+	// Two-byte tokens take precedence over single-byte tokens. For duplicates,
+	// search backwards so the last dictionary slot wins.
 	for dictionary := 3; dictionary >= 0; dictionary -= 1 {
 		for index := 255; index >= 0; index -= 1 {
 			if DOUBLE_BYTE_TOKENS[dictionary][index] == value {
@@ -689,12 +694,10 @@ binary_read_byte :: proc(reader: ^Binary_Reader) -> u8 {
 
 binary_read_integer :: proc(reader: ^Binary_Reader, count: int) -> u32 {
 	data := binary_read_bytes(reader, count)
-	value: u32
-	for b in data {
-		value = value << 8 | cast(u32)b
-	}
-
-	return value
+	encoded: [4]u8
+	n := min(len(data), len(encoded))
+	copy(encoded[4 - n:], data[len(data) - n:])
+	return endian.unchecked_get_u32be(encoded[:])
 }
 
 binary_read_length :: proc(reader: ^Binary_Reader, tag: u8) -> int {
