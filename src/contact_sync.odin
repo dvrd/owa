@@ -683,14 +683,6 @@ socket_request_contact_key :: proc(socket: ^Socket, key_id: []u8) -> Socket_Erro
 	   time.diff(now, socket.contact_key_retry_after) > 0 {
 		return {}
 	}
-	me := string(socket.auth.account.jid[:socket.auth.account.jid_size])
-	user, _, e := pairing_jid_decode(me)
-	if e.kind != .None {
-		return {kind = .Invalid_State}
-	}
-	server := "@lid" if strings.has_suffix(me, "@lid") else "@s.whatsapp.net"
-	jid := fmt.aprintf("%s%s", user, server)
-	defer delete(jid)
 	id_buf, req_buf, protocol_buf, msg_buf: [256]u8
 	id_writer := Protobuf_Writer {
 		dst = id_buf[:],
@@ -709,110 +701,9 @@ socket_request_contact_key :: proc(socket: ^Socket, key_id: []u8) -> Socket_Erro
 		dst = msg_buf[:],
 	}
 	protobuf_write_bytes(&msg_writer, 12, protocol_buf[:protocol_writer.at])
-	padded := pad_outbound_message(msg_buf[:msg_writer.at])
-	defer delete(padded)
-	session := new(Signal_Session)
-	defer {signal_session_clear(session); free(session)}
-	encryption_jid := jid
-	owned_lid: string
-	defer delete(owned_lid)
-	if own_lid, known := state_store_get(socket.store, .LID_Mapping, "self");
-	   known && strings.has_suffix(jid, "@s.whatsapp.net") {
-		lid_user, _, invalid := pairing_jid_decode(string(own_lid))
-		if invalid.kind != .None || !strings.has_suffix(string(own_lid), "@lid") {
-			return {kind = .Protocol_Error}
-		}
-		owned_lid = fmt.aprintf("%s@lid", lid_user)
-		if err := socket_record_lid_mapping(socket, jid, owned_lid); err.kind != .None {
-			return err
-		}
-		// Keep an owned value across the prekey IQ, which can replace the store.
-		encryption_jid = owned_lid
-	}
-	if err := socket_outgoing_session(socket, encryption_jid, session); err.kind != .None {
-		return err
-	}
-	cipher: [2048]u8
-	kind, n, encrypt_err := signal_session_encrypt(
-		session,
-		cipher[:],
-		padded,
-		session.remote_identity_public,
-	)
-	if encrypt_err.kind != .None {
-		return {kind = .Signal_Failed, signal = encrypt_err}
-	}
 	id := generate_outbound_message_id()
 	defer delete(id)
-	enc_type := "pkmsg" if kind == .Prekey else "msg"
-	children := [3]Binary_Node {
-		{tag = "meta", attrs = []Binary_Node_Attribute{{"appdata", "default"}}},
-		{
-			tag = "enc",
-			attrs = []Binary_Node_Attribute{{"v", "2"}, {"type", enc_type}},
-			content = cipher[:n],
-		},
-		{},
-	}
-	count := 2
-	identity: [2048]u8
-	if kind == .Prekey {
-		acc := &socket.auth.account
-		size, error := pairing_signed_identity_encode(
-			identity[:],
-			{
-				details = acc.details[:acc.details_size],
-				account_signature_key = acc.account_signature_key[:],
-				account_signature = acc.account_signature[:],
-				device_signature = acc.device_signature[:],
-			},
-			true,
-		)
-		if error != .None {
-			return {kind = .Protocol_Error}
-		}
-		children[2] = {
-			tag     = "device-identity",
-			content = identity[:size],
-		}
-		count = 3
-	}
-	node := Binary_Node {
-		tag     = "message",
-		attrs   = []Binary_Node_Attribute {
-			{"id", id},
-			{"type", "text"},
-			{"category", "peer"},
-			{"to", jid},
-			{"push_priority", "high"},
-		},
-		content = children[:count],
-	}
-	wire: [8192]u8
-	size, error := binary_node_encode(wire[:], node)
-	if error.kind != .None {
-		return {kind = .Binary_Failed, binary = error}
-	}
-	candidate: State_Store
-	defer state_store_clear(&candidate)
-	if err := socket_store_clone(&candidate, socket.store); err.kind != .None {
-		return err
-	}
-	staged := new(Socket)
-	defer free(staged)
-	staged.store = &candidate
-	if err := socket_stage_session(staged, encryption_jid, session); err.kind != .None {
-		return err
-	}
-	if err := state_store_set(&candidate, .Outbound_Message, id, wire[:size]); err.kind != .None {
-		return {kind = .State_Failed, state = err}
-	}
-	if err := socket_store_commit(socket, &candidate); err.kind != .None {
-		return err
-	}
-	if err := socket_write(socket, wire[:size]); err.kind != .None {
-		return err
-	}
+	if e := socket_send_primary_device_message(socket, id, msg_buf[:msg_writer.at]); e.kind != .None { return e }
 	socket.contact_key_size = copy(socket.contact_key_requested[:], key_id)
 	socket.contact_key_retry_after = time.time_add(now, time.Minute)
 	return {}
@@ -950,19 +841,25 @@ contact_history_media :: proc(notification: []u8) -> (Media_Message, Socket_Erro
 	}, {}
 }
 
-import_compressed_contact_profiles :: proc(store: ^State_Store, compressed: []u8) -> Socket_Error {
-	if len(compressed) == 0 {
-		return {kind = .Protocol_Error}
+decompress_history_chunk :: proc(dst, compressed: []u8) -> ([]u8, Socket_Error) {
+	if len(compressed) == 0 || len(compressed) > DEFAULT_MAX_MEDIA_SIZE || len(dst) == 0 {
+		return nil, {kind = .Protocol_Error}
 	}
-	raw := make([]u8, DEFAULT_MAX_MEDIA_SIZE)
-	defer {crypto.zero_explicit(raw_data(raw), len(raw)); delete(raw)}
-	out_size := zlib.uLongf(len(raw))
+	out_size := zlib.uLongf(len(dst))
 	in_size := zlib.uLong(len(compressed))
-	if zlib.uncompress2(raw_data(raw), &out_size, raw_data(compressed), &in_size) != zlib.OK ||
-	   int(in_size) != len(compressed) {
-		return {kind = .Protocol_Error}
+	if zlib.uncompress2(raw_data(dst), &out_size, raw_data(compressed), &in_size) != zlib.OK ||
+	   int(in_size) != len(compressed) || out_size == 0 {
+		return nil, {kind = .Protocol_Error}
 	}
-	chunk := raw[:int(out_size)]
+	return dst[:int(out_size)], {}
+}
+
+import_compressed_contact_profiles :: proc(store: ^State_Store, compressed: []u8) -> Socket_Error {
+	raw, ae := make([]u8, DEFAULT_MAX_MEDIA_SIZE)
+	if ae != nil { return {kind = .Allocation_Failed, allocation = ae} }
+	defer {crypto.zero_explicit(raw_data(raw), len(raw)); delete(raw)}
+	chunk, e := decompress_history_chunk(raw, compressed)
+	if e.kind != .None { return e }
 	history_kind, valid := read_unique_protobuf_field(chunk, 1, 0)
 	if !valid || history_kind.value != 4 {
 		return {kind = .Protocol_Error}

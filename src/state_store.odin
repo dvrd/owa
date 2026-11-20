@@ -34,6 +34,7 @@ State_Record_Kind :: enum u8 {
 	Contact_Index_MAC,
 	Contact_Sync_State,
 	Pending_Profile_History,
+	Chat_History_Cursor,
 }
 State_Record :: struct {
 	kind: State_Record_Kind,
@@ -647,7 +648,7 @@ state_store_load :: proc(store: ^State_Store, path: string, identity: [32]u8) ->
 }
 
 state_record_valid :: proc(kind: State_Record_Kind, name: string, data: []u8) -> bool {
-	if cast(u8)kind > cast(u8)State_Record_Kind.Pending_Profile_History ||
+	if cast(u8)kind > cast(u8)State_Record_Kind.Chat_History_Cursor ||
 	   len(name) == 0 ||
 	   len(name) > 512 ||
 	   len(data) > MAX_STATE_RECORD_SIZE {
@@ -661,6 +662,9 @@ state_record_valid :: proc(kind: State_Record_Kind, name: string, data: []u8) ->
 	}
 
 	#partial switch kind {
+	case .Chat_History_Cursor:
+		_, valid := decode_chat_history_cursor(data)
+		return valid && device_user_jid_valid(name, false)
 	case .Contact_Name:
 		contact, ok := decode_saved_contact(name, data)
 		return ok && device_user_jid_valid(name, false) && contact_name_valid(contact.full_name) &&
@@ -812,6 +816,8 @@ state_store_export_v0_2 :: proc(source: ^State_Store, path: string) -> (deferred
 			if legacy_name != "" {
 				if e := state_store_set(&exported, record.kind, legacy_name, record.data); e.kind != .None {return 0, e}
 			}
+		case .Chat_History_Cursor:
+			if e := state_store_delete(&exported, record.kind, record.name); e.kind != .None {return 0, e}
 		case .Pending_Profile_History:
 			// Older clients cannot import deferred profile names. The original
 			// snapshot retains the references and all previously imported names.
@@ -822,7 +828,7 @@ state_store_export_v0_2 :: proc(source: ^State_Store, path: string) -> (deferred
 				if e := state_store_set(&exported, record.kind, record.name, record.data[:8]); e.kind != .None {return 0, e}
 			}
 		}
-		if record.kind > .Pending_Profile_History {return 0, {kind = .Invalid_Record}}
+		if record.kind > .Chat_History_Cursor {return 0, {kind = .Invalid_Record}}
 	}
 	return deferred_profiles, state_store_save(&exported, path, create_only = true)
 }

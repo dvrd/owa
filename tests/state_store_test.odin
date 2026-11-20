@@ -94,6 +94,7 @@ rollback_export_preserves_session_and_queue_with_legacy_contact_fields :: proc(t
 	for r in ([]wa.State_Record{
 		{.Session, "device", []u8{42}}, {.Outbound_Message, "id", []u8{15}},
 		{.Pending_Profile_History, "history", []u8{2}},
+		{.Chat_History_Cursor, "123@lid", []u8{0,0,0,0,0,0,0,9,0,'m'}},
 		{.Contact_Name, "123@lid", transmute([]u8)string("Test\x00\x00")},
 		{.Contact_Sync_State, "contacts-cursor", cursor[:]},
 		{.Contact_Sync_State, "server-version", cursor[:8]},
@@ -117,7 +118,7 @@ rollback_export_preserves_session_and_queue_with_legacy_contact_fields :: proc(t
 		}
 	}
 	for r in store.records {
-		if r.kind == .Pending_Profile_History {continue}
+		if r.kind == .Pending_Profile_History || r.kind == .Chat_History_Cursor {continue}
 		key, data := r.name, r.data
 		if key == "contacts-cursor" {key = "cursor"}
 		if key == "server-version" {key = "required-version"}

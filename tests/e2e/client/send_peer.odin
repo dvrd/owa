@@ -17,6 +17,7 @@ import wa "shared:whatsapp"
 // against in-memory keys; no account, network or provider is involved. The
 // peer owns group 123@g.us with two members: us (111:1) and 222 (devices 1, 2).
 Send_Peer :: struct {
+	history_reply: proc(peer: ^Send_Peer, id: string),
 	contact_replies: []wa.Binary_Node,
 	contact_versions: []string,
 	contact_requests: int,
@@ -343,11 +344,12 @@ send_peer_message :: proc(peer: ^Send_Peer, node: wa.Binary_Node, raw: []u8) {
 		enc, e := wa.device_unique_child(node, "enc")
 		cipher, ok := enc.content.([]u8)
 		peer.durable = found && bytes.equal(stored, raw)
-		if !ok || e.kind != .None || !peer.durable || to != "111@s.whatsapp.net" || priority != "high" { peer.failed = true; return }
+		if !ok || e.kind != .None || !peer.durable || to != "111@s.whatsapp.net" || priority != ("high_force" if peer.history_reply != nil else "high") { peer.failed = true; return }
 		plaintext: [512]u8
 		n, _, err := wa.signal_session_decrypt_prekey(&peer.pairwise[0], plaintext[:], cipher, peer.local[0], peer.store.identity)
 		if err.kind != .None { peer.failed = true; return }
 		peer.last_size = copy(peer.last_plain[:], send_peer_unpad(plaintext[:n]))
+		if peer.history_reply != nil {peer.history_reply(peer, id)}
 		return
 	}
 	_, group_found := wa.state_store_get(&loaded, .Sender_Key, "123@g.us|111:1@s.whatsapp.net")

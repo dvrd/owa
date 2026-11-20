@@ -68,6 +68,7 @@ Socket_Error :: struct {
 	device:     Device_Error,
 }
 Socket_Config :: struct {
+	track_chat_history_cursors: bool, // Keep the newest private message ID, direction and original time per chat.
 	sync_contacts: bool, // Refresh the address book after login and server updates in socket_tick.
 	host, target, origin:               string,
 	port:                               int,
@@ -130,6 +131,7 @@ socket_message_destroy :: proc(message: ^Socket_Message) {
 // Only one caller may use it. Config requires trusted CA roots. Reconnect uses
 // a fresh Socket with the SAME Auth_State, Prekey_Store and State_Store.
 Socket :: struct {
+	history_request: ^Pending_Chat_History,
 	contact_refresh_due: bool,
 	profile_history_pending: bool,
 	profile_history_retry_after: time.Time,
@@ -1010,50 +1012,9 @@ socket_query_response_receive :: proc(socket: ^Socket, id: string) -> (Binary_Do
 	deadline := time.time_add(time.now(), socket.config.query_timeout)
 
 	for {
-		if time.now()._nsec >= deadline._nsec {
-			return {}, socket_fail(socket, {kind = .Query_Timeout})
-		}
-
-		if _, err := socket_tick(socket, time.now()); err.kind != .None {
-			return {}, err
-		}
-
-		ready, poll_err := socket_network_poll(socket, 100 * time.Millisecond)
-		if poll_err.kind != .None {
-			return {}, poll_err
-		}
-
-		if !ready {
-			continue
-		}
-
-		if e := socket_read_deadline(socket, deadline); e.kind != .None {
-			return {}, e
-		}
-
-		event, err := socket_receive_wire(socket)
-		if err.kind != .None {
-			return {}, err
-		}
-
-		if e := socket_read_deadline(socket, {}); e.kind != .None {
-			if event.message != nil {
-				socket_message_destroy(event.message)
-			}
-
-			return {}, e
-		}
-
-		if event.kind == .Message {
-			if enqueue_error := socket_query_message_enqueue(socket, event); enqueue_error.kind != .None {
-				return {}, enqueue_error
-			}
-		}
-
-		if event.kind == .Restart_Required {
-			return {}, {kind = .Invalid_State}
-		}
-
+		event, e := socket_receive_while_waiting(socket, deadline)
+		if e.kind == .Query_Timeout && socket.phase != .Failed {return {}, socket_fail(socket, e)}
+		if e.kind != .None {return {}, e}
 		if event.kind != .Node || event.node.tag != "iq" {
 			continue
 		}
@@ -1065,6 +1026,56 @@ socket_query_response_receive :: proc(socket: ^Socket, id: string) -> (Binary_Do
 
 		return socket_query_response_copy(event.node)
 	}
+}
+
+// Read one frame during a synchronous operation. Preserve unrelated live messages for socket_read.
+socket_receive_while_waiting :: proc(socket: ^Socket, deadline: time.Time) -> (Socket_Event, Socket_Error) {
+	if time.now()._nsec >= deadline._nsec {
+		return {}, {kind = .Query_Timeout}
+	}
+
+	if _, err := socket_tick(socket, time.now()); err.kind != .None {
+		return {}, err
+	}
+
+	ready, poll_err := socket_network_poll(socket, 100 * time.Millisecond)
+	if poll_err.kind != .None {
+		return {}, poll_err
+	}
+
+	if !ready {
+		return {}, {}
+	}
+
+	if e := socket_read_deadline(socket, deadline); e.kind != .None {
+		return {}, e
+	}
+
+	event, err := socket_receive_wire(socket)
+	if err.kind != .None {
+		return {}, err
+	}
+
+	if e := socket_read_deadline(socket, {}); e.kind != .None {
+		if event.message != nil {
+			socket_message_destroy(event.message)
+		}
+
+		return {}, e
+	}
+
+	if event.kind == .Message {
+		if enqueue_error := socket_query_message_enqueue(socket, event); enqueue_error.kind != .None {
+			return {}, enqueue_error
+		}
+		return {}, {}
+	}
+
+	if event.kind == .Restart_Required {
+		return {}, {kind = .Invalid_State}
+	}
+
+	return event, {}
 }
 
 socket_read_deadline :: proc(socket: ^Socket, deadline: time.Time) -> Socket_Error {

@@ -253,6 +253,7 @@ socket_process_message :: proc(
 		var_payload,
 		own,
 		history_receipt,
+		participant,
 	)
 	if handled {
 		return {}, control_error
@@ -555,6 +556,7 @@ socket_message_control_commit :: proc(
 	var_payload: []u8,
 	own: bool,
 	history_receipt: ^bool,
+	participant := "",
 ) -> (
 	bool,
 	Socket_Error,
@@ -584,6 +586,13 @@ socket_message_control_commit :: proc(
 			return true, e
 		}
 
+		if history && socket.history_request != nil {
+			_, device, pe := pairing_jid_decode(participant)
+			control_type, valid := read_unique_protobuf_field(protocol, 2, 0)
+			if valid && control_type.value == 5 && pe.kind == .None && device == 0 {
+				if e := collect_chat_history_notification(socket.history_request, notification.data); e.kind != .None { return true, e }
+			}
+		}
 		if history && socket.config.sync_contacts { socket.profile_history_pending = true }
 		if socket.contact_key_size > 0 {
 			key := hex.encode(socket.contact_key_requested[:socket.contact_key_size])
@@ -641,6 +650,11 @@ socket_message_event_commit :: proc(
 	defer {
 		if !success {
 			socket_message_destroy(message)
+		}
+	}
+	if socket.config.track_chat_history_cursors {
+		if e := store_chat_history_cursor(candidate, message); e.kind != .None {
+			return {}, {kind = .State_Failed, state = e}
 		}
 	}
 	if e := socket_inbox_stage(candidate, name, message); e.kind != .None {

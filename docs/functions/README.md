@@ -1,12 +1,12 @@
 # Function catalog
 
-This catalog covers **1,306 named functions and bound callbacks** in the WhatsApp repository. Entries follow declaration order within each file. Each links to the implementation and describes its behavior.
+This catalog covers **1,324 named functions and bound callbacks** in the WhatsApp repository. Entries follow declaration order within each file. Each links to the implementation and describes its behavior.
 
 | Area | Entries | What it covers |
 |---|---:|---|
-| [Client library](library.md) | 630 | WhatsApp connection, pairing, addressing, messages, Signal encryption, media, codecs and persistent state. |
+| [Client library](library.md) | 642 | WhatsApp connection, pairing, addressing, messages, Signal encryption, media, codecs and persistent state. |
 | [Tools](tools.md) | 131 | Release checks and upstream protocol review. |
-| [Tests and harnesses](tests.md) | 545 | Test assertions, fixtures, synthetic peers, recovery campaigns, subprocess controls and test runners. |
+| [Tests and harnesses](tests.md) | 551 | Test assertions, fixtures, synthetic peers, recovery campaigns, subprocess controls and test runners. |
 
 ## Running checks
 

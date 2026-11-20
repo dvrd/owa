@@ -1280,3 +1280,117 @@ socket_same_device :: proc(a, b: string) -> bool {
 
 	return a_lid == b_lid
 }
+
+// Atomically persist the primary device ratchet and ciphertext before writing the peer stanza.
+socket_send_primary_device_message :: proc(socket: ^Socket, id: string, message: []u8, history := false) -> Socket_Error {
+	me := string(socket.auth.account.jid[:socket.auth.account.jid_size])
+	user, _, e := pairing_jid_decode(me)
+	if e.kind != .None {
+		return {kind = .Invalid_State}
+	}
+	server := "@lid" if strings.has_suffix(me, "@lid") else "@s.whatsapp.net"
+	jid := fmt.aprintf("%s%s", user, server)
+	defer delete(jid)
+	padded := pad_outbound_message(message)
+	defer delete(padded)
+	session := new(Signal_Session)
+	defer {signal_session_clear(session); free(session)}
+	encryption_jid := jid
+	owned_lid: string
+	defer delete(owned_lid)
+	if own_lid, known := state_store_get(socket.store, .LID_Mapping, "self");
+	   known && strings.has_suffix(jid, "@s.whatsapp.net") {
+		lid_user, _, invalid := pairing_jid_decode(string(own_lid))
+		if invalid.kind != .None || !strings.has_suffix(string(own_lid), "@lid") {
+			return {kind = .Protocol_Error}
+		}
+		owned_lid = fmt.aprintf("%s@lid", lid_user)
+		if err := socket_record_lid_mapping(socket, jid, owned_lid); err.kind != .None {
+			return err
+		}
+		// Keep an owned value across the prekey IQ, which can replace the store.
+		encryption_jid = owned_lid
+	}
+	if err := socket_outgoing_session(socket, encryption_jid, session); err.kind != .None {
+		return err
+	}
+	cipher: [2048]u8
+	kind, n, encrypt_err := signal_session_encrypt(
+		session,
+		cipher[:],
+		padded,
+		session.remote_identity_public,
+	)
+	if encrypt_err.kind != .None {
+		return {kind = .Signal_Failed, signal = encrypt_err}
+	}
+	enc_type := "pkmsg" if kind == .Prekey else "msg"
+	children := [3]Binary_Node {
+		{tag = "meta", attrs = []Binary_Node_Attribute{{"appdata", "default"}}},
+		{
+			tag = "enc",
+			attrs = []Binary_Node_Attribute{{"v", "2"}, {"type", enc_type}},
+			content = cipher[:n],
+		},
+		{},
+	}
+	count := 2
+	identity: [2048]u8
+	if kind == .Prekey {
+		acc := &socket.auth.account
+		size, error := pairing_signed_identity_encode(
+			identity[:],
+			{
+				details = acc.details[:acc.details_size],
+				account_signature_key = acc.account_signature_key[:],
+				account_signature = acc.account_signature[:],
+				device_signature = acc.device_signature[:],
+			},
+			true,
+		)
+		if error != .None {
+			return {kind = .Protocol_Error}
+		}
+		children[2] = {
+			tag     = "device-identity",
+			content = identity[:size],
+		}
+		count = 3
+	}
+	attrs := [6]Binary_Node_Attribute{
+		{"id", id}, {"type", "text"}, {"category", "peer"}, {"to", jid},
+		{"push_priority", "high"}, {"privacy_sensitive", "1"},
+	}
+	attr_count := 5
+	if history {
+		attrs[4].value = "high_force"
+		attr_count = 6
+	}
+	node := Binary_Node{tag = "message", attrs = attrs[:attr_count], content = children[:count]}
+	wire: [8192]u8
+	size, error := binary_node_encode(wire[:], node)
+	if error.kind != .None {
+		return {kind = .Binary_Failed, binary = error}
+	}
+	candidate: State_Store
+	defer state_store_clear(&candidate)
+	if err := socket_store_clone(&candidate, socket.store); err.kind != .None {
+		return err
+	}
+	staged := new(Socket)
+	defer free(staged)
+	staged.store = &candidate
+	if err := socket_stage_session(staged, encryption_jid, session); err.kind != .None {
+		return err
+	}
+	if err := state_store_set(&candidate, .Outbound_Message, id, wire[:size]); err.kind != .None {
+		return {kind = .State_Failed, state = err}
+	}
+	if err := socket_store_commit(socket, &candidate); err.kind != .None {
+		return err
+	}
+	if err := socket_write(socket, wire[:size]); err.kind != .None {
+		return err
+	}
+	return {}
+}

@@ -46,3 +46,35 @@ pending ciphertext, and message deduplication timestamps. Its return count
 reports deferred profile-history downloads omitted from the legacy copy. Their
 references stay in the original. After the old version goes online, its working
 files are the authoritative session for the next upgrade.
+
+## Private chat history
+
+Call `socket_fetch_chat_history(socket, chat_jid)` on an online linked socket.
+It asks the account's primary phone for a page of up to 50 messages. The phone
+needs an internet connection. A successful empty page and a query timeout are
+distinct results.
+
+The request starts before the newest private message reference in the session.
+Set `Socket_Config.track_chat_history_cursors` to record the ID, original Unix
+timestamp and direction of newly received private messages, including outgoing
+messages synchronized from another linked device. Previously saved outbound
+content also supplies references for older sessions. A legacy consumption marker
+only records when the local client processed a message.
+
+For an explicit page, pass a `Chat_History_Cursor` with `id`, `from_me` and
+`timestamp` in seconds. Use the oldest returned message as the cursor for
+the next page. A session with no local reference asks the phone for initial
+reverse history. Some phones leave that request unanswered. On timeout, a
+known message reference can be supplied explicitly.
+
+The caller owns the returned array and its messages. Decode text and audio
+with `text_message_decode` and `media_message_decode`. Download an audio message
+with `socket_download_media` while its protobuf and metadata are available.
+Destroy each message with `socket_message_destroy`, then delete the array.
+History pages bypass the live application inbox. Incoming live messages during
+the request remain available through `socket_read`.
+
+Enabling cursor tracking adds a record kind to the session after a timestamped
+private message arrives. For a handoff to an older binary, use
+`state_store_export_v0_2` with the matching credentials and prekeys. The
+compatibility export omits chat history cursors.
