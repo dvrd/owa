@@ -11,7 +11,10 @@ permissions:
 
 jobs:
   publish:
-    if: github.event.pull_request.merged == true
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.ref == 'develop' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     concurrency:
       group: owa-main-releases
       cancel-in-progress: false
@@ -52,8 +55,9 @@ jobs:
             else
               title=$(gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$commit/pulls" |
                 jq -sr --arg sha "$commit" --arg repo "$GITHUB_REPOSITORY" '
-                  [ .[][] | select(.merged_at and .base.ref == "main" and
-                      .base.repo.full_name == $repo and .merge_commit_sha == $sha) ][0].title // empty')
+                [ .[][] | select(.merged_at and .base.ref == "main" and
+                    .head.ref == "develop" and .head.repo.full_name == $repo and
+                    .base.repo.full_name == $repo and .merge_commit_sha == $sha) ][0].title // empty')
             fi
             if [[ -z "$title" ]]; then
               continue
