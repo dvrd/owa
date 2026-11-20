@@ -1,25 +1,27 @@
 # Function catalog
 
-This catalog covers **1,276 named functions and bound callbacks** in the WhatsApp repository. Entries follow declaration order within each file. Each links to the implementation and describes its behavior.
+This catalog covers **1,306 named functions and bound callbacks** in the WhatsApp repository. Entries follow declaration order within each file. Each links to the implementation and describes its behavior.
 
 | Area | Entries | What it covers |
 |---|---:|---|
-| [Client library](library.md) | 617 | WhatsApp connection, pairing, addressing, messages, Signal encryption, media, codecs and persistent state. |
-| [Tools](tools.md) | 130 | Release checks and upstream protocol review. |
-| [Tests and harnesses](tests.md) | 529 | Test assertions, fixtures, synthetic peers, recovery campaigns, subprocess controls and test runners. |
+| [Client library](library.md) | 630 | WhatsApp connection, pairing, addressing, messages, Signal encryption, media, codecs and persistent state. |
+| [Tools](tools.md) | 131 | Release checks and upstream protocol review. |
+| [Tests and harnesses](tests.md) | 545 | Test assertions, fixtures, synthetic peers, recovery campaigns, subprocess controls and test runners. |
 
 ## Running checks
 
 Run `task hooks:install` once per clone to enable the pre-push hook. The hook runs `task check` on each distinct commit at the tip of a ref being pushed. A failing test blocks the push. Run `task check` directly to test uncommitted edits. Both use the local Odin compiler and shared packages. Set `ODIN` and `WEBTOOLS_SHARED` to override their locations.
 
-- `task test:odin -- --package . --internal-only` runs the private client tests. Append `--` and Odin flags to select a sanitizer or set a test definition.
-- `task test:protocol` runs the protocol tooling tests with vet and allocation checks.
-- `task check -- -sanitize:address` and `task check -- -sanitize:thread` run the same Odin tests with instrumentation. Run either locally when you need sanitizer coverage.
-- `task test:odin -- --package encrypted_recovery` exercises crash recovery and reads the committed session fixture produced by revision `fa2734f60b60cc9770809bb1be873cea60fe3c12`.
+Each `src/<module>.odin` has one unit test file at `tests/<module>_test.odin`. The protocol watcher pairs each `tools/protocol_watcher/src/<module>.odin` with `tools/protocol_watcher/tests/<module>_test.odin`. `task check` verifies both sets of filenames. End-to-end suites live in `tests/e2e/`. Shared test data and helpers live in `tests/fixtures/`.
+
+- `task test:odin -- --package .` runs the client unit tests against this checkout.
+- `task test:odin -- --package e2e` runs all end-to-end suites. Use `--package e2e/encrypted_recovery` to run only the subprocess recovery tests.
+- `task test:protocol` runs the watcher's unit and end-to-end suites.
+- `task check -- -sanitize:address` and `task check -- -sanitize:thread` run the full suite with instrumentation.
 
 ## Publishing the protocol watcher
 
-Run `task protocol:publish` from the checkout after changing the watcher. It uses local Odin and shared packages, Zig to link for Linux x86-64, and an authenticated GitHub CLI with release access to `dvrd/owa`. It publishes the binary, verifies the downloaded copy, and writes the release checksum to `tools/protocol_watch/linux-amd64.sha256`. Include that file with the source changes in the next push. The daily workflow uses the checksum to select and verify the binary before running the upstream scan and Linear tracking.
+Commit the watcher changes, then run `task protocol:publish`. It uses local Odin and shared packages, Zig to link for Linux x86-64, and an authenticated GitHub CLI with release access to `dvrd/owa`. It builds the committed source in a temporary directory and pushes a release tag pointing at that commit. After verifying the published binary, it writes the SHA-256 and source commit to `tools/protocol_watcher/linux-amd64.sha256`. Commit that file to select the release for CI. The daily workflow uses the checksum to select and verify the binary before running the upstream scan and Linear tracking.
 
 ## Naming review
 

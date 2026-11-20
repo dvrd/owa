@@ -16,10 +16,10 @@ Contact_Sync_Status :: enum {
 
 contact_sync_status :: proc(store: ^State_Store) -> Contact_Sync_Status {
 	_, ready := state_store_get(store, .Contact_Sync_State, "ready")
-	return .Ready if ready else .Syncing
+	_, legacy := state_store_get(store, .Contact_Sync_State, "cursor")
+	return .Ready if ready && !legacy else .Syncing
 }
 
-@(private)
 decode_saved_contact :: proc(jid: string, data: []u8) -> (Contact, bool) {
 	encoded := string(data)
 	first := strings.index_byte(encoded, 0)
@@ -47,12 +47,10 @@ contact_by_jid :: proc(store: ^State_Store, jid: string) -> (Contact, bool) {
 	if store == nil || !store.initialized || !device_user_jid_valid(jid, false) {
 		return {}, false
 	}
-	result := Contact {
-		jid = jid,
-	}
+	result: Contact
 	saved := false
-	if names, exact := state_store_get(store, .Contact_Name, jid); exact {
-		result, saved = decode_saved_contact(jid, names)
+	if stored, exact := state_store_find_record(store, .Contact_Name, jid); exact {
+		result, saved = decode_saved_contact(stored.name, stored.data)
 	} else {
 		for record in store.records {
 			if record.kind != .Contact_Name {
@@ -65,11 +63,13 @@ contact_by_jid :: proc(store: ^State_Store, jid: string) -> (Contact, bool) {
 			}
 		}
 	}
-	profile, seen := state_store_get(store, .Contact_Profile, result.jid)
+	profile_jid := result.jid if saved else jid
+	profile, seen := state_store_find_record(store, .Contact_Profile, profile_jid)
 	if !seen && result.alternate_jid != "" {
-		profile, seen = state_store_get(store, .Contact_Profile, result.alternate_jid)
+		profile, seen = state_store_find_record(store, .Contact_Profile, result.alternate_jid)
 	}
-	result.profile_name = string(profile)
+	if !saved && seen { result.jid = profile.name }
+	result.profile_name = string(profile.data)
 	return result, saved || seen
 }
 
@@ -134,7 +134,6 @@ search_contact_jids :: proc(
 	return
 }
 
-@(private)
 contact_name_valid :: proc(name: string) -> bool {
 	return len(name) <= 4096 && utf8.valid_string(name) && strings.index_byte(name, 0) < 0
 }

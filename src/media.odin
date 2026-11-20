@@ -9,6 +9,7 @@ import "core:crypto/hkdf"
 import "core:crypto/hmac"
 import "core:encoding/base64"
 import "core:encoding/json"
+import "core:fmt"
 import "core:mem"
 import "core:strconv"
 import "core:strings"
@@ -17,8 +18,7 @@ import "core:sync"
 import "core:thread"
 import "core:time"
 
-// Encrypts complete images and documents.
-// Audio/video and ranged downloads are outside this module's scope.
+// Whole-file downloads authenticate the ciphertext and plaintext before returning bytes.
 DEFAULT_MAX_MEDIA_SIZE :: 16 << 20
 MAX_MEDIA_SIZE_LIMIT :: 64 << 20
 MEDIA_MAC_SIZE :: 10
@@ -29,6 +29,7 @@ Media_Kind :: enum {
 	Document,
 	App_State,
 	History,
+	Audio,
 }
 Media_Keys :: struct {
 	iv:                                 [16]u8,
@@ -109,6 +110,8 @@ media_keys_derive :: proc(kind: Media_Kind, media_key: [32]u8) -> (keys: Media_K
 		info = "WhatsApp Image Keys"
 	case .Document:
 		info = "WhatsApp Document Keys"
+	case .Audio:
+		info = "WhatsApp Audio Keys"
 	case .App_State:
 		info = "WhatsApp App State Keys"
 	case .History:
@@ -346,6 +349,8 @@ compute_media_authentication_tag :: proc(keys: Media_Keys, ciphertext: []u8) -> 
 // borrow the decoded protobuf. Presence flags preserve explicitly empty fields;
 // nonempty fields are also emitted when constructed without presence flags.
 Media_Message :: struct {
+	duration_seconds: u32,
+	voice_note, has_duration_seconds, has_voice_note: bool,
 	kind:                                                                                         Media_Kind,
 	url, direct_path, mime_type, caption, file_name, title:                                       string,
 	media_key, file_sha256, file_enc_sha256, jpeg_thumbnail:                                      []u8,
@@ -371,7 +376,7 @@ Reaction_Message :: struct {
 }
 
 media_metadata_from_message :: proc(message: Media_Message) -> (metadata: Media_Metadata, err: Media_Error) {
-	if message.kind != .Image && message.kind != .Document && message.kind != .App_State && message.kind != .History {
+	if message.kind != .Image && message.kind != .Document && message.kind != .Audio && message.kind != .App_State && message.kind != .History {
 		return {}, {kind = .Invalid_Kind}
 	}
 
@@ -480,6 +485,7 @@ media_message_decode :: proc(src: []u8) -> (message: Media_Message, err: Media_E
 		return {}, extract_err
 	}
 
+	if number == 8 {return decode_audio_message(payload)}
 	if number != 3 && number != 7 {
 		return {}, {}
 	}
@@ -535,6 +541,45 @@ media_message_decode :: proc(src: []u8) -> (message: Media_Message, err: Media_E
 		}
 	}
 
+	return message, {}
+}
+
+// WhatsApp uses the same AudioMessage envelope for voice notes and audio attachments.
+decode_audio_message :: proc(payload: []u8) -> (Media_Message, Media_Error) {
+	message := Media_Message{kind = .Audio}
+	at := 0
+	seen: u32
+	for at < len(payload) {
+		field, err := protobuf_field_read(payload, &at)
+		if err != .None {return {}, {kind = .Invalid_Protobuf, protobuf = err}}
+		if field.number > 10 && field.number != 17 {continue}
+		bit := u32(1) << field.number
+		if seen & bit != 0 {return {}, {kind = .Duplicate_Field}}
+		seen |= bit
+		integer := field.number >= 4 && field.number <= 6 || field.number == 10
+		if field.wire_type != (0 if integer else 2) {return {}, {kind = .Invalid_Protobuf}}
+		switch field.number {
+		case 1, 2, 9:
+			if e := media_message_string_decode(&message, field); e.kind != .None {return {}, e}
+		case 3, 7, 8:
+			if len(field.data) != 32 {return {}, {kind = .Invalid_Metadata}}
+			switch field.number {
+			case 3: message.file_sha256, message.has_file_sha256 = field.data, true
+			case 7: message.media_key, message.has_media_key = field.data, true
+			case 8: message.file_enc_sha256, message.has_file_enc_sha256 = field.data, true
+			}
+		case 4: message.file_length, message.has_file_length = field.value, true
+		case 5:
+			if field.value > u64(max(u32)) {return {}, {kind = .Invalid_Protobuf, protobuf = .Integer_Overflow}}
+			message.duration_seconds, message.has_duration_seconds = u32(field.value), true
+		case 6: message.voice_note, message.has_voice_note = field.value != 0, true
+		case 10: message.media_key_timestamp, message.has_media_key_timestamp = i64(field.value), true
+		case 17:
+			context_info, e := media_context_decode(field.data)
+			if e.kind != .None {return {}, e}
+			message.context_info, message.has_context = context_info, true
+		}
+	}
 	return message, {}
 }
 
@@ -1078,7 +1123,7 @@ media_extract_content :: proc(src: []u8, depth: int) -> (payload: []u8, number: 
 		}
 
 		switch field.number {
-		case 1, 3, 6, 7, 37, 40, 46, 53, 55, 59:
+		case 1, 3, 6, 7, 8, 37, 40, 46, 53, 55, 59:
 			if field.wire_type != 2 {
 				return nil, 0, {kind = .Invalid_Protobuf}
 			}
@@ -1862,7 +1907,6 @@ media_download :: proc(
 	return media_decrypt(dst, response.body, message.kind, metadata, max_size)
 }
 
-@(private)
 fetch_media_ciphertext :: proc(message: Media_Message, config: network_client.Config, max_plaintext: u64, execute: Media_HTTP_Execute) -> (network_client.Response, Media_Error) {
 	exchange := execute
 	if exchange == nil {
@@ -2323,6 +2367,7 @@ Socket_HTTP_Job :: struct {
 		HTTP,
 		Upload,
 		Download,
+		Contact_Blob,
 	},
 	done, cancel:           bool,
 	request:                http.Request,
@@ -2335,6 +2380,7 @@ Socket_HTTP_Job :: struct {
 	metadata:               Media_Metadata,
 	connection:             Media_Connection,
 	message:                Media_Message,
+	max_plaintext:          u64,
 	result:                 Media_Upload_Result,
 	n:                      int,
 	media_error:            Media_Error,
@@ -2508,6 +2554,8 @@ socket_http_worker :: proc(data: rawptr) {
 	switch job.kind {
 	case .HTTP:
 		job.response, job.http_error = socket_http_worker_execute(job.request, config)
+	case .Contact_Blob:
+		job.response, job.media_error = fetch_media_ciphertext(job.message, config, job.max_plaintext, socket_http_worker_execute)
 	case .Upload:
 		job.result, job.media_error = media_upload(
 			job.encrypted,
@@ -2591,7 +2639,7 @@ socket_http_run :: proc(socket: ^Socket, job: ^Socket_HTTP_Job) -> Socket_Error 
 			continue
 		}
 
-		event, e := socket_receive(socket)
+		event, e := socket_receive_wire(socket)
 		if e.kind != .None {
 			return e
 		}
@@ -3014,7 +3062,8 @@ socket_download_media :: proc(socket: ^Socket, message: ^Socket_Message, dst: []
 		return 0, {kind = .Invalid_State}
 	}
 
-	if message == nil || !group_jid_valid(message.group) || !stanza_id_valid(message.id) {
+	if message == nil || !stanza_id_valid(message.id) ||
+	   !(group_jid_valid(message.group) || (message.group == "" && device_user_jid_valid(message.participant, true))) {
 		return 0, {kind = .Invalid_Config}
 	}
 
@@ -3097,6 +3146,16 @@ socket_media_download_recover :: proc(
 		id          = message.id,
 		participant = message.participant,
 		from_me     = message.from_me,
+	}
+	chat: [256]u8
+	if message.group == "" {
+		peer := message.participant
+		if message.from_me && message.recipient != "" { peer = message.recipient }
+		user, _, e := pairing_jid_decode(peer)
+		if e.kind != .None { return 0, {kind = .Invalid_Config} }
+		at := strings.index_byte(peer, '@')
+		key.remote_jid = fmt.bprintf(chat[:], "%s%s", user, peer[at:])
+		key.participant = ""
 	}
 	if request_error := socket_media_retry_send(socket, key, &metadata); request_error.kind != .None {
 		return 0, request_error
@@ -3256,7 +3315,7 @@ socket_media_retry_event_read :: proc(socket: ^Socket, deadline: time.Time) -> (
 		return {}, false, e
 	}
 
-	event, e := socket_receive(socket)
+	event, e := socket_receive_wire(socket)
 	if e.kind != .None {
 		return {}, false, e
 	}

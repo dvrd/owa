@@ -16,21 +16,20 @@ import "core:time"
 import network_client "shared:surf"
 import zlib "vendor:zlib"
 
-@(private)
 CONTACT_COLLECTION :: "critical_unblock_low"
 
-@(private)
 Contact_Sync_Page :: struct {
 	store:        ^State_Store,
 	version:      u64,
 	hash:         [128]u8,
 	missing_id:   [128]u8,
 	missing_size: int,
+	authenticated_key: [128]u8,
+	authenticated_key_size: int,
 }
 
 // Read one singular protobuf field. Empty optional fields can be distinguished
 // from a missing field by number. Unknown fields are skipped by the wire reader.
-@(private)
 read_unique_protobuf_field :: proc(
 	data: []u8,
 	number: u32,
@@ -56,7 +55,6 @@ read_unique_protobuf_field :: proc(
 	return field, true
 }
 
-@(private)
 store_contact_sync_key_share :: proc(store: ^State_Store, protocol: []u8) -> Socket_Error {
 	kind, valid_kind := read_unique_protobuf_field(protocol, 2, 0)
 	if !valid_kind || kind.value != 6 {
@@ -100,7 +98,6 @@ store_contact_sync_key_share :: proc(store: ^State_Store, protocol: []u8) -> Soc
 	return {}
 }
 
-@(private)
 derive_contact_mutation_keys :: proc(
 	page: ^Contact_Sync_Page,
 	key_id: []u8,
@@ -131,7 +128,6 @@ derive_contact_mutation_keys :: proc(
 	return keys, true
 }
 
-@(private)
 update_contact_collection_hash :: proc(page: ^Contact_Sync_Page, mac: []u8, subtract: bool) {
 	expanded: [128]u8
 	hkdf.extract_and_expand(
@@ -151,7 +147,6 @@ update_contact_collection_hash :: proc(page: ^Contact_Sync_Page, mac: []u8, subt
 	}
 }
 
-@(private)
 apply_contact_action :: proc(store: ^State_Store, index, value: []u8, remove: bool) -> bool {
 	parts: []string
 	defer {
@@ -169,7 +164,15 @@ apply_contact_action :: proc(store: ^State_Store, index, value: []u8, remove: bo
 	}
 	jid := parts[1]
 	if remove {
-		return state_store_delete(store, .Contact_Name, jid).kind == .None
+		alias := ""
+		if saved, found := contact_by_jid(store, jid); found && saved.is_saved {
+			alias = saved.alternate_jid if saved.jid == jid else saved.jid
+		}
+		// Removing the saved record can free both of its JIDs.
+		owned, err := strings.clone(alias)
+		if err != nil { return false }
+		defer delete(owned)
+		return remove_saved_contact_aliases(store, jid, owned, "")
 	}
 	action, ok := read_unique_protobuf_field(value, 3, 2)
 	full, a := read_unique_protobuf_field(action.data, 1, 2)
@@ -194,12 +197,42 @@ apply_contact_action :: proc(store: ^State_Store, index, value: []u8, remove: bo
 					   strings.has_suffix(alias, "@lid") == strings.has_suffix(jid, "@lid"))) {
 		return false
 	}
+	// Preserve the link when a rename supplies only the other index.
+	primary := jid
+	if existing, found := contact_by_jid(store, jid); found && existing.is_saved {
+		primary = existing.jid
+		if primary != jid {
+			if alias != "" && alias != primary { primary = jid } else { alias = jid }
+		} else if alias == "" {
+			alias = existing.alternate_jid
+		}
+	} else if alias != "" {
+		if linked, known := contact_by_jid(store, alias); known && linked.is_saved && linked.jid == alias {
+			primary, alias = alias, jid
+		}
+	}
 	names := fmt.aprintf("%s\x00%s\x00%s", string(full.data), string(first.data), alias)
 	defer delete(names)
-	return state_store_set(store, .Contact_Name, jid, transmute([]u8)names).kind == .None
+	// Remove legacy duplicates before replacing the primary record. The
+	// encoded names own their bytes independently of any removed record.
+	return remove_saved_contact_aliases(store, primary, alias, primary) &&
+		state_store_set(store, .Contact_Name, primary, transmute([]u8)names).kind == .None
 }
 
-@(private)
+remove_saved_contact_aliases :: proc(store: ^State_Store, jid, alias, keep: string) -> bool {
+	for i := len(store.records) - 1; i >= 0; i -= 1 {
+		record := store.records[i]
+		if record.kind != .Contact_Name || record.name == keep { continue }
+		entry, ok := decode_saved_contact(record.name, record.data)
+		if !ok { return false }
+		if entry.jid == jid || entry.alternate_jid == jid ||
+		   (alias != "" && (entry.jid == alias || entry.alternate_jid == alias)) {
+			if state_store_delete(store, .Contact_Name, record.name).kind != .None { return false }
+		}
+	}
+	return true
+}
+
 apply_contact_record :: proc(
 	page: ^Contact_Sync_Page,
 	record: []u8,
@@ -225,15 +258,8 @@ apply_contact_record :: proc(
 	}
 	content := blob.data[:len(blob.data) - 32]
 	value_mac := blob.data[len(content):]
-	content_mac: hmac.Context
-	hmac.init(&content_mac, .SHA512, keys[64:96])
-	op := [1]u8{u8(operation + 1)}
-	length: [8]u8
-	endian.unchecked_put_u64be(length[:], u64(1 + len(id.data)))
-	for part in ([]([]u8){op[:], id.data, content, length[:]}) {hmac.update(&content_mac, part)}
-	expected: [64]u8
-	hmac.final(&content_mac, expected[:])
-	if crypto.compare_constant_time(expected[:32], value_mac) != 1 {
+	expected := contact_value_mac(keys[64:96], id.data, content, operation)
+	if crypto.compare_constant_time(expected[:], value_mac) != 1 {
 		return false
 	}
 
@@ -279,7 +305,6 @@ apply_contact_record :: proc(
 	return apply_contact_action(page.store, index.data, action.data, operation == 1)
 }
 
-@(private)
 download_contact_sync_blob :: proc(socket: ^Socket, reference: []u8) -> ([]u8, Socket_Error) {
 	key, a := read_unique_protobuf_field(reference, 1, 2)
 	path, b := read_unique_protobuf_field(reference, 2, 2)
@@ -301,7 +326,6 @@ download_contact_sync_blob :: proc(socket: ^Socket, reference: []u8) -> ([]u8, S
 	return download_contact_media(socket, message)
 }
 
-@(private)
 apply_authenticated_contact_batch :: proc(
 	socket: ^Socket,
 	page: ^Contact_Sync_Page,
@@ -405,10 +429,10 @@ apply_authenticated_contact_batch :: proc(
 	if crypto.compare_constant_time(expected[:], mac.data) != 1 {
 		return {kind = .Protocol_Error}
 	}
+	page.authenticated_key_size = copy(page.authenticated_key[:], id.data)
 	return {}
 }
 
-@(private)
 apply_contact_collection :: proc(
 	socket: ^Socket,
 	page: ^Contact_Sync_Page,
@@ -467,19 +491,44 @@ apply_contact_collection :: proc(
 	return {}
 }
 
+rebase_contact_collection :: proc(page, current: ^State_Store) -> Socket_Error {
+	latest: State_Store
+	defer state_store_clear(&latest)
+	if e := socket_store_clone(&latest, current); e.kind != .None { return e }
+	for i := len(latest.records) - 1; i >= 0; i -= 1 {
+		r := latest.records[i]
+		if r.kind != .Contact_Name && r.kind != .Contact_Index_MAC { continue }
+		if _, found := state_store_get(page, r.kind, r.name); !found {
+			if e := state_store_delete(&latest, r.kind, r.name); e.kind != .None {
+				return {kind = .State_Failed, state = e}
+			}
+		}
+	}
+	for r in page.records {
+		if r.kind != .Contact_Name && r.kind != .Contact_Index_MAC { continue }
+		if data, found := state_store_get(&latest, r.kind, r.name); found && bytes.equal(data, r.data) { continue }
+		if e := state_store_set(&latest, r.kind, r.name, r.data); e.kind != .None {
+			return {kind = .State_Failed, state = e}
+		}
+	}
+	page^, latest = latest, page^
+	return {}
+}
+
 // Call after login and on a server_sync notification for critical_unblock_low.
 // Each authenticated page commits atomically. A retry resumes at the last
-// committed version. While awaiting keys, pump socket_receive and call again.
-socket_sync_contacts :: proc(socket: ^Socket) -> (Contact_Sync_Status, Socket_Error) {
+// committed version. While awaiting keys, call socket_read and call again.
+socket_sync_contacts :: proc(socket: ^Socket, request_snapshot := false) -> (Contact_Sync_Status, Socket_Error) {
 	if socket == nil ||
 	   socket.phase != .Online ||
 	   socket.store == nil ||
 	   !socket.store.initialized {
 		return .Syncing, {kind = .Invalid_State}
 	}
+	refresh_snapshot := request_snapshot
 	for _ in 0 ..< 64 {
 		page := Contact_Sync_Page{}
-		cursor, resumed := state_store_get(socket.store, .Contact_Sync_State, "cursor")
+		cursor, resumed := state_store_get(socket.store, .Contact_Sync_State, "contacts-cursor")
 		if resumed {
 			if len(cursor) != 136 {
 				return .Syncing, {kind = .Protocol_Error}
@@ -487,6 +536,8 @@ socket_sync_contacts :: proc(socket: ^Socket) -> (Contact_Sync_Status, Socket_Er
 			page.version = endian.unchecked_get_u64be(cursor[:8])
 			copy(page.hash[:], cursor[8:])
 		}
+		stored_version := page.version
+		if refresh_snapshot {page.version = 0; page.hash = {}}
 		from_version := page.version
 		version := fmt.aprintf("%d", from_version)
 		defer delete(version)
@@ -537,14 +588,32 @@ socket_sync_contacts :: proc(socket: ^Socket) -> (Contact_Sync_Status, Socket_Er
 		if kind, _ := node_attr(collection, "type"); kind == "error" {
 			return .Syncing, {kind = .Server_Rejected}
 		}
+		base_revision := socket.store.revision
 		candidate: State_Store
 		defer state_store_clear(&candidate)
 		if e := socket_store_clone(&candidate, socket.store); e.kind != .None {
 			return .Syncing, e
 		}
+		if _, legacy := state_store_get(&candidate, .Contact_Sync_State, "cursor"); legacy || refresh_snapshot {
+			// The old index could retain a deleted name. Rebuild from version
+			// zero, preserving the offline cache until a page authenticates.
+			for i := len(candidate.records) - 1; i >= 0; i -= 1 {
+				r := candidate.records[i]
+				if r.kind == .Contact_Name || r.kind == .Contact_Index_MAC {
+					if removed := state_store_delete(&candidate, r.kind, r.name); removed.kind != .None {
+						return .Syncing, {kind = .State_Failed, state = removed}
+					}
+				}
+			}
+		}
 		page.store = &candidate
 		if e := apply_contact_collection(socket, &page, collection); e.kind != .None {
 			if page.missing_size > 0 {
+				key := hex.encode(page.missing_id[:page.missing_size])
+				defer delete(key)
+				if _, arrived := state_store_get(socket.store, .Contact_Sync_Key, string(key)); arrived {
+					continue
+				}
 				return .Syncing, socket_request_contact_key(
 					socket,
 					page.missing_id[:page.missing_size],
@@ -552,18 +621,34 @@ socket_sync_contacts :: proc(socket: ^Socket) -> (Contact_Sync_Status, Socket_Er
 			}
 			return .Syncing, e
 		}
+		if refresh_snapshot && more != "true" && page.version < stored_version {
+			return .Syncing, {kind = .Protocol_Error}
+		}
 		if more == "true" && page.version <= from_version {
 			return .Syncing, {kind = .Protocol_Error}
+		}
+		// The HTTP worker pumps incoming stanzas. Keep inbox, ratchet, profile
+		// and required-version changes committed while this page was in flight.
+		if socket.store.revision != base_revision {
+			if e := rebase_contact_collection(&candidate, socket.store); e.kind != .None {
+				return .Syncing, e
+			}
+		}
+		// Earlier versions accepted the required version before checking its sender.
+		for legacy in ([3]string{"cursor", "required-version", "contacts-key-id"}) {
+			if e := state_store_delete(&candidate, .Contact_Sync_State, legacy); e.kind != .None {
+				return .Syncing, {kind = .State_Failed, state = e}
+			}
 		}
 		buf: [136]u8
 		endian.unchecked_put_u64be(buf[:8], page.version)
 		copy(buf[8:], page.hash[:])
-		if e := state_store_set(&candidate, .Contact_Sync_State, "cursor", buf[:]);
+		if e := state_store_set(&candidate, .Contact_Sync_State, "contacts-cursor", buf[:]);
 		   e.kind != .None {
 			return .Syncing, {kind = .State_Failed, state = e}
 		}
 		status: State_Error
-		required, _ := state_store_get(&candidate, .Contact_Sync_State, "required-version")
+		required, _ := state_store_get(&candidate, .Contact_Sync_State, "server-version")
 		behind := len(required) == 8 && endian.unchecked_get_u64be(required) > page.version
 		if more == "true" || behind {
 			status = state_store_delete(&candidate, .Contact_Sync_State, "ready")
@@ -576,6 +661,10 @@ socket_sync_contacts :: proc(socket: ^Socket) -> (Contact_Sync_Status, Socket_Er
 		if e := socket_store_commit(socket, &candidate); e.kind != .None {
 			return .Syncing, e
 		}
+		if page.authenticated_key_size > 0 {
+			socket.contact_write_key_size = copy(socket.contact_write_key_id[:], page.authenticated_key[:page.authenticated_key_size])
+		}
+		refresh_snapshot = false
 		if more != "true" {
 			return .Syncing if behind else .Ready, {}
 		}
@@ -585,7 +674,6 @@ socket_sync_contacts :: proc(socket: ^Socket) -> (Contact_Sync_Status, Socket_Er
 
 // Send the missing key ID only to the account's primary device. Commit the
 // advanced pairwise ratchet together with the exact stanza before transmission.
-@(private)
 socket_request_contact_key :: proc(socket: ^Socket, key_id: []u8) -> Socket_Error {
 	if socket.auth == nil || len(key_id) == 0 || len(key_id) > 128 {
 		return {kind = .Invalid_State}
@@ -730,99 +818,139 @@ socket_request_contact_key :: proc(socket: ^Socket, key_id: []u8) -> Socket_Erro
 	return {}
 }
 
-@(private)
 socket_note_contact_update :: proc(socket: ^Socket, node: Binary_Node) -> Socket_Error {
 	kind, _ := node_attr(node, "type")
 	if node.tag != "notification" || kind != "server_sync" {
 		return {}
 	}
-	children, _ := node.content.([]Binary_Node)
+	from, _ := node_attr(node, "from")
+	id, _ := node_attr(node, "id")
+	if (from != "s.whatsapp.net" && from != "@s.whatsapp.net") || !socket_inbox_id_valid(id) {
+		return {kind = .Protocol_Error}
+	}
+	children, ok := node.content.([]Binary_Node)
+	if !ok { return {kind = .Protocol_Error} }
+	required: u64
 	for collection in children {
 		name, _ := node_attr(collection, "name")
 		if collection.tag != "collection" || name != CONTACT_COLLECTION {
 			continue
 		}
 		raw_version, _ := node_attr(collection, "version")
-		version, ok := strconv.parse_u64(raw_version)
-		if !ok {
+		version, parsed := strconv.parse_u64(raw_version)
+		if !parsed {
 			return {kind = .Protocol_Error}
 		}
-		cursor, _ := state_store_get(socket.store, .Contact_Sync_State, "cursor")
-		if len(cursor) == 136 && endian.unchecked_get_u64be(cursor[:8]) >= version {
-			continue
-		}
-		pending, _ := state_store_get(socket.store, .Contact_Sync_State, "required-version")
-		if len(pending) == 8 && endian.unchecked_get_u64be(pending) >= version {
-			continue
-		}
-		staged: State_Store
-		defer state_store_clear(&staged)
-		if e := socket_store_clone(&staged, socket.store); e.kind != .None {
-			return e
-		}
-		buf: [8]u8
-		endian.unchecked_put_u64be(buf[:], version)
-		if e := state_store_set(&staged, .Contact_Sync_State, "required-version", buf[:]);
-		   e.kind != .None {
-			return {kind = .State_Failed, state = e}
-		}
-		if e := state_store_delete(&staged, .Contact_Sync_State, "ready"); e.kind != .None {
-			return {kind = .State_Failed, state = e}
-		}
-		if e := socket_store_commit(socket, &staged); e.kind != .None {
-			return e
-		}
-		socket.contact_refresh_due = true
-		socket.contact_refresh_after = {}
+		required = max(required, version)
 	}
+	if required == 0 { return {} }
+	cursor, _ := state_store_get(socket.store, .Contact_Sync_State, "contacts-cursor")
+	if len(cursor) == 136 && endian.unchecked_get_u64be(cursor[:8]) >= required {
+		return {}
+	}
+	pending, _ := state_store_get(socket.store, .Contact_Sync_State, "server-version")
+	if len(pending) == 8 && endian.unchecked_get_u64be(pending) >= required {
+		return {}
+	}
+	staged: State_Store
+	defer state_store_clear(&staged)
+	if e := socket_store_clone(&staged, socket.store); e.kind != .None {
+		return e
+	}
+	buf: [8]u8
+	endian.unchecked_put_u64be(buf[:], required)
+	if e := state_store_set(&staged, .Contact_Sync_State, "server-version", buf[:]);
+	   e.kind != .None {
+		return {kind = .State_Failed, state = e}
+	}
+	if e := state_store_delete(&staged, .Contact_Sync_State, "ready"); e.kind != .None {
+		return {kind = .State_Failed, state = e}
+	}
+	if e := socket_store_commit(socket, &staged); e.kind != .None {
+		return e
+	}
+	socket.contact_refresh_due = true
+	socket.contact_refresh_after = {}
 	return {}
 }
 
-@(private)
-store_historical_contact_profiles :: proc(
-	socket: ^Socket,
-	store: ^State_Store,
-	notification: []u8,
-) -> Socket_Error {
-	kind, k := read_unique_protobuf_field(notification, 6, 0)
-	if !k {
-		return {kind = .Protocol_Error}
-	}
-	if kind.value != 4 {
+// Explicitly import one history notification. The receive loop stages external
+// references so it can finish committing the ratchet before fetching them.
+store_historical_contact_profiles :: proc(socket: ^Socket, store: ^State_Store, notification: []u8, pending_name := "") -> Socket_Error {
+	kind, valid := read_unique_protobuf_field(notification, 6, 0)
+	if !valid { return {kind = .Protocol_Error} }
+	if kind.value != 4 { return {} }
+	inline, ok := read_unique_protobuf_field(notification, 11, 2)
+	if !ok { return {kind = .Protocol_Error} }
+	if inline.number != 0 { return import_compressed_contact_profiles(store, inline.data) }
+	if pending_name != "" {
+		if _, parsed := contact_history_media(notification); parsed.kind != .None { return parsed }
+		if e := state_store_set(store, .Pending_Profile_History, pending_name, notification); e.kind != .None {
+			return {kind = .State_Failed, state = e}
+		}
 		return {}
-	} // PUSH_NAME history chunks carry profile names.
-	inline, present := read_unique_protobuf_field(notification, 11, 2)
-	if !present {
-		return {kind = .Protocol_Error}
 	}
-	compressed := inline.data
-	if inline.number == 0 {
-		plain, a := read_unique_protobuf_field(notification, 1, 2)
-		length, b := read_unique_protobuf_field(notification, 2, 0)
-		key, c := read_unique_protobuf_field(notification, 3, 2)
-		cipher, d := read_unique_protobuf_field(notification, 4, 2)
-		path, e := read_unique_protobuf_field(notification, 5, 2)
-		if !(a && b && c && d && e) || length.value > DEFAULT_MAX_MEDIA_SIZE {
-			return {kind = .Protocol_Error}
+	compressed, e := download_contact_history(socket, notification)
+	if e.kind != .None { return e }
+	defer {crypto.zero_explicit(raw_data(compressed), len(compressed)); delete(compressed)}
+	return import_compressed_contact_profiles(store, compressed)
+}
+
+download_contact_history :: proc(socket: ^Socket, notification: []u8) -> ([]u8, Socket_Error) {
+	// Network reads can replace both the active session document and store.
+	ref, allocation := slice.clone(notification)
+	if allocation != nil { return nil, {kind = .Allocation_Failed, allocation = allocation} }
+	defer {crypto.zero_explicit(raw_data(ref), len(ref)); delete(ref)}
+	source, parsed := contact_history_media(ref)
+	if parsed.kind != .None { return nil, parsed }
+	return download_contact_media(socket, source)
+}
+
+socket_import_pending_contact_history :: proc(socket: ^Socket) -> Socket_Error {
+	for record in socket.store.records {
+		if record.kind != .Pending_Profile_History { continue }
+		// The socket pump can replace the entire store during the download.
+		name, ae := strings.clone(record.name)
+		if ae != nil { return {kind = .Allocation_Failed, allocation = ae} }
+		defer delete(name)
+		compressed, fetched := download_contact_history(socket, record.data)
+		if fetched.kind != .None { return fetched }
+		defer {crypto.zero_explicit(raw_data(compressed), len(compressed)); delete(compressed)}
+		candidate: State_Store
+		defer state_store_clear(&candidate)
+		if e := socket_store_clone(&candidate, socket.store); e.kind != .None { return e }
+		if e := import_compressed_contact_profiles(&candidate, compressed); e.kind != .None { return e }
+		if e := state_store_delete(&candidate, .Pending_Profile_History, name); e.kind != .None {
+			return {kind = .State_Failed, state = e}
 		}
-		msg := Media_Message {
-			kind            = .History,
-			media_key       = key.data,
-			file_sha256     = plain.data,
-			file_length     = length.value,
-			has_file_length = length.number != 0,
-			file_enc_sha256 = cipher.data,
-			direct_path     = string(path.data),
-		}
-		download_error: Socket_Error
-		compressed, download_error = download_contact_media(socket, msg)
-		if download_error.kind != .None {
-			return download_error
-		}
+		return socket_store_commit(socket, &candidate)
 	}
-	defer if inline.number == 0 {
-		delete(compressed)
+	socket.profile_history_pending = false
+	return {}
+}
+
+contact_history_media :: proc(notification: []u8) -> (Media_Message, Socket_Error) {
+	plain, a := read_unique_protobuf_field(notification, 1, 2)
+	length, b := read_unique_protobuf_field(notification, 2, 0)
+	key, c := read_unique_protobuf_field(notification, 3, 2)
+	cipher, d := read_unique_protobuf_field(notification, 4, 2)
+	path, e := read_unique_protobuf_field(notification, 5, 2)
+	if !(a && b && c && d && e) || length.value > DEFAULT_MAX_MEDIA_SIZE ||
+	   len(key.data) != 32 || len(plain.data) != 32 || len(cipher.data) != 32 || len(path.data) == 0 {
+		return {}, {kind = .Protocol_Error}
 	}
+	return {
+		kind            = .History,
+		media_key       = key.data,
+		file_sha256     = plain.data,
+		file_length     = length.value,
+		has_file_length = length.number != 0,
+		file_enc_sha256 = cipher.data,
+		direct_path     = string(path.data),
+	}, {}
+}
+
+import_compressed_contact_profiles :: proc(store: ^State_Store, compressed: []u8) -> Socket_Error {
 	if len(compressed) == 0 {
 		return {kind = .Protocol_Error}
 	}
@@ -871,7 +999,6 @@ store_historical_contact_profiles :: proc(
 
 // An external sync reference may omit file length. Authenticate the bounded
 // ciphertext first, then validate padding and the separate plaintext digest.
-@(private)
 download_contact_media :: proc(socket: ^Socket, message: Media_Message) -> ([]u8, Socket_Error) {
 	if len(message.media_key) != 32 ||
 	   len(message.file_sha256) != 32 ||
@@ -898,12 +1025,20 @@ download_contact_media :: proc(socket: ^Socket, message: Media_Message) -> ([]u8
 		media_type,
 	)
 	defer delete(source.direct_path)
-	response, fetch_error := fetch_media_ciphertext(
-		source,
-		{tls = socket.config.tls},
-		maximum,
-		socket.config.http_execute,
-	)
+	config := network_client.Config{tls = socket.config.tls, timeout = socket.config.query_timeout}
+	response: network_client.Response
+	fetch_error: Media_Error
+	if socket.config.http_execute != nil {
+		// Injected media executors run synchronously on the calling thread.
+		response, fetch_error = fetch_media_ciphertext(source, config, maximum, socket.config.http_execute)
+	} else {
+		job := Socket_HTTP_Job{kind = .Contact_Blob, message = source, config = config, max_plaintext = maximum}
+		if e := socket_http_run(socket, &job); e.kind != .None {
+			network_client.response_destroy(&job.response)
+			return nil, e
+		}
+		response, fetch_error = job.response, job.media_error
+	}
 	if fetch_error.kind != .None {
 		return nil, {kind = .Media_Failed, media = fetch_error}
 	}
@@ -946,4 +1081,187 @@ download_contact_media :: proc(socket: ^Socket, message: Media_Message) -> ([]u8
 		return nil, {kind = .Allocation_Failed, allocation = err}
 	}
 	return result, {}
+}
+
+// Compute the signature over one encrypted SET or REMOVE value in a sync record.
+contact_value_mac :: proc(key, id, ciphertext: []u8, operation: u64) -> [32]u8 {
+	digest: hmac.Context
+	hmac.init(&digest, .SHA512, key)
+	op := [1]u8{u8(operation + 1)}
+	length: [8]u8
+	endian.unchecked_put_u64be(length[:], u64(1 + len(id)))
+	for part in ([]([]u8){op[:], id, ciphertext, length[:]}) {hmac.update(&digest, part)}
+	full: [64]u8
+	hmac.final(&digest, full[:])
+	result: [32]u8
+	copy(result[:], full[:32])
+	return result
+}
+
+// Encode one app-state SET against the supplied cursor. The read-side store
+// advances only when WhatsApp returns the authenticated update.
+encode_contact_add_patch :: proc(dst: []u8, store: ^State_Store, jid, name: string, key_id, cursor: []u8) -> (int, Socket_Error) {
+	if !device_user_jid_valid(jid, false) || !strings.has_suffix(jid, "@s.whatsapp.net") ||
+	   !contact_name_valid(name) || strings.trim_space(name) == "" {
+		return 0, {kind = .Invalid_Config}
+	}
+	if len(cursor) != 136 {return 0, {kind = .Invalid_State}}
+	page := Contact_Sync_Page{store = store, version = endian.unchecked_get_u64be(cursor[:8])}
+	if page.version == max(u64) {return 0, {kind = .Protocol_Error}}
+	copy(page.hash[:], cursor[8:])
+	keys, ok := derive_contact_mutation_keys(&page, key_id)
+	defer crypto.zero_explicit(&keys, size_of(keys))
+	if !ok {return 0, {kind = .Invalid_State}}
+
+	index := fmt.aprintf(`["contact","%s"]`, jid)
+	defer delete(index)
+	mapping_name := fmt.aprintf("pn:%s", jid)
+	defer delete(mapping_name)
+	lid, mapped := state_store_get(store, .LID_Mapping, mapping_name)
+	if mapped && (!device_user_jid_valid(string(lid), false) || !strings.has_suffix(string(lid), "@lid")) {
+		return 0, {kind = .Protocol_Error}
+	}
+	action_size := message_field_size(1, len(name)) + 2 // saveOnPrimaryAddressbook
+	if mapped {action_size += message_field_size(3, len(lid))}
+	now := u64(time.to_unix_nanoseconds(time.now()) / 1_000_000)
+	value_size := 1 + protobuf_varint_size(now) + message_field_size(3, action_size)
+	plain: [8192]u8
+	defer crypto.zero_explicit(&plain, size_of(plain))
+	data := Protobuf_Writer{dst = plain[:]}
+	protobuf_write_string(&data, 1, index)
+	protobuf_write_header(&data, 2, value_size)
+	protobuf_write_uint(&data, 1, now)
+	protobuf_write_header(&data, 3, action_size)
+	protobuf_write_string(&data, 1, name)
+	if mapped {protobuf_write_bytes(&data, 3, lid)}
+	protobuf_write_uint(&data, 4, 1)
+	protobuf_write_bytes(&data, 3, nil)
+	protobuf_write_uint(&data, 4, 2)
+	if data.err != .None {return 0, {kind = .Invalid_Config}}
+
+	iv: [16]u8
+	crypto.rand_bytes(iv[:])
+	blob: [8192 + 64]u8
+	copy(blob[:16], iv[:])
+	cipher_key: [32]u8
+	defer crypto.zero_explicit(&cipher_key, size_of(cipher_key))
+	copy(cipher_key[:], keys[32:64])
+	n, encryption_error := signal_cbc_encrypt(blob[16:], cipher_key, iv, plain[:data.at])
+	if encryption_error != .None {return 0, {kind = .Protocol_Error}}
+	value_mac := contact_value_mac(keys[64:96], key_id, blob[:16+n], 0)
+	copy(blob[16+n:], value_mac[:])
+	encrypted := blob[:16+n+32]
+	index_mac: [32]u8
+	hmac.sum(.SHA256, index_mac[:], transmute([]u8)index, keys[:32])
+	index_key := hex.encode(index_mac[:])
+	defer delete(index_key)
+	if previous, exists := state_store_get(store, .Contact_Index_MAC, string(index_key)); exists {
+		if len(previous) != 32 {return 0, {kind = .Protocol_Error}}
+		update_contact_collection_hash(&page, previous, true)
+	}
+	update_contact_collection_hash(&page, value_mac[:], false)
+	version: [8]u8
+	endian.unchecked_put_u64be(version[:], page.version + 1)
+	collection := transmute([]u8)string(CONTACT_COLLECTION)
+	snapshot_mac, patch_mac: [32]u8
+	digest: hmac.Context
+	hmac.init(&digest, .SHA256, keys[96:128])
+	for part in ([]([]u8){page.hash[:], version[:], collection}) {hmac.update(&digest, part)}
+	hmac.final(&digest, snapshot_mac[:])
+	hmac.init(&digest, .SHA256, keys[128:])
+	for part in ([]([]u8){snapshot_mac[:], value_mac[:], version[:], collection}) {hmac.update(&digest, part)}
+	hmac.final(&digest, patch_mac[:])
+
+	idx_size := message_field_size(1, len(index_mac))
+	blob_size := message_field_size(1, len(encrypted))
+	key_size := message_field_size(1, len(key_id))
+	record_size := message_field_size(1, idx_size) + message_field_size(2, blob_size) + message_field_size(3, key_size)
+	patch := Protobuf_Writer{dst = dst}
+	protobuf_write_header(&patch, 2, 2 + message_field_size(2, record_size))
+	protobuf_write_uint(&patch, 1, 0)
+	protobuf_write_header(&patch, 2, record_size)
+	protobuf_write_header(&patch, 1, idx_size)
+	protobuf_write_bytes(&patch, 1, index_mac[:])
+	protobuf_write_header(&patch, 2, blob_size)
+	protobuf_write_bytes(&patch, 1, encrypted)
+	protobuf_write_header(&patch, 3, key_size)
+	protobuf_write_bytes(&patch, 1, key_id)
+	protobuf_write_bytes(&patch, 4, snapshot_mac[:])
+	protobuf_write_bytes(&patch, 5, patch_mac[:])
+	protobuf_write_header(&patch, 6, key_size)
+	protobuf_write_bytes(&patch, 1, key_id)
+	if patch.err != .None {return 0, {kind = .Invalid_Config}}
+	return patch.at, {}
+}
+
+// Add a saved contact by phone-number JID. Repeating the same request is
+// idempotent. Success means the saved name was read back from WhatsApp.
+socket_add_contact :: proc(socket: ^Socket, phone_jid, full_name: string) -> Socket_Error {
+	if !device_user_jid_valid(phone_jid, false) || !strings.has_suffix(phone_jid, "@s.whatsapp.net") ||
+	   !contact_name_valid(full_name) || strings.trim_space(full_name) == "" {
+		return {kind = .Invalid_Config}
+	}
+	if socket == nil || socket.store == nil || socket.phase != .Online {return {kind = .Invalid_State}}
+	// Callers can supply strings borrowed from the store replaced during sync.
+	jid, je := strings.clone(phone_jid)
+	if je != nil {return {kind = .Allocation_Failed, allocation = je}}
+	defer delete(jid)
+	name, ne := strings.clone(full_name)
+	if ne != nil {return {kind = .Allocation_Failed, allocation = ne}}
+	defer delete(name)
+	// Already-saved entries require only an incremental read. A fresh
+	// connection may need a snapshot to learn the collection's active key.
+	for refresh in ([2]bool{false, true}) {
+		ready, err := socket_sync_contacts(socket, refresh)
+		if err.kind != .None {return err}
+		if ready != .Ready {return {kind = .Contacts_Syncing}}
+		if contact, found := contact_by_jid(socket.store, jid); found && contact.is_saved {
+			if contact.full_name == name {return {}}
+			return {kind = .Contact_Already_Exists}
+		}
+		if socket.contact_write_key_size != 0 {break}
+	}
+	cursor, _ := state_store_get(socket.store, .Contact_Sync_State, "contacts-cursor")
+	key_id := socket.contact_write_key_id[:socket.contact_write_key_size]
+	// An empty collection may have no signed page yet. Its sole shared key
+	// unambiguously identifies the key to use for the first mutation.
+	if len(key_id) == 0 {
+		for record in socket.store.records {
+			if record.kind != .Contact_Sync_Key {continue}
+			if len(key_id) != 0 {return {kind = .Invalid_State}}
+			var_ok: bool
+			key_id, var_ok = hex.decode_into_buffer(transmute([]u8)record.name, socket.contact_write_key_id[:])
+			if !var_ok {return {kind = .Protocol_Error}}
+		}
+	}
+	encoded: [8192]u8
+	n, encode_error := encode_contact_add_patch(encoded[:], socket.store, jid, name, key_id, cursor)
+	if encode_error.kind != .None {return encode_error}
+	version := fmt.aprintf("%d", endian.unchecked_get_u64be(cursor[:8]))
+	defer delete(version)
+	collection := Binary_Node{
+		tag = "collection",
+		attrs = []Binary_Node_Attribute{{"name", CONTACT_COLLECTION}, {"version", version}, {"return_snapshot", "false"}},
+		content = []Binary_Node{{tag = "patch", content = encoded[:n]}},
+	}
+	doc, query_error := socket_query(socket, {
+		tag = "iq",
+		attrs = []Binary_Node_Attribute{{"to", "@s.whatsapp.net"}, {"type", "set"}, {"xmlns", "w:sync:app:state"}},
+		content = []Binary_Node{{tag = "sync", content = []Binary_Node{collection}}},
+	})
+	if query_error.kind != .None {return query_error}
+	defer binary_document_destroy(&doc)
+	id, _ := node_attr(doc.root, "id")
+	if e := device_response_validate(doc.root, id); e.kind != .None {return {kind = .Device_Failed, device = e}}
+	sync, se := device_unique_child(doc.root, "sync")
+	result, re := device_unique_child(sync, "collection")
+	response_name, _ := node_attr(result, "name")
+	if se.kind != .None || re.kind != .None || response_name != CONTACT_COLLECTION {return {kind = .Protocol_Error}}
+	if kind, _ := node_attr(result, "type"); kind == "error" {return {kind = .Server_Rejected}}
+	ready, err := socket_sync_contacts(socket)
+	if err.kind != .None {return err}
+	if ready != .Ready {return {kind = .Contacts_Syncing}}
+	contact, found := contact_by_jid(socket.store, jid)
+	if !found || !contact.is_saved || contact.full_name != name {return {kind = .Contact_Unconfirmed}}
+	return {}
 }
