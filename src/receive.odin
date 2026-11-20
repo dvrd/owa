@@ -1774,7 +1774,6 @@ socket_processed_set :: proc(store: ^State_Store, name: string) -> State_Error {
 
 // Inspect only envelope structure. History contents are never downloaded or
 // imported; our other device only needs the protocol's hist_sync receipt.
-@(private)
 unwrap_protocol_message :: proc(message: []u8, depth: int) -> []u8 {
 	if depth >= MAX_MESSAGE_NESTING || len(message) > MAX_PROTOBUF_MESSAGE_SIZE {
 		return nil

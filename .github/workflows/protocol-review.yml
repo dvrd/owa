@@ -8,8 +8,8 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/protocol-review.yml'
-      - 'tools/protocol_watch/linux-amd64.sha256'
-      - 'tools/protocol_watch/sources.json'
+      - 'tools/protocol_watcher/linux-amd64.sha256'
+      - 'tools/protocol_watcher/sources.json'
 
 permissions:
   contents: read
@@ -32,7 +32,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          pin=tools/protocol_watch/linux-amd64.sha256
+          pin=tools/protocol_watcher/linux-amd64.sha256
           read -r digest asset < "$pin"
           gh release download "protocol-watch-${digest:0:16}" --repo "$GITHUB_REPOSITORY" --pattern "$asset" --dir "$RUNNER_TEMP"
           (cd "$RUNNER_TEMP" && sha256sum -c "$GITHUB_WORKSPACE/$pin")

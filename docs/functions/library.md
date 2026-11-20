@@ -68,11 +68,11 @@
 
 | Function | Behavior |
 |---|---|
-| [`is_alpha`](../../src/ascii.odin#L7) | Recognize ASCII letters. |
-| [`is_digit`](../../src/ascii.odin#L12) | Recognize ASCII decimal digits. |
-| [`is_alphanumeric`](../../src/ascii.odin#L17) | Recognize ASCII letters and decimal digits. |
-| [`is_lower`](../../src/ascii.odin#L22) | Recognize lowercase ASCII letters. |
-| [`is_hex_upper`](../../src/ascii.odin#L27) | Recognize digits and uppercase A–F. |
+| [`is_alpha`](../../src/ascii.odin#L6) | Recognize ASCII letters. |
+| [`is_digit`](../../src/ascii.odin#L10) | Recognize ASCII decimal digits. |
+| [`is_alphanumeric`](../../src/ascii.odin#L14) | Recognize ASCII letters and decimal digits. |
+| [`is_lower`](../../src/ascii.odin#L18) | Recognize lowercase ASCII letters. |
+| [`is_hex_upper`](../../src/ascii.odin#L22) | Recognize digits and uppercase A–F. |
 
 <a id="file-src-auth-odin"></a>
 
@@ -233,20 +233,20 @@
 
 | Function | Behavior |
 |---|---|
-| [`read_unique_protobuf_field`](../../src/contact_sync.odin#L34) | Read an optional singular field of the specified wire type and reject duplicate or malformed fields. |
-| [`store_contact_sync_key_share`](../../src/contact_sync.odin#L60) | Store the app-state keys delivered in an authenticated protocol message from the linked account. |
-| [`derive_contact_mutation_keys`](../../src/contact_sync.odin#L104) | Derive the authentication and encryption keys for a mutation, or record which key ID the primary device must supply. |
-| [`update_contact_collection_hash`](../../src/contact_sync.odin#L135) | Add or subtract the expanded value MAC from the contact collection hash. |
-| [`apply_contact_action`](../../src/contact_sync.odin#L155) | Stage the saved-name change or deletion addressed by a contact mutation index. |
-| [`apply_contact_record`](../../src/contact_sync.odin#L203) | Verify a record, decrypt its action and stage the resulting changes and integrity hashes. |
-| [`download_contact_sync_blob`](../../src/contact_sync.odin#L283) | Read an external app-state blob reference and download its authenticated plaintext. |
-| [`apply_authenticated_contact_batch`](../../src/contact_sync.odin#L305) | Apply a snapshot or incremental patch to a candidate store and verify its version and collection signatures. |
-| [`apply_contact_collection`](../../src/contact_sync.odin#L412) | Decode the snapshot and patches in one server collection response. |
-| [`socket_sync_contacts`](../../src/contact_sync.odin#L473) | Fetch and persist authenticated contact pages or request a missing key from the primary device. |
-| [`socket_request_contact_key`](../../src/contact_sync.odin#L589) | Send the missing key ID to the primary device in a durably staged pairwise-encrypted peer message. |
-| [`socket_note_contact_update`](../../src/contact_sync.odin#L734) | Mark the address book incomplete when a server notification announces a newer version. |
-| [`store_historical_contact_profiles`](../../src/contact_sync.odin#L782) | Read profile names from an authenticated compressed history chunk without replacing later observations. |
-| [`download_contact_media`](../../src/contact_sync.odin#L875) | Download and authenticate a bounded contact sync or history payload with an optional declared length. |
+| [`read_unique_protobuf_field`](../../src/contact_sync.odin#L31) | Read an optional singular field of the specified wire type and reject duplicate or malformed fields. |
+| [`store_contact_sync_key_share`](../../src/contact_sync.odin#L56) | Store the app-state keys delivered in an authenticated protocol message from the linked account. |
+| [`derive_contact_mutation_keys`](../../src/contact_sync.odin#L99) | Derive the authentication and encryption keys for a mutation, or record which key ID the primary device must supply. |
+| [`update_contact_collection_hash`](../../src/contact_sync.odin#L129) | Add or subtract the expanded value MAC from the contact collection hash. |
+| [`apply_contact_action`](../../src/contact_sync.odin#L148) | Stage the saved-name change or deletion addressed by a contact mutation index. |
+| [`apply_contact_record`](../../src/contact_sync.odin#L195) | Verify a record, decrypt its action and stage the resulting changes and integrity hashes. |
+| [`download_contact_sync_blob`](../../src/contact_sync.odin#L274) | Read an external app-state blob reference and download its authenticated plaintext. |
+| [`apply_authenticated_contact_batch`](../../src/contact_sync.odin#L295) | Apply a snapshot or incremental patch to a candidate store and verify its version and collection signatures. |
+| [`apply_contact_collection`](../../src/contact_sync.odin#L401) | Decode the snapshot and patches in one server collection response. |
+| [`socket_sync_contacts`](../../src/contact_sync.odin#L462) | Fetch and persist authenticated contact pages or request a missing key from the primary device. |
+| [`socket_request_contact_key`](../../src/contact_sync.odin#L577) | Send the missing key ID to the primary device in a durably staged pairwise-encrypted peer message. |
+| [`socket_note_contact_update`](../../src/contact_sync.odin#L721) | Mark the address book incomplete when a server notification announces a newer version. |
+| [`store_historical_contact_profiles`](../../src/contact_sync.odin#L768) | Read profile names from an authenticated compressed history chunk without replacing later observations. |
+| [`download_contact_media`](../../src/contact_sync.odin#L860) | Download and authenticate a bounded contact sync or history payload with an optional declared length. |
 
 <a id="file-src-contacts-odin"></a>
 
@@ -255,10 +255,10 @@
 | Function | Behavior |
 |---|---|
 | [`contact_sync_status`](../../src/contacts.odin#L17) | Read whether the linked account has completed its last contact sync. |
-| [`decode_saved_contact`](../../src/contacts.odin#L23) | Split a saved name record into its full name, first name and alternate JID. |
-| [`contact_by_jid`](../../src/contacts.odin#L46) | Look up a contact by bare JID or its saved alternate and return the saved and profile names separately. |
-| [`search_contact_jids`](../../src/contacts.odin#L78) | Return ordered JIDs whose owner-saved names contain the case-insensitive query, together with sync status. |
-| [`contact_name_valid`](../../src/contacts.odin#L138) | Validate the UTF-8, length and separator constraints of a stored or queried name. |
+| [`decode_saved_contact`](../../src/contacts.odin#L22) | Split a saved name record into its full name, first name and alternate JID. |
+| [`contact_by_jid`](../../src/contacts.odin#L45) | Look up a contact by bare JID or its saved alternate and return the saved and profile names separately. |
+| [`search_contact_jids`](../../src/contacts.odin#L77) | Return ordered JIDs whose owner-saved names contain the case-insensitive query, together with sync status. |
+| [`contact_name_valid`](../../src/contacts.odin#L136) | Validate the UTF-8, length and separator constraints of a stored or queried name. |
 
 <a id="file-src-media-odin"></a>
 
@@ -317,43 +317,43 @@
 | [`media_upload_input_validate`](../../src/media.odin#L1764) | Check the upload inputs, metadata and encrypted payload digest. |
 | [`media_upload_exchange`](../../src/media.odin#L1789) | Send an upload to one host and parse its response. |
 | [`media_download`](../../src/media.odin#L1831) | Fetch the encrypted media, authenticate it and decrypt into the output. |
-| [`fetch_media_ciphertext`](../../src/media.odin#L1866) | Fetch bounded media ciphertext from a validated CDN URL and check the HTTP status. |
-| [`media_download_settings`](../../src/media.odin#L1888) | Validate download bounds and prepare HTTP settings. |
-| [`media_request_id_valid`](../../src/media.odin#L1908) | Check a media IQ request ID's length and UTF-8 encoding. |
-| [`media_hostname_valid`](../../src/media.odin#L1911) | Validate the labels of a media hostname. |
-| [`media_retry_request_encode`](../../src/media.odin#L1959) | Generate a nonce and encode an encrypted media retry request. |
-| [`media_retry_request_with_nonce`](../../src/media.odin#L1978) | Encrypt a retry request using the supplied nonce and derived key. |
-| [`media_retry_receipt_encode`](../../src/media.odin#L2020) | Build the retry receipt stanza with its encrypted payload. |
-| [`media_retry_request_validate`](../../src/media.odin#L2058) | Check the target message, owner JID and fields of a retry request. |
-| [`media_retry_event_decode`](../../src/media.odin#L2078) | Decode a media retry notification or server error. |
-| [`media_retry_event_route_validate`](../../src/media.odin#L2129) | Validate the notification's routing and its retry children. |
-| [`media_retry_decrypt`](../../src/media.odin#L2182) | Authenticate and decrypt a media retry response. |
-| [`derive_media_retry_key`](../../src/media.odin#L2239) | Derive the AES-GCM retry key from the file's media key. |
-| [`media_retry_notification_decode`](../../src/media.odin#L2249) | Read the result, stanza ID and refreshed direct path from retry data. |
-| [`socket_http_execute`](../../src/media.odin#L2349) | Execute an HTTP job while the socket continues processing events. |
-| [`socket_media_upload_http`](../../src/media.odin#L2378) | Upload media with the socket's HTTP configuration and event handling. |
-| [`socket_media_download_http`](../../src/media.odin#L2411) | Download media using the socket and the appropriate HTTP execution path. |
-| [`socket_media_download_direct`](../../src/media.odin#L2481) | Run the direct media download for the supplied job. |
-| [`socket_http_worker`](../../src/media.odin#L2491) | Dispatch an HTTP worker job and publish its completion. |
-| [`socket_http_worker_execute`](../../src/media.odin#L2530) | Execute one worker request with cancellation checks. |
-| [`socket_http_run`](../../src/media.odin#L2558) | Run the worker while pumping the socket and join it on exit. |
-| [`socket_media_retry_enqueue`](../../src/media.odin#L2611) | Queue an owning copy of a retry notification for later correlation. |
-| [`socket_http_event_process`](../../src/media.odin#L2650) | Preserve messages and retry notifications received during HTTP work. |
-| [`socket_send_image`](../../src/media.odin#L2668) | Encrypt, upload and send a group image with its caption. |
-| [`socket_send_document`](../../src/media.odin#L2680) | Encrypt, upload and send a group document with its filename. |
-| [`socket_send_reaction`](../../src/media.odin#L2695) | Encode and send a group reaction to the target message. |
-| [`socket_send_media`](../../src/media.odin#L2727) | Validate a media send, reuse stored intent if possible, then encrypt, upload and send. |
-| [`socket_media_existing_send`](../../src/media.odin#L2795) | Check whether a prior send can satisfy this media request and message ID. |
-| [`socket_media_send_validate`](../../src/media.odin#L2857) | Validate the destination and media properties before starting a send. |
-| [`socket_media_upload`](../../src/media.odin#L2897) | Request upload credentials and upload the encrypted file. |
-| [`socket_media_message_send`](../../src/media.odin#L2951) | Encode uploaded metadata and dispatch the group message. |
-| [`socket_download_media`](../../src/media.odin#L3012) | Download media from a received message and recover an expired location when supported. |
-| [`socket_media_retry_send`](../../src/media.odin#L3058) | Send an encrypted retry receipt for the requested media. |
-| [`socket_media_download_recover`](../../src/media.odin#L3079) | Obtain a refreshed direct path and retry the authenticated download. |
-| [`socket_media_owner_jid`](../../src/media.odin#L3132) | Resolve the account's owner JID for a media retry receipt. |
-| [`socket_media_wait_retry`](../../src/media.odin#L3170) | Wait for the media retry notification matching the stanza ID. |
-| [`socket_media_retry_event_read`](../../src/media.odin#L3237) | Poll for socket events within the retry deadline. |
-| [`socket_media_notification_open`](../../src/media.odin#L3275) | Validate the retry notification and decrypt its response. |
+| [`fetch_media_ciphertext`](../../src/media.odin#L1865) | Fetch bounded media ciphertext from a validated CDN URL and check the HTTP status. |
+| [`media_download_settings`](../../src/media.odin#L1887) | Validate download bounds and prepare HTTP settings. |
+| [`media_request_id_valid`](../../src/media.odin#L1907) | Check a media IQ request ID's length and UTF-8 encoding. |
+| [`media_hostname_valid`](../../src/media.odin#L1910) | Validate the labels of a media hostname. |
+| [`media_retry_request_encode`](../../src/media.odin#L1958) | Generate a nonce and encode an encrypted media retry request. |
+| [`media_retry_request_with_nonce`](../../src/media.odin#L1977) | Encrypt a retry request using the supplied nonce and derived key. |
+| [`media_retry_receipt_encode`](../../src/media.odin#L2019) | Build the retry receipt stanza with its encrypted payload. |
+| [`media_retry_request_validate`](../../src/media.odin#L2057) | Check the target message, owner JID and fields of a retry request. |
+| [`media_retry_event_decode`](../../src/media.odin#L2077) | Decode a media retry notification or server error. |
+| [`media_retry_event_route_validate`](../../src/media.odin#L2128) | Validate the notification's routing and its retry children. |
+| [`media_retry_decrypt`](../../src/media.odin#L2181) | Authenticate and decrypt a media retry response. |
+| [`derive_media_retry_key`](../../src/media.odin#L2238) | Derive the AES-GCM retry key from the file's media key. |
+| [`media_retry_notification_decode`](../../src/media.odin#L2248) | Read the result, stanza ID and refreshed direct path from retry data. |
+| [`socket_http_execute`](../../src/media.odin#L2348) | Execute an HTTP job while the socket continues processing events. |
+| [`socket_media_upload_http`](../../src/media.odin#L2377) | Upload media with the socket's HTTP configuration and event handling. |
+| [`socket_media_download_http`](../../src/media.odin#L2410) | Download media using the socket and the appropriate HTTP execution path. |
+| [`socket_media_download_direct`](../../src/media.odin#L2480) | Run the direct media download for the supplied job. |
+| [`socket_http_worker`](../../src/media.odin#L2490) | Dispatch an HTTP worker job and publish its completion. |
+| [`socket_http_worker_execute`](../../src/media.odin#L2529) | Execute one worker request with cancellation checks. |
+| [`socket_http_run`](../../src/media.odin#L2557) | Run the worker while pumping the socket and join it on exit. |
+| [`socket_media_retry_enqueue`](../../src/media.odin#L2610) | Queue an owning copy of a retry notification for later correlation. |
+| [`socket_http_event_process`](../../src/media.odin#L2649) | Preserve messages and retry notifications received during HTTP work. |
+| [`socket_send_image`](../../src/media.odin#L2667) | Encrypt, upload and send a group image with its caption. |
+| [`socket_send_document`](../../src/media.odin#L2679) | Encrypt, upload and send a group document with its filename. |
+| [`socket_send_reaction`](../../src/media.odin#L2694) | Encode and send a group reaction to the target message. |
+| [`socket_send_media`](../../src/media.odin#L2726) | Validate a media send, reuse stored intent if possible, then encrypt, upload and send. |
+| [`socket_media_existing_send`](../../src/media.odin#L2794) | Check whether a prior send can satisfy this media request and message ID. |
+| [`socket_media_send_validate`](../../src/media.odin#L2856) | Validate the destination and media properties before starting a send. |
+| [`socket_media_upload`](../../src/media.odin#L2896) | Request upload credentials and upload the encrypted file. |
+| [`socket_media_message_send`](../../src/media.odin#L2950) | Encode uploaded metadata and dispatch the group message. |
+| [`socket_download_media`](../../src/media.odin#L3011) | Download media from a received message and recover an expired location when supported. |
+| [`socket_media_retry_send`](../../src/media.odin#L3057) | Send an encrypted retry receipt for the requested media. |
+| [`socket_media_download_recover`](../../src/media.odin#L3078) | Obtain a refreshed direct path and retry the authenticated download. |
+| [`socket_media_owner_jid`](../../src/media.odin#L3131) | Resolve the account's owner JID for a media retry receipt. |
+| [`socket_media_wait_retry`](../../src/media.odin#L3169) | Wait for the media retry notification matching the stanza ID. |
+| [`socket_media_retry_event_read`](../../src/media.odin#L3236) | Poll for socket events within the retry deadline. |
+| [`socket_media_notification_open`](../../src/media.odin#L3274) | Validate the retry notification and decrypt its response. |
 
 <a id="file-src-pairing-odin"></a>
 
@@ -534,22 +534,22 @@
 | [`socket_send_delivery_receipt`](../../src/receive.odin#L1703) | Build and send a delivery receipt for the incoming stanza. |
 | [`encode_current_unix_timestamp`](../../src/receive.odin#L1762) | Encode the current time as a processed-message timestamp. |
 | [`socket_processed_set`](../../src/receive.odin#L1769) | Store a timestamped marker for a processed message. |
-| [`unwrap_protocol_message`](../../src/receive.odin#L1778) | Find the protocol payload in a decrypted message through supported wrappers. |
-| [`message_contains_history_sync_notification`](../../src/receive.odin#L1846) | Detect a history sync notification inside supported message wrappers. |
-| [`socket_protocol_has_history`](../../src/receive.odin#L1850) | Check a protocol message for a history sync field. |
-| [`socket_send_history_receipt`](../../src/receive.odin#L1855) | Send the history-sync receipt to the appropriate account address. |
-| [`socket_defer_retry`](../../src/receive.odin#L1890) | Queue an owned copy of an incoming retry request for deferred processing. |
-| [`socket_acknowledge`](../../src/receive.odin#L1930) | Send the stanza acknowledgement with the original routing attributes. |
-| [`socket_retry_outgoing`](../../src/receive.odin#L1984) | Process a peer retry request using the saved outbound message. |
-| [`socket_retry_session_archive`](../../src/receive.odin#L2049) | Resolve and archive the current session before retrying delivery. |
-| [`socket_replay_outbox`](../../src/receive.odin#L2080) | Resend the wire bytes for durable pending outbound messages. |
-| [`socket_trust_identity`](../../src/receive.odin#L2100) | Commit an explicitly trusted identity for the device. |
-| [`socket_prune_pending_ids`](../../src/receive.odin#L2153) | Collect pending message IDs that must survive pruning. |
-| [`socket_retry_record_id`](../../src/receive.odin#L2187) | Extract a message ID from a retry record name. |
-| [`socket_prune_retry_record`](../../src/receive.odin#L2207) | Check retry metadata for expiry and migrate its timestamp when needed. |
-| [`socket_prune_record`](../../src/receive.odin#L2245) | Determine whether a stored record is eligible for expiry. |
-| [`socket_prune_state`](../../src/receive.odin#L2292) | Prune eligible expired records in a single store transaction. |
-| [`socket_message_alias_stage`](../../src/receive.odin#L2382) | Stage phone/LID aliases learned from an incoming message. |
+| [`unwrap_protocol_message`](../../src/receive.odin#L1777) | Find the protocol payload in a decrypted message through supported wrappers. |
+| [`message_contains_history_sync_notification`](../../src/receive.odin#L1845) | Detect a history sync notification inside supported message wrappers. |
+| [`socket_protocol_has_history`](../../src/receive.odin#L1849) | Check a protocol message for a history sync field. |
+| [`socket_send_history_receipt`](../../src/receive.odin#L1854) | Send the history-sync receipt to the appropriate account address. |
+| [`socket_defer_retry`](../../src/receive.odin#L1889) | Queue an owned copy of an incoming retry request for deferred processing. |
+| [`socket_acknowledge`](../../src/receive.odin#L1929) | Send the stanza acknowledgement with the original routing attributes. |
+| [`socket_retry_outgoing`](../../src/receive.odin#L1983) | Process a peer retry request using the saved outbound message. |
+| [`socket_retry_session_archive`](../../src/receive.odin#L2048) | Resolve and archive the current session before retrying delivery. |
+| [`socket_replay_outbox`](../../src/receive.odin#L2079) | Resend the wire bytes for durable pending outbound messages. |
+| [`socket_trust_identity`](../../src/receive.odin#L2099) | Commit an explicitly trusted identity for the device. |
+| [`socket_prune_pending_ids`](../../src/receive.odin#L2152) | Collect pending message IDs that must survive pruning. |
+| [`socket_retry_record_id`](../../src/receive.odin#L2186) | Extract a message ID from a retry record name. |
+| [`socket_prune_retry_record`](../../src/receive.odin#L2206) | Check retry metadata for expiry and migrate its timestamp when needed. |
+| [`socket_prune_record`](../../src/receive.odin#L2244) | Determine whether a stored record is eligible for expiry. |
+| [`socket_prune_state`](../../src/receive.odin#L2291) | Prune eligible expired records in a single store transaction. |
+| [`socket_message_alias_stage`](../../src/receive.odin#L2381) | Stage phone/LID aliases learned from an incoming message. |
 
 <a id="file-src-send-odin"></a>
 

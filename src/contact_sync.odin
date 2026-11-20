@@ -16,10 +16,8 @@ import "core:time"
 import network_client "shared:surf"
 import zlib "vendor:zlib"
 
-@(private)
 CONTACT_COLLECTION :: "critical_unblock_low"
 
-@(private)
 Contact_Sync_Page :: struct {
 	store:        ^State_Store,
 	version:      u64,
@@ -30,7 +28,6 @@ Contact_Sync_Page :: struct {
 
 // Read one singular protobuf field. Empty optional fields can be distinguished
 // from a missing field by number. Unknown fields are skipped by the wire reader.
-@(private)
 read_unique_protobuf_field :: proc(
 	data: []u8,
 	number: u32,
@@ -56,7 +53,6 @@ read_unique_protobuf_field :: proc(
 	return field, true
 }
 
-@(private)
 store_contact_sync_key_share :: proc(store: ^State_Store, protocol: []u8) -> Socket_Error {
 	kind, valid_kind := read_unique_protobuf_field(protocol, 2, 0)
 	if !valid_kind || kind.value != 6 {
@@ -100,7 +96,6 @@ store_contact_sync_key_share :: proc(store: ^State_Store, protocol: []u8) -> Soc
 	return {}
 }
 
-@(private)
 derive_contact_mutation_keys :: proc(
 	page: ^Contact_Sync_Page,
 	key_id: []u8,
@@ -131,7 +126,6 @@ derive_contact_mutation_keys :: proc(
 	return keys, true
 }
 
-@(private)
 update_contact_collection_hash :: proc(page: ^Contact_Sync_Page, mac: []u8, subtract: bool) {
 	expanded: [128]u8
 	hkdf.extract_and_expand(
@@ -151,7 +145,6 @@ update_contact_collection_hash :: proc(page: ^Contact_Sync_Page, mac: []u8, subt
 	}
 }
 
-@(private)
 apply_contact_action :: proc(store: ^State_Store, index, value: []u8, remove: bool) -> bool {
 	parts: []string
 	defer {
@@ -199,7 +192,6 @@ apply_contact_action :: proc(store: ^State_Store, index, value: []u8, remove: bo
 	return state_store_set(store, .Contact_Name, jid, transmute([]u8)names).kind == .None
 }
 
-@(private)
 apply_contact_record :: proc(
 	page: ^Contact_Sync_Page,
 	record: []u8,
@@ -279,7 +271,6 @@ apply_contact_record :: proc(
 	return apply_contact_action(page.store, index.data, action.data, operation == 1)
 }
 
-@(private)
 download_contact_sync_blob :: proc(socket: ^Socket, reference: []u8) -> ([]u8, Socket_Error) {
 	key, a := read_unique_protobuf_field(reference, 1, 2)
 	path, b := read_unique_protobuf_field(reference, 2, 2)
@@ -301,7 +292,6 @@ download_contact_sync_blob :: proc(socket: ^Socket, reference: []u8) -> ([]u8, S
 	return download_contact_media(socket, message)
 }
 
-@(private)
 apply_authenticated_contact_batch :: proc(
 	socket: ^Socket,
 	page: ^Contact_Sync_Page,
@@ -408,7 +398,6 @@ apply_authenticated_contact_batch :: proc(
 	return {}
 }
 
-@(private)
 apply_contact_collection :: proc(
 	socket: ^Socket,
 	page: ^Contact_Sync_Page,
@@ -585,7 +574,6 @@ socket_sync_contacts :: proc(socket: ^Socket) -> (Contact_Sync_Status, Socket_Er
 
 // Send the missing key ID only to the account's primary device. Commit the
 // advanced pairwise ratchet together with the exact stanza before transmission.
-@(private)
 socket_request_contact_key :: proc(socket: ^Socket, key_id: []u8) -> Socket_Error {
 	if socket.auth == nil || len(key_id) == 0 || len(key_id) > 128 {
 		return {kind = .Invalid_State}
@@ -730,7 +718,6 @@ socket_request_contact_key :: proc(socket: ^Socket, key_id: []u8) -> Socket_Erro
 	return {}
 }
 
-@(private)
 socket_note_contact_update :: proc(socket: ^Socket, node: Binary_Node) -> Socket_Error {
 	kind, _ := node_attr(node, "type")
 	if node.tag != "notification" || kind != "server_sync" {
@@ -778,7 +765,6 @@ socket_note_contact_update :: proc(socket: ^Socket, node: Binary_Node) -> Socket
 	return {}
 }
 
-@(private)
 store_historical_contact_profiles :: proc(
 	socket: ^Socket,
 	store: ^State_Store,
@@ -871,7 +857,6 @@ store_historical_contact_profiles :: proc(
 
 // An external sync reference may omit file length. Authenticate the bounded
 // ciphertext first, then validate padding and the separate plaintext digest.
-@(private)
 download_contact_media :: proc(socket: ^Socket, message: Media_Message) -> ([]u8, Socket_Error) {
 	if len(message.media_key) != 32 ||
 	   len(message.file_sha256) != 32 ||

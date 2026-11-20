@@ -19,7 +19,6 @@ contact_sync_status :: proc(store: ^State_Store) -> Contact_Sync_Status {
 	return .Ready if ready else .Syncing
 }
 
-@(private)
 decode_saved_contact :: proc(jid: string, data: []u8) -> (Contact, bool) {
 	encoded := string(data)
 	first := strings.index_byte(encoded, 0)
@@ -134,7 +133,6 @@ search_contact_jids :: proc(
 	return
 }
 
-@(private)
 contact_name_valid :: proc(name: string) -> bool {
 	return len(name) <= 4096 && utf8.valid_string(name) && strings.index_byte(name, 0) < 0
 }

@@ -23,3 +23,8 @@ node_modules/
 *.sqlite-journal
 *.db
 *.db-*
+
+# Public certificate test vectors.
+!tests/fixtures/certificate_policy/*.bin
+
+docs/

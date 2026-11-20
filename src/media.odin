@@ -1862,7 +1862,6 @@ media_download :: proc(
 	return media_decrypt(dst, response.body, message.kind, metadata, max_size)
 }
 
-@(private)
 fetch_media_ciphertext :: proc(message: Media_Message, config: network_client.Config, max_plaintext: u64, execute: Media_HTTP_Execute) -> (network_client.Response, Media_Error) {
 	exchange := execute
 	if exchange == nil {
