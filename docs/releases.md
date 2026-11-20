@@ -1,8 +1,10 @@
 # Publishing owa
 
-Each pull request merged into `main` publishes a Git tag and a GitHub Release at that merge's exact commit. Merge commits, squash merges and rebase merges are supported. Direct pushes are skipped. Consumers can pin the resulting `vMAJOR.MINOR.PATCH` tag in KRS.
+Use `develop`, the default branch, for daily commits and feature PRs. Push to `develop` as often as needed. Each push updates the open release PR for that branch.
 
-The pull request title determines the bump:
+When preparing a release, open one PR from this repository's `develop` into `main`. You can keep it in draft while collecting changes. Choose a title that reflects the largest change in the batch, mark it ready, and merge. Use **Create a merge commit** to preserve the ancestry of the long-lived branches. The merge publishes one Git tag and one GitHub Release at the merged commit. Consumers can pin that tag in KRS.
+
+The release PR title determines the bump:
 
 | PR title | Example starting at `v0.2.0` |
 | --- | --- |
