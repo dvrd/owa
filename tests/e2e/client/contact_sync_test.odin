@@ -3,6 +3,8 @@ package whatsapp_test
 import test_fixtures "../../fixtures/client"
 import "core:bytes"
 import "core:testing"
+import "shared:http"
+import network_client "shared:surf"
 import wa "shared:whatsapp"
 
 // Independently generated protobuf, AES-CBC, HKDF and HMAC vectors for two
@@ -40,13 +42,11 @@ contact_sync_searches_saved_names_and_resumes_after_restart :: proc(t: ^testing.
 	defer delete(cipher)
 	n, meta, encrypted := wa.media_encrypt(cipher, raw, .App_State, [32]u8{0 = 1})
 	testing.expect_value(t, encrypted.kind, wa.Media_Error_Kind.None)
-	download := test_fixtures.Download_State {
-		encrypted = cipher[:n],
-	}
+	download := Contact_Download_Test{store = &peer.store, download = {encrypted = cipher[:n]}}
 	previous := context.user_ptr
 	context.user_ptr = &download
 	defer context.user_ptr = previous
-	peer.socket.config.http_execute = test_fixtures.download_http
+	peer.socket.config.http_execute = contact_download_during_update
 	ref: [256]u8
 	writer := wa.Protobuf_Writer {
 		dst = ref[:],
@@ -62,6 +62,14 @@ contact_sync_searches_saved_names_and_resumes_after_restart :: proc(t: ^testing.
 		attrs   = base,
 		content = []wa.Binary_Node{{tag = "snapshot", content = ref[:writer.at]}},
 	}
+	legacy_cursor: [136]u8
+	legacy_cursor[7] = 1
+	old_hint := [8]u8{0 = 255}
+	assert(wa.state_store_set(&peer.store, .Contact_Sync_State, "required-version", old_hint[:]).kind == .None)
+	assert(wa.state_store_set(&peer.store, .Contact_Sync_State, "cursor", legacy_cursor[:]).kind == .None)
+	assert(wa.state_store_set(&peer.store, .Contact_Sync_State, "ready", []u8{1}).kind == .None)
+	assert(wa.state_store_set(&peer.store, .Contact_Name, "800@lid", transmute([]u8)string("Stale\x00\x00")).kind == .None)
+	testing.expect_value(t, wa.contact_sync_status(&peer.store), .Syncing)
 	peer.contact_replies = []wa.Binary_Node{initial_reply, initial_reply}
 	peer.contact_versions = []string{"", ""}
 	waiting, missing_error := wa.socket_sync_contacts(&peer.socket)
@@ -107,9 +115,36 @@ contact_sync_searches_saved_names_and_resumes_after_restart :: proc(t: ^testing.
 	}
 	share_event, share_err := wa.socket_process_message(&peer.socket, share_stanza, nil)
 	testing.expect(t, share_event.kind == .None && share_err.kind == .None)
+	// Deliver an encrypted direct message before the second IQ reply.
+	text := wa.pad_outbound_message([]u8{10, 2, 'h', 'i'})
+	defer delete(text)
+	_, text_size, text_error := wa.signal_session_encrypt(
+		&peer.pairwise[0], encoded_share[:], text, peer.pairwise[0].remote_identity_public,
+	)
+	assert(text_error.kind == .None)
+	incoming := share_stanza
+	incoming.attrs = []wa.Binary_Node_Attribute{{"from", "111@s.whatsapp.net"}, {"id", "during-contact-sync"}, {"recipient", "333@s.whatsapp.net"}}
+	incoming.content.([]wa.Binary_Node)[0].content = encoded_share[:text_size]
+	send_peer_enqueue(peer, incoming)
 	status, err := wa.socket_sync_contacts(&peer.socket)
 	testing.expect_value(t, err.kind, wa.Socket_Error_Kind.None)
 	testing.expect_value(t, status, wa.Contact_Sync_Status.Ready)
+	_, stale := wa.contact_by_jid(&peer.store, "800@lid")
+	testing.expect(t, !stale)
+	live, exists := wa.contact_by_jid(&peer.store, "888@lid")
+	testing.expect(t, exists && live.profile_name == "Live name")
+	ready, poll_error := wa.socket_poll(&peer.socket, 0)
+	testing.expect(t, ready && poll_error.kind == .None)
+	event, receive_error := wa.socket_receive(&peer.socket)
+	assert(receive_error.kind == .None && event.message != nil)
+	testing.expect_value(t, event.message.id, "during-contact-sync")
+	testing.expect_value(t, event.message.recipient, "333@s.whatsapp.net")
+	assert(wa.socket_inbox_restore(&peer.socket).kind == .None)
+	restored_event, restored_error := wa.socket_read(&peer.socket)
+	assert(restored_error.kind == .None && restored_event.message != nil)
+	testing.expect_value(t, restored_event.message.recipient, "333@s.whatsapp.net")
+	wa.socket_message_destroy(restored_event.message)
+	wa.socket_message_destroy(event.message)
 	found, _, e := wa.search_contact_jids(&peer.store, " DaNiEL ")
 	defer delete(found)
 	testing.expect_value(t, e.kind, wa.State_Error_Kind.None)
@@ -143,13 +178,25 @@ contact_sync_searches_saved_names_and_resumes_after_restart :: proc(t: ^testing.
 
 	update := wa.Binary_Node {
 		tag     = "notification",
-		attrs   = []wa.Binary_Node_Attribute{{"type", "server_sync"}},
+		attrs   = []wa.Binary_Node_Attribute{{"type", "server_sync"}, {"from", "@s.whatsapp.net"}, {"id", "update-3"}},
 		content = []wa.Binary_Node {
 			{
 				tag = "collection",
 				attrs = []wa.Binary_Node_Attribute{{"name", wa.CONTACT_COLLECTION}, {"version", "3"}},
 			},
 		},
+	}
+	for attrs in ([][]wa.Binary_Node_Attribute{
+		{{"type", "server_sync"}, {"from", "@s.whatsapp.net"}},
+		{{"type", "server_sync"}, {"id", "missing-origin"}},
+		{{"type", "server_sync"}, {"from", "111@s.whatsapp.net"}, {"id", "unexpected-origin"}},
+	}) {
+		invalid := update
+		invalid.attrs = attrs
+		before := peer.store.revision
+		testing.expect_value(t, wa.socket_note_contact_update(&peer.socket, invalid).kind, .Protocol_Error)
+		testing.expect_value(t, peer.store.revision, before)
+		testing.expect_value(t, wa.contact_sync_status(&peer.store), .Ready)
 	}
 	testing.expect_value(
 		t,
@@ -209,4 +256,56 @@ contact_sync_searches_saved_names_and_resumes_after_restart :: proc(t: ^testing.
 	)
 	_, deleted := wa.contact_by_jid(&peer.store, "456@lid")
 	testing.expect(t, !deleted && !peer.failed)
+}
+
+// Simulate a live store update at the same point where the native worker
+// allows the socket pump to process incoming messages.
+Contact_Download_Test :: struct {
+	download: test_fixtures.Download_State,
+	store: ^wa.State_Store,
+}
+
+contact_download_during_update :: proc(request: http.Request, config: network_client.Config) -> (network_client.Response, network_client.HTTP_Error) {
+	state := cast(^Contact_Download_Test)context.user_ptr
+	assert(wa.state_store_set(state.store, .Contact_Profile, "888@lid", transmute([]u8)string("Live name" if state.download.calls > 0 else "Initial")).kind == .None)
+	context.user_ptr = &state.download
+	return test_fixtures.download_http(request, config)
+}
+
+@(test)
+external_profile_history_resumes_and_preserves_incoming_updates :: proc(t: ^testing.T) {
+	peer := send_peer_new()
+	defer send_peer_destroy(peer)
+	notification := test_fixtures.codec_api_hex(string(#load("../../fixtures/contact_sync/profile-history.hex")))
+	inline, valid := wa.read_unique_protobuf_field(notification, 11, 2)
+	assert(valid && inline.number != 0)
+	cipher := make([]u8, len(inline.data) + 32)
+	defer delete(cipher)
+	n, meta, encrypted := wa.media_encrypt(cipher, inline.data, .History, [32]u8{0 = 1})
+	assert(encrypted.kind == .None)
+	ref: [256]u8
+	w := wa.Protobuf_Writer{dst = ref[:]}
+	wa.protobuf_write_bytes(&w, 1, meta.file_sha256[:])
+	wa.protobuf_write_uint(&w, 2, meta.file_length)
+	wa.protobuf_write_bytes(&w, 3, meta.media_key[:])
+	wa.protobuf_write_bytes(&w, 4, meta.file_enc_sha256[:])
+	wa.protobuf_write_string(&w, 5, "/test/profiles")
+	wa.protobuf_write_uint(&w, 6, 4)
+	assert(wa.store_historical_contact_profiles(&peer.socket, &peer.store, ref[:w.at], pending_name = "history-id").kind == .None)
+	assert(wa.state_store_save(&peer.store, peer.path).kind == .None)
+	identity := peer.store.identity
+	assert(wa.state_store_load(&peer.store, peer.path, identity).kind == .None)
+	state := Contact_Download_Test{store = &peer.store, download = {encrypted = cipher[:n], status = 503}}
+	context.user_ptr = &state
+	peer.socket.config.http_execute = contact_download_during_update
+	testing.expect_value(t, wa.socket_import_pending_contact_history(&peer.socket).kind, .Media_Failed)
+	_, pending := wa.state_store_get(&peer.store, .Pending_Profile_History, "history-id")
+	testing.expect(t, pending)
+	state.download.status = 0
+	testing.expect_value(t, wa.socket_import_pending_contact_history(&peer.socket).kind, .None)
+	assert(wa.state_store_load(&peer.store, peer.path, identity).kind == .None)
+	_, pending = wa.state_store_get(&peer.store, .Pending_Profile_History, "history-id")
+	older, known := wa.contact_by_jid(&peer.store, "123@s.whatsapp.net")
+	current, live := wa.contact_by_jid(&peer.store, "888@lid")
+	testing.expect(t, !pending && known && live && older.profile_name == "Public nickname" && current.profile_name == "Live name")
 }

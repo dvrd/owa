@@ -1246,3 +1246,28 @@ unsupported_encryption_keeps_supported_distribution_order_and_controls_admissibl
 	controls := [1]wa.Binary_Node{{tag = "unavailable"}}
 	testing.expect_value(t, wa.message_encryption_nack_reason({content = controls[:]}), u32(0))
 }
+
+@(test)
+history_redelivery_restores_receipt_after_reopening_store :: proc(t: ^testing.T) {
+	f := test_fixtures.negative_ack_fixture()
+	defer test_fixtures.negative_ack_destroy(f)
+	from :: "222@s.whatsapp.net"
+	id :: "history-receipt"
+	name, e := wa.socket_inbox_key_store(&f.store, "", from, id)
+	assert(e.kind == .None)
+	defer delete(name)
+	// Message.protocolMessage.historySyncNotification, with an empty notification.
+	payload := []u8{0x62, 2, 0x32, 0}
+	staged: wa.State_Store
+	defer wa.state_store_clear(&staged)
+	assert(wa.socket_store_clone(&staged, &f.store).kind == .None)
+	receipt := false
+	handled, committed := wa.socket_message_control_commit(&f.socket, &staged, name, "", payload, true, &receipt)
+	testing.expect(t, handled && committed.kind == .None && receipt)
+	identity := f.store.identity
+	assert(wa.state_store_load(&f.store, f.path, identity).kind == .None)
+	receipt = false
+	node := wa.Binary_Node{tag = "message", attrs = []wa.Binary_Node_Attribute{{"from", from}, {"id", id}}}
+	_, err := wa.socket_process_message(&f.socket, node, &receipt)
+	testing.expect(t, err.kind == .None && receipt)
+}

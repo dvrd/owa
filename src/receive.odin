@@ -208,7 +208,8 @@ socket_process_message :: proc(
 	}
 
 	defer delete(name)
-	if _, found := state_store_get(&candidate, .Processed_Message, name); found {
+	if marker, found := state_store_get(&candidate, .Processed_Message, name); found {
+		if history_receipt != nil { history_receipt^ = processed_history_receipt(marker) }
 		return {}, {}
 	}
 
@@ -567,7 +568,7 @@ socket_message_control_commit :: proc(
 		notification, valid_history := read_unique_protobuf_field(protocol, 6, 2)
 		history := group == "" && valid_history && notification.number != 0
 		if history && socket.config.sync_contacts {
-			if e := store_historical_contact_profiles(socket, candidate, notification.data); e.kind != .None { return true, e }
+			if e := store_historical_contact_profiles(socket, candidate, notification.data, pending_name = name); e.kind != .None { return true, e }
 		}
 		if group == "" {
 			if e := store_contact_sync_key_share(candidate, protocol); e.kind != .None {
@@ -575,7 +576,7 @@ socket_message_control_commit :: proc(
 			}
 		}
 
-		if e := socket_processed_set(candidate, name); e.kind != .None {
+		if e := socket_processed_set(candidate, name, history); e.kind != .None {
 			return true, {kind = .State_Failed, state = e}
 		}
 
@@ -583,6 +584,7 @@ socket_message_control_commit :: proc(
 			return true, e
 		}
 
+		if history && socket.config.sync_contacts { socket.profile_history_pending = true }
 		if socket.contact_key_size > 0 {
 			key := hex.encode(socket.contact_key_requested[:socket.contact_key_size])
 			defer delete(key)
@@ -624,7 +626,13 @@ socket_message_event_commit :: proc(
 	}
 
 	offline, _ := node_attr(node, "offline")
-	message, message_error := socket_message_new(group, participant, id, var_payload, own, timestamp, offline != "")
+	recipient := ""
+	if group == "" && own {
+		if to, found := node_attr(node, "recipient"); found && device_user_jid_valid(to, true) {
+			recipient = to
+		}
+	}
+	message, message_error := socket_message_new(group, participant, id, var_payload, own, timestamp, offline != "", recipient)
 	if message_error.kind != .None {
 		return {}, message_error
 	}
@@ -1002,7 +1010,12 @@ socket_store_clone :: proc(destination, source: ^State_Store) -> Socket_Error {
 }
 
 socket_store_commit :: proc(socket: ^Socket, next: ^State_Store) -> Socket_Error {
+	if socket.store.requires_reload { return {kind = .State_Failed, state = {kind = .Directory_Flush_Failed}} }
 	if e := state_store_save(next, socket.config.state_path); e.kind != .None {
+		if e.kind == .Directory_Flush_Failed {
+			socket.store.requires_reload = true
+			return socket_fail(socket, {kind = .State_Failed, state = e})
+		}
 		return {kind = .State_Failed, state = e}
 	}
 
@@ -1138,6 +1151,7 @@ socket_message_new :: proc(
 	from_me: bool,
 	timestamp: u64,
 	offline: bool = false,
+	recipient: string = "",
 ) -> (
 	^Socket_Message,
 	Socket_Error,
@@ -1167,6 +1181,11 @@ socket_message_new :: proc(
 	}
 
 	message.participant = participant_copy
+	if recipient != "" {
+		to, e := strings.clone(recipient, a)
+		if e != nil { return nil, {kind = .Allocation_Failed, allocation = e} }
+		message.recipient = to
+	}
 	id_copy, ie := strings.clone(id, a)
 	if ie != nil {
 		return nil, {kind = .Allocation_Failed, allocation = ie}
@@ -1201,9 +1220,12 @@ socket_inbox_stage :: proc(store: ^State_Store, name: string, message: ^Socket_M
 			{"t", timestamp},
 			{"own", own},
 			{"offline", offline},
+			{"recipient", message.recipient},
 		},
 		content = message.protobuf,
 	}
+
+	if message.recipient == "" { node.attrs = node.attrs[:len(node.attrs) - 1] }
 
 	n, e := binary_node_encode(nil, node)
 
@@ -1326,12 +1348,14 @@ socket_inbox_record_restore :: proc(socket: ^Socket, record: State_Record) -> (^
 	timestamp, _ := node_attr(node, "t")
 	own, _ := node_attr(node, "own")
 	offline, _ := node_attr(node, "offline")
+	recipient, _ := node_attr(node, "recipient")
 	raw, ok := node.content.([]u8)
 	stamp, valid := strconv.parse_u64(timestamp)
 	if !ok ||
 	   !valid ||
 	   (own != "0" && own != "1") ||
 	   (offline != "0" && offline != "1") ||
+	   (recipient != "" && (own != "1" || group != "" || !device_user_jid_valid(recipient, true))) ||
 	   !device_user_jid_valid(participant, true) ||
 	   !socket_inbox_id_valid(id) ||
 	   (group != "" && !socket_receive_group_valid(group)) {
@@ -1354,7 +1378,7 @@ socket_inbox_record_restore :: proc(socket: ^Socket, record: State_Record) -> (^
 		return nil, {kind = .Protocol_Error}
 	}
 
-	message, me := socket_message_new(group, participant, id, raw, own == "1", stamp, offline == "1")
+	message, me := socket_message_new(group, participant, id, raw, own == "1", stamp, offline == "1", recipient)
 	binary_document_destroy(&doc)
 	if me.kind != .None {
 		return nil, me
@@ -1766,14 +1790,23 @@ encode_current_unix_timestamp :: proc() -> [8]u8 {
 
 	return stamp
 }
-socket_processed_set :: proc(store: ^State_Store, name: string) -> State_Error {
+processed_history_receipt :: proc(marker: []u8) -> bool {
+	return len(marker) == 9 && marker[8] == 1
+}
+
+socket_processed_set :: proc(store: ^State_Store, name: string, history_receipt := false) -> State_Error {
 	stamp := encode_current_unix_timestamp()
 
+	if history_receipt {
+		marker: [9]u8
+		copy(marker[:8], stamp[:])
+		marker[8] = 1
+		return state_store_set(store, .Processed_Message, name, marker[:])
+	}
 	return state_store_set(store, .Processed_Message, name, stamp[:])
 }
 
-// Inspect only envelope structure. History contents are never downloaded or
-// imported; our other device only needs the protocol's hist_sync receipt.
+// Locate the protocol envelope inside supported message wrappers.
 unwrap_protocol_message :: proc(message: []u8, depth: int) -> []u8 {
 	if depth >= MAX_MESSAGE_NESTING || len(message) > MAX_PROTOBUF_MESSAGE_SIZE {
 		return nil
@@ -2255,11 +2288,11 @@ socket_prune_record :: proc(
 	}
 	timestamp: u64
 	if record.kind == .Processed_Message {
-		if len(record.data) != 8 {
+		if len(record.data) != 8 && !processed_history_receipt(record.data) {
 			return false, false, {}
 		}
 
-		timestamp = endian.unchecked_get_u64be(record.data)
+		timestamp = endian.unchecked_get_u64be(record.data[:8])
 	} else if record.kind == .Outbound_Content {
 		if pending[sha256(transmute([]u8)record.name)] {
 			return false, false, {}

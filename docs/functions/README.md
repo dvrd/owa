@@ -1,12 +1,12 @@
 # Function catalog
 
-This catalog covers **1,284 named functions and bound callbacks** in the WhatsApp repository. Entries follow declaration order within each file. Each links to the implementation and describes its behavior.
+This catalog covers **1,306 named functions and bound callbacks** in the WhatsApp repository. Entries follow declaration order within each file. Each links to the implementation and describes its behavior.
 
 | Area | Entries | What it covers |
 |---|---:|---|
-| [Client library](library.md) | 617 | WhatsApp connection, pairing, addressing, messages, Signal encryption, media, codecs and persistent state. |
+| [Client library](library.md) | 630 | WhatsApp connection, pairing, addressing, messages, Signal encryption, media, codecs and persistent state. |
 | [Tools](tools.md) | 131 | Release checks and upstream protocol review. |
-| [Tests and harnesses](tests.md) | 536 | Test assertions, fixtures, synthetic peers, recovery campaigns, subprocess controls and test runners. |
+| [Tests and harnesses](tests.md) | 545 | Test assertions, fixtures, synthetic peers, recovery campaigns, subprocess controls and test runners. |
 
 ## Running checks
 
@@ -21,7 +21,7 @@ Each `src/<module>.odin` has one unit test file at `tests/<module>_test.odin`. T
 
 ## Publishing the protocol watcher
 
-Run `task protocol:publish` from the checkout after changing the watcher. It uses local Odin and shared packages, Zig to link for Linux x86-64, and an authenticated GitHub CLI with release access to `dvrd/owa`. It publishes the binary, verifies the downloaded copy, and writes the release checksum to `tools/protocol_watcher/linux-amd64.sha256`. Include that file with the source changes in the next push. The daily workflow uses the checksum to select and verify the binary before running the upstream scan and Linear tracking.
+Commit the watcher changes, then run `task protocol:publish`. It uses local Odin and shared packages, Zig to link for Linux x86-64, and an authenticated GitHub CLI with release access to `dvrd/owa`. It builds the committed source in a temporary directory and pushes a release tag pointing at that commit. After verifying the published binary, it writes the SHA-256 and source commit to `tools/protocol_watcher/linux-amd64.sha256`. Commit that file to select the release for CI. The daily workflow uses the checksum to select and verify the binary before running the upstream scan and Linear tracking.
 
 ## Naming review
 

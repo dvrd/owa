@@ -48,6 +48,9 @@ Socket_Error_Kind :: enum {
 	Message_Rejected,
 	// Incoming encrypted content is unsupported; no successful receive occurred.
 	Unsupported_Message_Encryption,
+	Contacts_Syncing,
+	Contact_Already_Exists,
+	Contact_Unconfirmed,
 }
 Socket_Error :: struct {
 	kind:       Socket_Error_Kind,
@@ -101,6 +104,7 @@ Socket_Event :: struct {
 // protobuf storage. Parsed text/media/quote slices borrow protobuf until destroy.
 Socket_Message :: struct {
 	group, participant, id: string,
+	recipient:              string, // Direct-chat peer on messages from another linked device.
 	protobuf:               []u8,
 	from_me:                bool,
 	offline:                bool,
@@ -115,6 +119,7 @@ socket_message_destroy :: proc(message: ^Socket_Message) {
 	a := message.allocator
 	delete(message.group, a)
 	delete(message.participant, a)
+	delete(message.recipient, a)
 	delete(message.id, a)
 	crypto.zero_explicit(raw_data(message.protobuf), len(message.protobuf))
 	delete(message.protobuf, a)
@@ -126,7 +131,11 @@ socket_message_destroy :: proc(message: ^Socket_Message) {
 // a fresh Socket with the SAME Auth_State, Prekey_Store and State_Store.
 Socket :: struct {
 	contact_refresh_due: bool,
+	profile_history_pending: bool,
+	profile_history_retry_after: time.Time,
 	contact_refresh_after: time.Time,
+	contact_write_key_id: [128]u8,
+	contact_write_key_size: int,
 	contact_key_requested: [128]u8,
 	contact_key_size: int,
 	contact_key_retry_after: time.Time,
@@ -250,7 +259,7 @@ socket_connect_validate :: proc(
 		return {kind = .Invalid_State}
 	}
 
-	if !prekeys.initialized || !store.initialized || config.prekey_path == "" || config.state_path == "" {
+	if !prekeys.initialized || !store.initialized || store.requires_reload || config.prekey_path == "" || config.state_path == "" {
 		return {kind = .Invalid_Config}
 	}
 
@@ -396,10 +405,18 @@ socket_tick :: proc(socket: ^Socket, now: time.Time) -> (Socket_Event, Socket_Er
 		}
 	}
 
+	if socket.config.sync_contacts && socket.profile_history_pending && socket.query_depth == 0 &&
+	   socket.phase == .Online && time.diff(socket.profile_history_retry_after, now) >= 0 {
+		if e := socket_import_pending_contact_history(socket); e.kind != .None {
+			socket.profile_history_retry_after = time.time_add(now, time.Minute)
+			return {}, e
+		}
+	}
+
 	return {}, {}
 }
 
-socket_receive :: proc(socket: ^Socket) -> (Socket_Event, Socket_Error) {
+socket_receive_wire :: proc(socket: ^Socket) -> (Socket_Event, Socket_Error) {
 	if socket == nil || socket.phase == .Closed || socket.phase == .Failed {
 		return {}, {kind = .Invalid_State}
 	}
@@ -596,6 +613,7 @@ socket_handle_activation_response :: proc(socket: ^Socket, node: Binary_Node) ->
 
 	socket.provision_stage = .None
 	socket.phase = .Online
+	socket.profile_history_pending = socket.config.sync_contacts
 	socket.contact_refresh_due = socket.config.sync_contacts
 
 	if e := socket_cleanup_consumed_prekeys(socket); e.kind != .None {
@@ -727,8 +745,11 @@ socket_read :: proc(socket: ^Socket) -> (Socket_Event, Socket_Error) {
 		return {kind = .Message, message = message}, {}
 	}
 
-	return socket_receive(socket)
+	return socket_receive_wire(socket)
 }
+
+// Existing callers of socket_receive also receive events queued by synchronous queries.
+socket_receive :: socket_read
 
 socket_control_node :: proc(socket: ^Socket, node: Binary_Node) -> Socket_Error {
 	if node.tag == "ib" {
@@ -1010,7 +1031,7 @@ socket_query_response_receive :: proc(socket: ^Socket, id: string) -> (Binary_Do
 			return {}, e
 		}
 
-		event, err := socket_receive(socket)
+		event, err := socket_receive_wire(socket)
 		if err.kind != .None {
 			return {}, err
 		}

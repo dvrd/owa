@@ -243,20 +243,36 @@ tasks:
           work=$(mktemp -d "${TMPDIR:-/tmp}/wa-protocol-release.XXXXXX")
           trap 'rm -rf "$work"' EXIT
           asset=protocol-watch-linux-amd64
+          repo=dvrd/owa
+          source=$(git rev-parse --verify 'HEAD^{commit}')
+          watcher=tools/protocol_watcher
+          if [ -n "$(git status --porcelain --untracked-files=all -- "$watcher" ":(exclude)$watcher/linux-amd64.sha256")" ]; then
+            echo 'Commit the protocol watcher inputs before publishing.' >&2
+            exit 1
+          fi
+          mkdir "$work/source"
+          git archive --output="$work/source.tar" "$source" -- "$watcher"
+          tar -xf "$work/source.tar" -C "$work/source"
           compiler=${ODIN:-odin}
           shared=${WEBTOOLS_SHARED:-"$("$compiler" root)/shared"}
-          "$compiler" build tools/protocol_watcher/src "-collection:shared=$shared" \
+          "$compiler" build "$work/source/$watcher/src" "-collection:shared=$shared" \
             -target:linux_amd64 -microarch:generic -build-mode:obj -use-single-module -o:speed \
             -source-code-locations:filename -vet -warnings-as-errors "-out:$work/watch.o"
           zig cc -target x86_64-linux-gnu.2.35 "$work/watch.o" -s -o "$work/$asset"
           (cd "$work" && shasum -a 256 "$asset") > "$work/checksum"
-          tag=protocol-watch-$(cut -c1-16 "$work/checksum")
-          repo=dvrd/owa
+          digest=$(cut -c1-16 "$work/checksum")
+          tag=protocol-watch-$source-$digest
+          # Push only the immutable source tag. This also makes a local source
+          # commit available to GitHub without moving either development branch.
+          remote=https://github.com/$repo.git
+          git push "$remote" "$source:refs/tags/$tag"
           if ! gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
-            gh release create "$tag" "$work/$asset" --repo "$repo" --latest=false \
-              --title "Protocol watcher ${tag#protocol-watch-}" \
-              --notes "Linux x86-64 protocol watcher built locally. SHA-256: $(cut -d ' ' -f 1 "$work/checksum")."
+            gh release create "$tag" "$work/$asset" --repo "$repo" --verify-tag --target "$source" --latest=false \
+              --title "Protocol watcher $digest" \
+              --notes "Built from $source. SHA-256: $(cut -d ' ' -f 1 "$work/checksum")."
           fi
           gh release download "$tag" --repo "$repo" --pattern "$asset" --dir "$work/download"
           (cd "$work/download" && shasum -a 256 -c "$work/checksum")
-          cp "$work/checksum" tools/protocol_watcher/linux-amd64.sha256
+          # Keep the checksum line compatible with standard verification tools.
+          printf '# source %s\n' "$source" >> "$work/checksum"
+          cp "$work/checksum" "$watcher/linux-amd64.sha256"

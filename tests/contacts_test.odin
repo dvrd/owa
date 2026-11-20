@@ -21,3 +21,19 @@ contact_search_matches_unicode_saved_names_and_rejects_blank_queries :: proc(t: 
 	defer delete(empty)
 	testing.expect_value(t, invalid.kind, wa.State_Error_Kind.Invalid_Record)
 }
+
+@(test)
+contact_jids_outlive_the_lookup_buffer :: proc(t: ^testing.T) {
+	store: wa.State_Store
+	assert(wa.state_store_init(&store, [32]u8{0 = 1}).kind == .None)
+	defer wa.state_store_clear(&store)
+	for kind in ([]wa.State_Record_Kind{.Contact_Profile, .Contact_Name}) {
+		value := "Profile" if kind == .Contact_Profile else "Daniel\x00Dan\x00999@lid"
+		assert(wa.state_store_set(&store, kind, "123@s.whatsapp.net", transmute([]u8)value).kind == .None)
+		query: [32]u8
+		n := copy(query[:], "123@s.whatsapp.net")
+		result, found := wa.contact_by_jid(&store, string(query[:n]))
+		query[0] = '8'
+		testing.expect(t, found && result.jid == "123@s.whatsapp.net")
+	}
+}

@@ -2,7 +2,7 @@
 
 [Catalog index](README.md) · [Name changes](renames.md)
 
-536 entries across 49 source files. Select a function to open its declaration.
+545 entries across 49 source files. Select a function to open its declaration.
 
 | Source file | Functions |
 |---|---:|
@@ -13,10 +13,10 @@
 | [tests/binary_node_test.odin](#file-tests-binary-node-test-odin) | 1 |
 | [tests/binary_tokens_test.odin](#file-tests-binary-tokens-test-odin) | 1 |
 | [tests/connection_test.odin](#file-tests-connection-test-odin) | 16 |
-| [tests/contact_sync_test.odin](#file-tests-contact-sync-test-odin) | 1 |
-| [tests/contacts_test.odin](#file-tests-contacts-test-odin) | 1 |
+| [tests/contact_sync_test.odin](#file-tests-contact-sync-test-odin) | 3 |
+| [tests/contacts_test.odin](#file-tests-contacts-test-odin) | 2 |
 | [tests/e2e/child_process/child_process.odin](#file-tests-e2e-child-process-child-process-odin) | 5 |
-| [tests/e2e/client/contact_sync_test.odin](#file-tests-e2e-client-contact-sync-test-odin) | 1 |
+| [tests/e2e/client/contact_sync_test.odin](#file-tests-e2e-client-contact-sync-test-odin) | 3 |
 | [tests/e2e/client/media_test.odin](#file-tests-e2e-client-media-test-odin) | 6 |
 | [tests/e2e/client/receive_test.odin](#file-tests-e2e-client-receive-test-odin) | 27 |
 | [tests/e2e/client/send_peer.odin](#file-tests-e2e-client-send-peer-odin) | 23 |
@@ -40,14 +40,14 @@
 | [tests/e2e/version_http/version_test.odin](#file-tests-e2e-version-http-version-test-odin) | 2 |
 | [tests/fixtures/client/helpers.odin](#file-tests-fixtures-client-helpers-odin) | 18 |
 | [tests/fixtures/protocol_watch/helpers.odin](#file-tests-fixtures-protocol-watch-helpers-odin) | 4 |
-| [tests/media_test.odin](#file-tests-media-test-odin) | 26 |
+| [tests/media_test.odin](#file-tests-media-test-odin) | 27 |
 | [tests/pairing_test.odin](#file-tests-pairing-test-odin) | 41 |
 | [tests/protobuf_test.odin](#file-tests-protobuf-test-odin) | 9 |
-| [tests/receive_test.odin](#file-tests-receive-test-odin) | 46 |
+| [tests/receive_test.odin](#file-tests-receive-test-odin) | 47 |
 | [tests/send_test.odin](#file-tests-send-test-odin) | 7 |
 | [tests/signal_test.odin](#file-tests-signal-test-odin) | 1 |
 | [tests/socket_test.odin](#file-tests-socket-test-odin) | 3 |
-| [tests/state_store_test.odin](#file-tests-state-store-test-odin) | 2 |
+| [tests/state_store_test.odin](#file-tests-state-store-test-odin) | 4 |
 | [tools/protocol_watcher/tests/main_test.odin](#file-tools-protocol-watcher-tests-main-test-odin) | 1 |
 | [tools/protocol_watcher/tests/release_test.odin](#file-tools-protocol-watcher-tests-release-test-odin) | 12 |
 | [tools/protocol_watcher/tests/schedule_test.odin](#file-tools-protocol-watcher-tests-schedule-test-odin) | 10 |
@@ -159,6 +159,8 @@
 | Function | Behavior |
 |---|---|
 | [`contact_sync_rejects_forged_records_and_collection_signatures`](../../tests/contact_sync_test.odin#L8) | Reject corrupted index, value and collection signatures without committing candidate contacts. |
+| [`alternate_contact_index_renames_and_removes_one_saved_contact`](../../tests/contact_sync_test.odin#L60) | Rename and delete through either linked JID and verify that the original name disappears. |
+| [`contact_add_patch_round_trips_through_authenticated_sync`](../../tests/contact_sync_test.odin#L83) | Decode two signed updates for the same address, verify its names and linked identity, and reject an undersized output buffer. |
 
 <a id="file-tests-contacts-test-odin"></a>
 
@@ -167,6 +169,7 @@
 | Function | Behavior |
 |---|---|
 | [`contact_search_matches_unicode_saved_names_and_rejects_blank_queries`](../../tests/contacts_test.odin#L7) | Search stored Unicode names case-insensitively during sync and reject a blank query. |
+| [`contact_jids_outlive_the_lookup_buffer`](../../tests/contacts_test.odin#L26) | Reuse the input buffer after saved and profile-only lookups and verify that both return a stable JID. |
 
 <a id="file-tests-e2e-child-process-child-process-odin"></a>
 
@@ -186,7 +189,9 @@
 
 | Function | Behavior |
 |---|---|
-| [`contact_sync_searches_saved_names_and_resumes_after_restart`](../../tests/e2e/client/contact_sync_test.odin#L11) | Exercise a missing key request, authenticated contact import, persisted search, rename, removal and rejected patch. |
+| [`contact_sync_searches_saved_names_and_resumes_after_restart`](../../tests/e2e/client/contact_sync_test.odin#L13) | Exercise a missing key request, authenticated contact import, persisted search, rename, removal and rejected patch. |
+| [`contact_download_during_update`](../../tests/e2e/client/contact_sync_test.odin#L268) | Apply a live profile update during a simulated CDN fetch. |
+| [`external_profile_history_resumes_and_preserves_incoming_updates`](../../tests/e2e/client/contact_sync_test.odin#L276) | Restart with a pending history download, retry a CDN failure and verify both historical and live profile names. |
 
 <a id="file-tests-e2e-client-media-test-odin"></a>
 
@@ -580,22 +585,23 @@
 | [`media_retry_test_close`](../../tests/media_test.odin#L171) | Close the controlled media retry stream. |
 | [`media_retry_test_socket`](../../tests/media_test.odin#L175) | Attach the retry fixture to a test socket. |
 | [`media_retry_test_notification`](../../tests/media_test.odin#L199) | Construct the fixed encrypted media-retry notification. |
-| [`media_retry_preserves_caller_routing_metadata`](../../tests/media_test.odin#L232) | Correlate media retry with the message routing supplied by its caller. |
-| [`writer_golden_media`](../../tests/media_test.odin#L290) | Build the reference media message for writer comparisons. |
-| [`writer_media_encoders_match_retired_writer`](../../tests/media_test.odin#L370) | Compare encoded media fields against stored reference bytes. |
-| [`codec_api_reaction_key`](../../tests/media_test.odin#L401) | Construct the message key targeted by the reaction test. |
-| [`reaction_checkmark_encode_matches_reference_bytes_and_decodes_back`](../../tests/media_test.odin#L415) | Match the checkmark reaction wire bytes and decode the result. |
-| [`reaction_checkmark_encode_validates_key_and_destination`](../../tests/media_test.odin#L434) | Check invalid reaction keys and undersized output buffers. |
-| [`reaction_message_decode_rejects_malformed_and_ignores_other_messages`](../../tests/media_test.odin#L459) | Reject malformed reaction data and distinguish other message types. |
-| [`send_image_rejects_bad_state_and_inputs_before_any_network_work`](../../tests/media_test.odin#L493) | Reject invalid image parameters before network work starts. |
-| [`send_reaction_validates_state_key_and_text`](../../tests/media_test.odin#L514) | Reject invalid reaction state, target or text. |
-| [`download_fixture_init`](../../tests/media_test.odin#L554) | Construct encrypted file bytes and the associated media message. |
-| [`download_media_fetches_decrypts_and_verifies_over_the_cdn_path`](../../tests/media_test.odin#L588) | Download encrypted media through its canonical CDN path and check recovered bytes. |
-| [`download_media_corrupt_ciphertext_fails_authentication_and_leaves_destination_untouched`](../../tests/media_test.odin#L605) | Corrupt the downloaded ciphertext and verify authentication failure preserves the output. |
-| [`download_media_surfaces_http_status_without_retrying_other_codes`](../../tests/media_test.odin#L630) | Check that an HTTP failure carries its status and only eligible codes enter retry. |
-| [`download_media_runs_offline_backlog_while_provisioning`](../../tests/media_test.odin#L651) | Download offline-batch media received before activation completes. |
-| [`download_media_preflights_state_message_and_destination_before_network`](../../tests/media_test.odin#L690) | Reject invalid input or output capacity before attempting an HTTP request. |
-| [`http_execute_requires_an_online_socket_and_never_runs_the_request_otherwise`](../../tests/media_test.odin#L732) | Require an online socket before dispatching a generic HTTP job. |
+| [`media_retry_preserves_caller_routing_metadata`](../../tests/media_test.odin#L236) | Correlate media retry with the message routing supplied by its caller. |
+| [`writer_golden_media`](../../tests/media_test.odin#L308) | Build the reference media message for writer comparisons. |
+| [`writer_media_encoders_match_retired_writer`](../../tests/media_test.odin#L388) | Compare encoded media fields against stored reference bytes. |
+| [`codec_api_reaction_key`](../../tests/media_test.odin#L419) | Construct the message key targeted by the reaction test. |
+| [`reaction_checkmark_encode_matches_reference_bytes_and_decodes_back`](../../tests/media_test.odin#L433) | Match the checkmark reaction wire bytes and decode the result. |
+| [`reaction_checkmark_encode_validates_key_and_destination`](../../tests/media_test.odin#L452) | Check invalid reaction keys and undersized output buffers. |
+| [`reaction_message_decode_rejects_malformed_and_ignores_other_messages`](../../tests/media_test.odin#L477) | Reject malformed reaction data and distinguish other message types. |
+| [`send_image_rejects_bad_state_and_inputs_before_any_network_work`](../../tests/media_test.odin#L511) | Reject invalid image parameters before network work starts. |
+| [`send_reaction_validates_state_key_and_text`](../../tests/media_test.odin#L532) | Reject invalid reaction state, target or text. |
+| [`download_fixture_init`](../../tests/media_test.odin#L572) | Construct encrypted file bytes and the associated media message. |
+| [`download_media_fetches_decrypts_and_verifies_over_the_cdn_path`](../../tests/media_test.odin#L606) | Download encrypted media through its canonical CDN path and check recovered bytes. |
+| [`download_media_corrupt_ciphertext_fails_authentication_and_leaves_destination_untouched`](../../tests/media_test.odin#L626) | Corrupt the downloaded ciphertext and verify authentication failure preserves the output. |
+| [`download_media_surfaces_http_status_without_retrying_other_codes`](../../tests/media_test.odin#L651) | Check that an HTTP failure carries its status and only eligible codes enter retry. |
+| [`download_media_runs_offline_backlog_while_provisioning`](../../tests/media_test.odin#L672) | Download offline-batch media received before activation completes. |
+| [`download_media_preflights_state_message_and_destination_before_network`](../../tests/media_test.odin#L711) | Reject invalid input or output capacity before attempting an HTTP request. |
+| [`http_execute_requires_an_online_socket_and_never_runs_the_request_otherwise`](../../tests/media_test.odin#L753) | Require an online socket before dispatching a generic HTTP job. |
+| [`download_private_voice_note_and_audio_attachment`](../../tests/media_test.odin#L767) | Download both private audio variants using independent encrypted bytes and verify that a corrupt file leaves the destination untouched. |
 
 <a id="file-tests-pairing-test-odin"></a>
 
@@ -713,6 +719,7 @@
 | [`unsupported_enc_write_fail`](../../tests/receive_test.odin#L1204) | Fail the write of the negative acknowledgement. |
 | [`unsupported_encryption_failed_nack_does_not_commit_or_enqueue_retry`](../../tests/receive_test.odin#L1209) | Fail the negative ACK and check for durable changes or queued retries. |
 | [`unsupported_encryption_keeps_supported_distribution_order_and_controls_admissible`](../../tests/receive_test.odin#L1234) | Accept supported sender-key distribution ordering and admissible controls. |
+| [`history_redelivery_restores_receipt_after_reopening_store`](../../tests/receive_test.odin#L1251) | Reopen the state after a history message commits and verify that its duplicate requests the history receipt. |
 
 <a id="file-tests-send-test-odin"></a>
 
@@ -752,8 +759,10 @@
 
 | Function | Behavior |
 |---|---|
-| [`state_atomic_write_replaces_the_file_and_reports_a_missing_directory`](../../tests/state_store_test.odin#L9) | Replace a state file and verify the missing-directory error path. |
-| [`consumer_can_store_read_and_replace_session`](../../tests/state_store_test.odin#L30) | Use only the public library API to store, read and replace session data. |
+| [`state_atomic_write_replaces_the_file_and_reports_a_missing_directory`](../../tests/state_store_test.odin#L10) | Replace a state file and verify the missing-directory error path. |
+| [`consumer_can_store_read_and_replace_session`](../../tests/state_store_test.odin#L31) | Use only the public library API to store, read and replace session data. |
+| [`post_rename_directory_failure_requires_reloading_replaced_state`](../../tests/state_store_test.odin#L52) | Deny directory reads after file replacement, verify that stale writes fail and reload the new revision. |
+| [`rollback_export_preserves_session_and_queue_with_legacy_contact_fields`](../../tests/state_store_test.odin#L81) | Reopen a rollback export and compare session records, queued ciphertext, saved names, and legacy sync fields with the untouched source. |
 
 <a id="file-tools-protocol-watcher-tests-main-test-odin"></a>
 

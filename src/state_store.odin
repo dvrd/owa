@@ -33,6 +33,7 @@ State_Record_Kind :: enum u8 {
 	Contact_Sync_Key,
 	Contact_Index_MAC,
 	Contact_Sync_State,
+	Pending_Profile_History,
 }
 State_Record :: struct {
 	kind: State_Record_Kind,
@@ -41,6 +42,7 @@ State_Record :: struct {
 }
 State_Store :: struct {
 	initialized:                bool,
+	requires_reload:            bool,
 	identity:                   [32]u8,
 	records:                    [dynamic]State_Record,
 	revision, durable_revision: u64,
@@ -61,6 +63,7 @@ State_Error_Kind :: enum {
 	Write_Failed,
 	Flush_Failed,
 	Rename_Failed,
+	Directory_Flush_Failed,
 }
 State_Error :: struct {
 	kind:       State_Error_Kind,
@@ -111,21 +114,26 @@ state_store_clear :: proc(store: ^State_Store) {
 // Returned bytes borrow the store until its next mutation/clear. Never mutate
 // them: stage changes in a candidate, then set and save before exposing effects.
 state_store_get :: proc(store: ^State_Store, kind: State_Record_Kind, name: string) -> ([]u8, bool) {
+	record, found := state_store_find_record(store, kind, name)
+	return record.data, found
+}
+
+state_store_find_record :: proc(store: ^State_Store, kind: State_Record_Kind, name: string) -> (State_Record, bool) {
 	if store == nil || !store.initialized {
-		return nil, false
+		return {}, false
 	}
 
 	for record in store.records {
 		if record.kind == kind && record.name == name {
-			return record.data, true
+			return record, true
 		}
 	}
 
-	return nil, false
+	return {}, false
 }
 
 state_store_delete :: proc(store: ^State_Store, kind: State_Record_Kind, name: string) -> State_Error {
-	if store == nil || !store.initialized {
+	if store == nil || !store.initialized || store.requires_reload {
 		return {kind = .Invalid_State}
 	}
 
@@ -153,7 +161,7 @@ state_store_delete :: proc(store: ^State_Store, kind: State_Record_Kind, name: s
 // session snapshot and its consumed-prekey marker must be saved together.
 // Until then, runtime code must neither ack plaintext nor send ciphertext.
 state_store_set :: proc(store: ^State_Store, kind: State_Record_Kind, name: string, data: []u8) -> State_Error {
-	if store == nil || !store.initialized {
+	if store == nil || !store.initialized || store.requires_reload {
 		return {kind = .Invalid_State}
 	}
 
@@ -297,7 +305,7 @@ state_store_encode :: proc(dst: []u8, store: ^State_Store) -> (int, State_Error)
 state_store_clone :: proc(destination, source: ^State_Store, allocator := context.allocator) -> State_Error {
 	if destination == nil ||
 	   source == nil ||
-	   !source.initialized ||
+	   !source.initialized || source.requires_reload ||
 	   source.revision == 0 ||
 	   source.durable_revision > source.revision {
 		return {kind = .Invalid_State}
@@ -530,7 +538,8 @@ state_store_decode :: proc(
 	return {}
 }
 
-state_store_save :: proc(store: ^State_Store, path: string) -> State_Error {
+state_store_save :: proc(store: ^State_Store, path: string, create_only := false) -> State_Error {
+	if store != nil && store.requires_reload { return {kind = .Directory_Flush_Failed} }
 	size, measured := state_store_encode(nil, store)
 
 	if measured.kind != .Destination_Undersized {
@@ -553,7 +562,8 @@ state_store_save :: proc(store: ^State_Store, path: string) -> State_Error {
 		return encoded
 	}
 
-	if write_error := state_atomic_write(path, buffer); write_error.kind != .None {
+	if write_error := state_atomic_write(path, buffer, create_only); write_error.kind != .None {
+		store.requires_reload = write_error.kind == .Directory_Flush_Failed
 		return write_error
 	}
 
@@ -564,8 +574,8 @@ state_store_save :: proc(store: ^State_Store, path: string) -> State_Error {
 
 // Replace the file using a synced temporary file and sync its directory.
 // Report the failing step as a State_Error.
-state_atomic_write :: proc(path: string, data: []u8) -> State_Error {
-	step, io_error := replace_file_durably(path, data)
+state_atomic_write :: proc(path: string, data: []u8, create_only := false) -> State_Error {
+	step, io_error := replace_file_durably(path, data, create_only)
 
 	if step == .None {
 		return {}
@@ -577,7 +587,7 @@ state_atomic_write :: proc(path: string, data: []u8) -> State_Error {
 		.Flush     = .Flush_Failed,
 		.Close     = .Write_Failed,
 		.Rename    = .Rename_Failed,
-		.Directory = .Flush_Failed,
+		.Directory = .Directory_Flush_Failed,
 	}
 
 	return {kind = kinds[step], io = io_error}
@@ -617,6 +627,16 @@ state_store_load :: proc(store: ^State_Store, path: string, identity: [32]u8) ->
 		return {kind = .Read_Failed, io = read_err}
 	}
 
+	// A previous rename succeeded but the directory entry was not confirmed.
+	// Establish durability before adopting the visible file as the new baseline.
+	if store != nil && store.requires_reload {
+		parent, open_error := os.open(filepath.dir(path))
+		if open_error != nil { return {kind = .Directory_Flush_Failed, io = open_error} }
+		defer os.close(parent)
+		if flush_error := os.flush(parent); flush_error != nil {
+			return {kind = .Directory_Flush_Failed, io = flush_error}
+		}
+	}
 	if err := state_store_decode(store, buffer[:used], identity); err.kind != .None {
 		return err
 	}
@@ -627,7 +647,7 @@ state_store_load :: proc(store: ^State_Store, path: string, identity: [32]u8) ->
 }
 
 state_record_valid :: proc(kind: State_Record_Kind, name: string, data: []u8) -> bool {
-	if cast(u8)kind > cast(u8)State_Record_Kind.Contact_Sync_State ||
+	if cast(u8)kind > cast(u8)State_Record_Kind.Pending_Profile_History ||
 	   len(name) == 0 ||
 	   len(name) > 512 ||
 	   len(data) > MAX_STATE_RECORD_SIZE {
@@ -655,9 +675,10 @@ state_record_valid :: proc(kind: State_Record_Kind, name: string, data: []u8) ->
 		}
 	case .Contact_Sync_State:
 		switch name {
+		case "contacts-key-id": return len(data) > 0 && len(data) <= 128
 		case "ready": return len(data) == 1 && data[0] == 1
-		case "cursor": return len(data) == 136
-		case "required-version": return len(data) == 8
+		case "cursor", "contacts-cursor": return len(data) == 136
+		case "required-version", "server-version": return len(data) == 8
 		case: return false
 		}
 	}
@@ -677,7 +698,7 @@ Durable_Write_Step :: enum {
 // directory fsync: flushing the file protects its contents, but the directory
 // entry must be durable too. Reports the step that failed. Serialize writers;
 // this is a local single-process store, not a multi-writer database.
-replace_file_durably :: proc(path: string, data: []u8) -> (Durable_Write_Step, os.Error) {
+replace_file_durably :: proc(path: string, data: []u8, create_only := false) -> (Durable_Write_Step, os.Error) {
 	random: [8]u8
 	crypto.rand_bytes(random[:])
 	tmp := fmt.aprintf("%s.tmp-%016x", path, transmute(u64)random)
@@ -718,10 +739,13 @@ replace_file_durably :: proc(path: string, data: []u8) -> (Durable_Write_Step, o
 		return .Close, close_err
 	}
 
-	if err := os.rename(tmp, path); err != nil {
+	if create_only {
+		// Publish the flushed inode only if the destination is still absent.
+		if err := os.link(tmp, path); err != nil {return .Rename, err}
+		if err := os.remove(tmp); err != nil {return .Directory, err}
+	} else if err := os.rename(tmp, path); err != nil {
 		return .Rename, err
 	}
-
 	renamed = true
 	parent, parent_err := os.open(filepath.dir(path))
 	if parent_err != nil {
@@ -762,4 +786,43 @@ sha256 :: proc(src: []u8) -> [32]u8 {
 	digest: [32]u8
 	hash.hash_bytes_to_buffer(.SHA256, src, digest[:])
 	return digest
+}
+
+// Build a v0.2.0–v0.2.2 snapshot for an offline handoff. The source remains
+// authoritative until the caller transfers ownership to the older process.
+state_store_export_v0_2 :: proc(source: ^State_Store, path: string) -> (deferred_profiles: int, error: State_Error) {
+	if source == nil || !source.initialized || source.revision != source.durable_revision {
+		return 0, {kind = .Invalid_State}
+	}
+	exported: State_Store
+	defer state_store_clear(&exported)
+	if e := state_store_clone(&exported, source); e.kind != .None {return 0, e}
+	for record in source.records {
+		#partial switch record.kind {
+		case .Contact_Sync_State:
+			legacy_name: string
+			switch record.name {
+			case "contacts-cursor": legacy_name = "cursor"
+			case "server-version": legacy_name = "required-version"
+			case "contacts-key-id": // This transient key hint has no v0.2 representation.
+			case "ready", "cursor", "required-version": continue
+			case: return 0, {kind = .Invalid_Record}
+			}
+			if e := state_store_delete(&exported, record.kind, record.name); e.kind != .None {return 0, e}
+			if legacy_name != "" {
+				if e := state_store_set(&exported, record.kind, legacy_name, record.data); e.kind != .None {return 0, e}
+			}
+		case .Pending_Profile_History:
+			// Older clients cannot import deferred profile names. The original
+			// snapshot retains the references and all previously imported names.
+			if e := state_store_delete(&exported, record.kind, record.name); e.kind != .None {return 0, e}
+			deferred_profiles += 1
+		case .Processed_Message:
+			if processed_history_receipt(record.data) {
+				if e := state_store_set(&exported, record.kind, record.name, record.data[:8]); e.kind != .None {return 0, e}
+			}
+		}
+		if record.kind > .Pending_Profile_History {return 0, {kind = .Invalid_Record}}
+	}
+	return deferred_profiles, state_store_save(&exported, path, create_only = true)
 }

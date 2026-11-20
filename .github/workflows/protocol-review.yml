@@ -32,14 +32,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          pin=tools/protocol_watcher/linux-amd64.sha256
+          watcher=tools/protocol_watcher
+          if [[ ! -f "$watcher/linux-amd64.sha256" ]]; then watcher=tools/protocol_watch; fi
+          pin=$watcher/linux-amd64.sha256
           read -r digest asset < "$pin"
-          gh release download "protocol-watch-${digest:0:16}" --repo "$GITHUB_REPOSITORY" --pattern "$asset" --dir "$RUNNER_TEMP"
-          (cd "$RUNNER_TEMP" && sha256sum -c "$GITHUB_WORKSPACE/$pin")
+          tag="protocol-watch-${digest:0:16}"
+          source=$(sed -n 's/^# source //p' "$pin")
+          if [[ -n "$source" ]]; then
+            [[ "$source" =~ ^[0-9a-f]{40}$ ]]
+            tag="protocol-watch-$source-${digest:0:16}"
+            [[ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq .object.sha)" == "$source" ]]
+          fi
+          echo "WATCHER_MANIFEST=$watcher/sources.json" >> "$GITHUB_ENV"
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "$asset" --dir "$RUNNER_TEMP"
+          (cd "$RUNNER_TEMP" && printf '%s  %s\n' "$digest" "$asset" | sha256sum --strict -c -)
           chmod +x "$RUNNER_TEMP/$asset"
       - name: Scan and assess bounded public upstream changes
         run: >-
           "$RUNNER_TEMP/protocol-watch-linux-amd64" ci
+          --manifest "$WATCHER_MANIFEST"
           --state-dir "$RUNNER_TEMP/protocol-state"
           --output-dir "$RUNNER_TEMP/protocol-report"
       - name: Track only new actionable tasks or investigation spikes

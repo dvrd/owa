@@ -1,13 +1,13 @@
 package whatsapp
 
-import endian "core:encoding/endian"
-import "core:slice"
+import "core:bytes"
+import "core:crypto"
+import "core:encoding/endian"
 import "core:fmt"
+import "core:slice"
 import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
-import "core:bytes"
-import "core:crypto"
 
 // Device discovery and remote key bundles.
 
@@ -28,12 +28,14 @@ Device_Error_Kind :: enum {
 	Invalid_Signature,
 	Binary_Node_Failed,
 }
+
 Device_Error :: struct {
 	kind:        Device_Error_Kind,
 	required:    int,
 	server_code: u32,
 	binary:      Binary_Node_Error,
 }
+
 Remote_Device :: struct {
 	user_jid:      string, // Borrows the decoded response document.
 	id, key_index: u32,
@@ -56,7 +58,8 @@ device_keys_response_decode :: proc(
 	int,
 	Device_Error,
 ) {
-	if validation_error := device_query_response_validate(node, jids, request_id, true); validation_error.kind != .None {
+  validation_error := device_query_response_validate(node, jids, request_id, true)
+	if validation_error.kind != .None {
 		return 0, validation_error
 	}
 
@@ -200,7 +203,10 @@ device_bundle_decode :: proc(node: Binary_Node) -> (Signal_Prekey_Bundle, Device
 	return result, {}
 }
 
-device_bundle_prekey_decode :: proc(node: Binary_Node, result: ^Signal_Prekey_Bundle) -> Device_Error {
+device_bundle_prekey_decode :: proc(
+	node: Binary_Node,
+	result: ^Signal_Prekey_Bundle,
+) -> Device_Error {
 	if _, has_key := pairing_node_child(node, "key"); has_key {
 		key, e := device_unique_child(node, "key")
 		if e.kind != .None {
@@ -227,7 +233,14 @@ device_bundle_prekey_decode :: proc(node: Binary_Node, result: ^Signal_Prekey_Bu
 	return {}
 }
 
-device_read_fixed_child_bytes :: proc(node: Binary_Node, tag: string, length: int) -> ([]u8, Device_Error) {
+device_read_fixed_child_bytes :: proc(
+	node: Binary_Node,
+	tag: string,
+	length: int,
+) -> (
+	[]u8,
+	Device_Error,
+) {
 	child, err := device_unique_child(node, tag)
 	if err.kind != .None {
 		return nil, err
@@ -244,7 +257,14 @@ device_read_fixed_child_bytes :: proc(node: Binary_Node, tag: string, length: in
 
 // Queries all recipient devices, including primary phones (device zero).
 // Users must be normalized PN or LID JIDs, without a device/agent suffix.
-devices_query_encode :: proc(dst: []u8, users: []string, request_id: string) -> (int, Device_Error) {
+devices_query_encode :: proc(
+	dst: []u8,
+	users: []string,
+	request_id: string,
+) -> (
+	int,
+	Device_Error,
+) {
 	if !stanza_id_valid(request_id) || len(users) == 0 {
 		return 0, {kind = .Invalid_Request}
 	}
@@ -255,11 +275,17 @@ devices_query_encode :: proc(dst: []u8, users: []string, request_id: string) -> 
 
 	attrs: [MAX_DEVICE_QUERY_USERS][1]Binary_Node_Attribute
 	nodes: [MAX_DEVICE_QUERY_USERS]Binary_Node
-	if node_error := devices_query_nodes_prepare(users, attrs[:], nodes[:]); node_error.kind != .None {
+	if node_error := devices_query_nodes_prepare(users, attrs[:], nodes[:]);
+	   node_error.kind != .None {
 		return 0, node_error
 	}
 	children := [?]Binary_Node {
-		{tag = "query", content = []Binary_Node{{tag = "devices", attrs = []Binary_Node_Attribute{{"version", "2"}}}}},
+		{
+			tag = "query",
+			content = []Binary_Node {
+				{tag = "devices", attrs = []Binary_Node_Attribute{{"version", "2"}}},
+			},
+		},
 		{tag = "list", content = nodes[:len(users)]},
 	}
 
@@ -330,7 +356,8 @@ devices_response_decode :: proc(
 	int,
 	Device_Error,
 ) {
-	if validation_error := device_query_response_validate(node, users, request_id, false); validation_error.kind != .None {
+	if validation_error := device_query_response_validate(node, users, request_id, false);
+	   validation_error.kind != .None {
 		return 0, validation_error
 	}
 
@@ -438,7 +465,13 @@ devices_response_user_validate :: proc(child: Binary_Node, jid: string) -> (int,
 	return count, {}
 }
 
-devices_response_children_validate :: proc(children: []Binary_Node, users: []string) -> (int, Device_Error) {
+devices_response_children_validate :: proc(
+	children: []Binary_Node,
+	users: []string,
+) -> (
+	int,
+	Device_Error,
+) {
 	seen: [MAX_DEVICE_QUERY_USERS]bool
 	count := 0
 
@@ -486,7 +519,13 @@ remote_device_jid :: proc(dst: []u8, device: Remote_Device) -> (string, Device_E
 
 	at := strings.index_byte(device.user_jid, '@')
 	buffer: [256]u8
-	text := fmt.bprintf(buffer[:], "%s:%d%s", device.user_jid[:at], device.id, device.user_jid[at:])
+	text := fmt.bprintf(
+		buffer[:],
+		"%s:%d%s",
+		device.user_jid[:at],
+		device.id,
+		device.user_jid[at:],
+	)
 
 	if len(dst) < len(text) {
 		return "", {kind = .Destination_Undersized, required = len(text)}
@@ -511,7 +550,8 @@ stanza_id_valid :: proc(id: string) -> bool {
 	return true
 }
 device_user_jid_valid :: proc(jid: string, allow_device: bool) -> bool {
-	if len(jid) > 128 || !(strings.has_suffix(jid, "@s.whatsapp.net") || strings.has_suffix(jid, "@lid")) {
+	if len(jid) > 128 ||
+	   !(strings.has_suffix(jid, "@s.whatsapp.net") || strings.has_suffix(jid, "@lid")) {
 		return false
 	}
 
@@ -531,7 +571,9 @@ device_response_validate :: proc(node: Binary_Node, request_id: string) -> Devic
 	id, _ := node_attr(node, "id")
 	from, has_from := node_attr(node, "from")
 
-	if node.tag != "iq" || id != request_id || has_from && from != "s.whatsapp.net" && from != "@s.whatsapp.net" {
+	if node.tag != "iq" ||
+	   id != request_id ||
+	   has_from && from != "s.whatsapp.net" && from != "@s.whatsapp.net" {
 		return {kind = .Unexpected_Response}
 	}
 
@@ -592,7 +634,12 @@ device_entry_decode :: proc(jid: string, node: Binary_Node) -> (Remote_Device, D
 
 	hosted, _ := node_attr(node, "is_hosted")
 
-	return {user_jid = jid, id = cast(u32)n, key_index = key_index, is_hosted = hosted == "true"}, {}
+	return {
+		user_jid = jid,
+		id = cast(u32)n,
+		key_index = key_index,
+		is_hosted = hosted == "true",
+	}, {}
 }
 
 MAX_GROUP_PARTICIPANTS :: 2048
@@ -642,8 +689,15 @@ group_metadata_query_encode :: proc(dst: []u8, jid, request_id: string) -> (int,
 
 	node := Binary_Node {
 		tag     = "iq",
-		attrs   = []Binary_Node_Attribute{{"type", "get"}, {"xmlns", "w:g2"}, {"to", jid}, {"id", request_id}},
-		content = []Binary_Node{{tag = "query", attrs = []Binary_Node_Attribute{{"request", "interactive"}}}},
+		attrs   = []Binary_Node_Attribute {
+			{"type", "get"},
+			{"xmlns", "w:g2"},
+			{"to", jid},
+			{"id", request_id},
+		},
+		content = []Binary_Node {
+			{tag = "query", attrs = []Binary_Node_Attribute{{"request", "interactive"}}},
+		},
 	}
 	n, err := binary_node_encode(dst, node)
 
@@ -689,7 +743,8 @@ group_metadata_decode :: proc(
 				return {}, {kind = .Invalid_Metadata}
 			}
 
-			if description_error := group_metadata_description_decode(&result, child); description_error.kind != .None {
+			if description_error := group_metadata_description_decode(&result, child);
+			   description_error.kind != .None {
 				return {}, description_error
 			}
 		}
@@ -810,7 +865,10 @@ group_metadata_response_group :: proc(
 	return group, {}
 }
 
-group_metadata_description_decode :: proc(result: ^Group_Metadata, child: Binary_Node) -> Group_Error {
+group_metadata_description_decode :: proc(
+	result: ^Group_Metadata,
+	child: Binary_Node,
+) -> Group_Error {
 	result.description_id, _ = node_attr(child, "id")
 	bodies := 0
 	parts, _ := child.content.([]Binary_Node)
@@ -880,7 +938,8 @@ group_participant_decode :: proc(node: Binary_Node) -> (Group_Participant, Group
 
 	if len(result.jid) == 0 ||
 	   len(result.jid) > 256 ||
-	   !(strings.has_suffix(result.jid, "@s.whatsapp.net") || strings.has_suffix(result.jid, "@lid")) {
+	   !(strings.has_suffix(result.jid, "@s.whatsapp.net") ||
+			   strings.has_suffix(result.jid, "@lid")) {
 		return {}, {kind = .Invalid_Metadata}
 	}
 
@@ -953,7 +1012,10 @@ socket_record_lid_mapping :: proc(socket: ^Socket, pn, lid: string) -> Socket_Er
 
 // Group metadata already passed the response id/group/server validation. All
 // mappings and affected ratchets are committed together, including conflicts.
-socket_record_group_lid_mappings :: proc(socket: ^Socket, metadata: Group_Metadata) -> Socket_Error {
+socket_record_group_lid_mappings :: proc(
+	socket: ^Socket,
+	metadata: Group_Metadata,
+) -> Socket_Error {
 	if socket == nil || socket.store == nil {
 		return {kind = .Invalid_State}
 	}
@@ -968,7 +1030,8 @@ socket_record_group_lid_mappings :: proc(socket: ^Socket, metadata: Group_Metada
 	for participant in metadata.participants {
 		pn, lid := participant.phone_number, participant.lid
 		if pn == "" &&
-		   (strings.has_suffix(participant.jid, "@s.whatsapp.net") || strings.has_suffix(participant.jid, "@c.us")) {
+		   (strings.has_suffix(participant.jid, "@s.whatsapp.net") ||
+				   strings.has_suffix(participant.jid, "@c.us")) {
 			pn = participant.jid
 		}
 
@@ -1074,13 +1137,15 @@ socket_lid_mapping_stage :: proc(store: ^State_Store, pn, lid: string) -> Socket
 	}
 
 	if !have_pn {
-		if e := state_store_set(store, .LID_Mapping, pn_key, transmute([]u8)bare_lid); e.kind != .None {
+		if e := state_store_set(store, .LID_Mapping, pn_key, transmute([]u8)bare_lid);
+		   e.kind != .None {
 			return {kind = .State_Failed, state = e}
 		}
 	}
 
 	if !have_lid {
-		if e := state_store_set(store, .LID_Mapping, lid_key, transmute([]u8)bare_pn); e.kind != .None {
+		if e := state_store_set(store, .LID_Mapping, lid_key, transmute([]u8)bare_pn);
+		   e.kind != .None {
 			return {kind = .State_Failed, state = e}
 		}
 	}
@@ -1116,12 +1181,14 @@ socket_lid_migrate :: proc(next, original: ^State_Store) -> Socket_Error {
 			}
 
 			if kind == .Session {
-				if pin_error := socket_lid_session_pin_validate(next, record, name); pin_error.kind != .None {
+				if pin_error := socket_lid_session_pin_validate(next, record, name);
+				   pin_error.kind != .None {
 					return pin_error
 				}
 			}
 
-			if merge_error := socket_lid_record_merge(next, record, name); merge_error.kind != .None {
+			if merge_error := socket_lid_record_merge(next, record, name);
+			   merge_error.kind != .None {
 				return merge_error
 			}
 
@@ -1134,7 +1201,11 @@ socket_lid_migrate :: proc(next, original: ^State_Store) -> Socket_Error {
 	return {}
 }
 
-socket_lid_session_pin_validate :: proc(next: ^State_Store, record: State_Record, name: string) -> Socket_Error {
+socket_lid_session_pin_validate :: proc(
+	next: ^State_Store,
+	record: State_Record,
+	name: string,
+) -> Socket_Error {
 	owner := name
 
 	if hash := strings.index_byte(owner, '#'); hash >= 0 {
@@ -1152,7 +1223,8 @@ socket_lid_session_pin_validate :: proc(next: ^State_Store, record: State_Record
 			return {kind = .Signal_Failed, signal = e}
 		}
 
-		if len(pin) != 32 || crypto.compare_constant_time(pin, decoded.remote_identity_public[:]) != 1 {
+		if len(pin) != 32 ||
+		   crypto.compare_constant_time(pin, decoded.remote_identity_public[:]) != 1 {
 			return {kind = .Identity_Changed}
 		}
 	}
@@ -1195,14 +1267,19 @@ socket_lid_session_archive :: proc(
 	defer {
 		crypto.zero_explicit(temporary, size_of(Socket)); free(temporary)
 	}; temporary.store = next
-	if archive_error := socket_archive_session(temporary, name, incoming); archive_error.kind != .None {
+	if archive_error := socket_archive_session(temporary, name, incoming);
+	   archive_error.kind != .None {
 		return archive_error
 	}
 
 	return {}
 }
 
-socket_lid_record_merge :: proc(next: ^State_Store, record: State_Record, name: string) -> Socket_Error {
+socket_lid_record_merge :: proc(
+	next: ^State_Store,
+	record: State_Record,
+	name: string,
+) -> Socket_Error {
 	kind := record.kind
 
 	if existing, have := state_store_get(next, kind, name); have {
@@ -1212,13 +1289,25 @@ socket_lid_record_merge :: proc(next: ^State_Store, record: State_Record, name: 
 			}
 
 			if kind == .Processed_Message {
-				if len(record.data) == 8 && (len(existing) != 8 || bytes.compare(record.data, existing) > 0) {
-					if e := state_store_set(next, kind, name, record.data); e.kind != .None {
+				if len(record.data) == 8 || processed_history_receipt(record.data) {
+					marker: [9]u8
+					copy(marker[:8], record.data[:8])
+					if (len(existing) == 8 || processed_history_receipt(existing)) &&
+					   bytes.compare(existing[:8], marker[:8]) > 0 {
+						copy(marker[:8], existing[:8])
+					}
+					size := 8
+					if processed_history_receipt(existing) ||
+					   processed_history_receipt(record.data) {
+						marker[8], size = 1, 9
+					}
+					if e := state_store_set(next, kind, name, marker[:size]); e.kind != .None {
 						return {kind = .State_Failed, state = e}
 					}
 				}
 			} else if kind == .Session {
-				if archive_error := socket_lid_session_archive(next, record, name, existing); archive_error.kind != .None {
+				if archive_error := socket_lid_session_archive(next, record, name, existing);
+				   archive_error.kind != .None {
 					return archive_error
 				}
 			} else {
@@ -1234,7 +1323,14 @@ socket_lid_record_merge :: proc(next: ^State_Store, record: State_Record, name: 
 	return {}
 }
 
-socket_lid_record_name :: proc(store: ^State_Store, kind: State_Record_Kind, name: string) -> (string, Socket_Error) {
+socket_lid_record_name :: proc(
+	store: ^State_Store,
+	kind: State_Record_Kind,
+	name: string,
+) -> (
+	string,
+	Socket_Error,
+) {
 	prefix, suffix, jid := "", "", name
 
 	if kind == .Session {
