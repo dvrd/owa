@@ -1,0 +1,72 @@
+name: Release owa
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [closed]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  publish:
+    if: github.event.pull_request.merged == true
+    concurrency:
+      group: owa-main-releases
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Publish unreleased merges in main history order
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          stable='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          previous=$(git tag --merged HEAD --sort=-version:refname | grep -E "$stable" | sed -n '1p')
+          IFS=. read -r major minor patch <<< "${previous#v}"
+          breaking='^[[:alpha:]][[:alnum:]-]*(\([^()]+\))?!:'
+          feature='^feat(\([^()]+\))?:'
+
+          # A queued run can be superseded. Walk every merge since the last
+          # library tag so that a later run also finishes interrupted releases.
+          # A rerun of an already published PR has no work to do.
+          if git merge-base --is-ancestor "$MERGE_SHA" "$previous"; then
+            exit 0
+          fi
+          git merge-base --is-ancestor "$MERGE_SHA" HEAD
+          commits=$(git rev-list --first-parent --reverse "$previous..$MERGE_SHA")
+          for commit in $commits; do
+            # GitHub records the final main SHA for merge, squash and rebase.
+            if [[ "$commit" == "$MERGE_SHA" ]]; then
+              title=$PR_TITLE
+            else
+              title=$(gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$commit/pulls" |
+                jq -sr --arg sha "$commit" --arg repo "$GITHUB_REPOSITORY" '
+                  [ .[][] | select(.merged_at and .base.ref == "main" and
+                      .base.repo.full_name == $repo and .merge_commit_sha == $sha) ][0].title // empty')
+            fi
+            if [[ -z "$title" ]]; then
+              continue
+            fi
+            if [[ "$title" =~ $breaking ]]; then
+              major=$((major + 1)); minor=0; patch=0
+            elif [[ "$title" =~ $feature ]]; then
+              minor=$((minor + 1)); patch=0
+            else
+              patch=$((patch + 1))
+            fi
+            tag="v$major.$minor.$patch"
+            gh release create "$tag" --target "$commit" --title "owa $tag" \
+              --generate-notes --notes-start-tag "$previous" --latest
+            previous=$tag
+          done
