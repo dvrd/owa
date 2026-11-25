@@ -1,13 +1,13 @@
 package whatsapp_test
 
 import "core:testing"
-import test_fixtures "fixtures/client"
+import test_fixtures "../fixtures/client"
 import wa "shared:whatsapp"
 
 @(test)
 contact_sync_rejects_forged_records_and_collection_signatures :: proc(t: ^testing.T) {
-	raw := test_fixtures.codec_api_hex(string(#load("fixtures/contact_sync/snapshot.hex")))
-	share := test_fixtures.codec_api_hex(string(#load("fixtures/contact_sync/key-share.hex")))
+	raw := test_fixtures.codec_api_hex(string(#load("../fixtures/contact_sync/snapshot.hex")))
+	share := test_fixtures.codec_api_hex(string(#load("../fixtures/contact_sync/key-share.hex")))
 	// Locate each signed part in the independent vector and change one byte.
 	for target in 0 ..< 3 {
 		checkpoint := make([]u8, len(raw))

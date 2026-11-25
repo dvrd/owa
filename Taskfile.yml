@@ -9,8 +9,8 @@ tasks:
     cmds:
       - |
           for source_dir in src tools/protocol_watcher/src; do
-            test_dir=tests
-            if [ "$source_dir" != src ]; then test_dir="${source_dir%/src}/tests"; fi
+            test_dir=tests/unit
+            if [ "$source_dir" != src ]; then test_dir=tests/unit/protocol_watcher; fi
             for source in "$source_dir"/*.odin; do
               name=${source##*/}
               test -f "$test_dir/${name%.odin}_test.odin" || { echo "Missing unit tests for $source" >&2; exit 1; }
@@ -38,7 +38,7 @@ tasks:
           umask 077
           work=$(mktemp -d "${TMPDIR:-/tmp}/owa-protocol-tests.XXXXXX")
           trap 'rm -rf "$work"' EXIT
-          for suite in tools/protocol_watcher/tests tests/e2e/protocol_watch; do
+          for suite in tests/unit/protocol_watcher tests/e2e/protocol_watch; do
             "${OWA_ODIN_BIN:-${ODIN:-odin}}" test "$suite" \
               "-collection:shared=${OWA_SHARED_ROOT:-${WEBTOOLS_SHARED:-$HOME/dev/oss/Odin/shared}}" \
               -thread-count:1 -vet -warnings-as-errors -define:ODIN_TEST_THREADS=1 \
@@ -97,16 +97,17 @@ tasks:
           # Keep the old package selectors working as well as the directory names.
           case "$selected" in
               tools/protocol_watch) selected=tools/protocol_watcher ;;
-              public_api) selected=. ;;
+              public_api|tests) selected=. ;;
+              tools/protocol_watcher/tests) selected=tests/unit/protocol_watcher ;;
               encrypted_recovery|loopback_noise|recovery_campaign|version_http) selected=e2e/$selected ;;
           esac
           : > "$work/suites"
-          for suite in tests tools/protocol_watcher/tests "$root"/tests/e2e/*; do
+          for suite in tests/unit tests/unit/protocol_watcher "$root"/tests/e2e/*; do
               suite=${suite#"$root"/}
               compgen -G "$root/$suite/*_test.odin" >/dev/null || continue
               case "$suite" in
-                  tests) owner=. ;;
-                  tools/protocol_watcher/tests) owner=tools/protocol_watcher ;;
+                  tests/unit) owner=. ;;
+                  tests/unit/protocol_watcher) owner=tools/protocol_watcher ;;
                   *) owner=${suite#tests/} ;;
               esac
               [[ "$internal_only" == false || "$owner" == . ]] || continue

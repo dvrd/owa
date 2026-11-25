@@ -1420,6 +1420,7 @@ socket_send_primary_device_message :: proc(
 	id: string,
 	message: []u8,
 	history := false,
+	placeholder_resend := false,
 ) -> Socket_Error {
 	me := string(socket.auth.account.jid[:socket.auth.account.jid_size])
 	user, _, e := pairing_jid_decode(me)
@@ -1503,7 +1504,7 @@ socket_send_primary_device_message :: proc(
 		{"push_priority", "high"},
 		{"privacy_sensitive", "1"},
 	}
-	attr_count := 5
+	attr_count := 4 if placeholder_resend else 5
 	if history {
 		attrs[4].value = "high_force"
 		attr_count = 6

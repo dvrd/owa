@@ -343,20 +343,77 @@ socket_fetch_chat_history :: proc(
 	[dynamic]^Socket_Message,
 	Socket_Error,
 ) {
+	return socket_fetch_history_page(socket, chat_jid, before, count, timeout, true)
+}
+
+Recent_Chat_History :: struct {
+	messages:               [dynamic]^Socket_Message,
+	// All three pointers borrow messages. Bounds describe only the received page.
+	oldest, newest, target: ^Socket_Message,
+}
+
+// Request INITIAL_REVERSE_HISTORY even when the store has an older reference.
+// target_id identifies an incoming message unless target_from_me is set.
+socket_fetch_recent_chat_history :: proc(
+	socket: ^Socket,
+	chat_jid: string,
+	target_id := "",
+	target_from_me := false,
+	count := MAX_CHAT_HISTORY_MESSAGES,
+	timeout := 60 * time.Second,
+) -> (
+	Recent_Chat_History,
+	Socket_Error,
+) {
+	if target_id != "" && !socket_inbox_id_valid(target_id) {
+		return {}, {kind = .Invalid_Config}
+	}
+	// The caller may have borrowed the ID from a state record before this query.
+	id, ae := strings.clone(target_id)
+	if ae != nil {
+		return {}, {kind = .Allocation_Failed, allocation = ae}
+	}
+	defer delete(id)
+	messages, err := socket_fetch_history_page(socket, chat_jid, {}, count, timeout, false)
+	if err.kind != .None {
+		return {}, err
+	}
+	page := Recent_Chat_History {
+		messages = messages,
+	}
+	for msg in messages {
+		if page.oldest == nil || msg.timestamp < page.oldest.timestamp {
+			page.oldest = msg
+		}
+		if page.newest == nil || msg.timestamp > page.newest.timestamp {
+			page.newest = msg
+		}
+		if msg.id == id && msg.from_me == target_from_me {
+			page.target = msg
+		}
+	}
+	return page, {}
+}
+
+@(private)
+socket_fetch_history_page :: proc(
+	socket: ^Socket, chat_jid: string, before: Chat_History_Cursor, count: int,
+	timeout: time.Duration, use_local_cursor: bool,
+) -> ([dynamic]^Socket_Message, Socket_Error) {
 	if socket == nil ||
 	   socket.phase != .Online ||
 	   socket.auth == nil ||
 	   socket.store == nil ||
 	   !socket.store.initialized ||
-	   socket.history_request != nil {
+	   (socket.history_request != nil || socket.message_lookup != nil) {
 		return nil, {kind = .Invalid_State}
 	}
-	if timeout <= 0 {
+	if timeout <= 0 || !device_user_jid_valid(chat_jid, false) {
 		return nil, {kind = .Invalid_Config}
 	}
 	buf: [512]u8
 	cursor := before
-	if cursor == (Chat_History_Cursor{}) {
+	if use_local_cursor && cursor == (Chat_History_Cursor{}) {
 		known, err := latest_chat_history_cursor(socket.store, chat_jid)
 		if err.kind != .None {
 			return nil, err
@@ -450,4 +507,185 @@ socket_fetch_chat_history :: proc(
 	}
 	success = true
 	return messages, {}
+}
+
+Pending_Message_Lookup :: struct {
+	request_id, chat, target_id: string,
+	message:                     ^Socket_Message,
+	done:                        bool,
+}
+
+// Ask our own primary for an incoming private message by its original key.
+// A correlated response without that message returns nil and success.
+// The caller owns the message. A timeout does not establish availability.
+socket_fetch_private_message_by_id :: proc(
+	socket: ^Socket,
+	chat, id: string,
+	timeout := 60 * time.Second,
+) -> (
+	^Socket_Message,
+	Socket_Error,
+) {
+	if socket == nil ||
+	   socket.phase != .Online ||
+	   socket.auth == nil ||
+	   socket.store == nil ||
+	   !socket.store.initialized ||
+	   socket.history_request != nil ||
+	   socket.message_lookup != nil {
+		return nil, {kind = .Invalid_State}
+	}
+	if !device_user_jid_valid(chat, false) || !socket_inbox_id_valid(id) || timeout <= 0 {
+		return nil, {kind = .Invalid_Config}
+	}
+	// Inputs can borrow store records invalidated by the outbound Signal commit.
+	chat_copy, ce := strings.clone(chat)
+	if ce != nil {
+		return nil, {kind = .Allocation_Failed, allocation = ce}
+	}
+	defer delete(chat_copy)
+	id_copy, ie := strings.clone(id)
+	if ie != nil {
+		return nil, {kind = .Allocation_Failed, allocation = ie}
+	}
+	defer delete(id_copy)
+
+	key_buf, item_buf, op_buf, control_buf, msg_buf: [512]u8
+	key := Protobuf_Writer {
+		dst = key_buf[:],
+	}
+	media_emit_message_key(&key, {remote_jid = chat, id = id, has_from_me = true})
+	item := Protobuf_Writer {
+		dst = item_buf[:],
+	}
+	protobuf_write_bytes(&item, 1, key_buf[:key.at])
+	op := Protobuf_Writer {
+		dst = op_buf[:],
+	}
+	protobuf_write_uint(&op, 1, 4) // PLACEHOLDER_MESSAGE_RESEND
+	protobuf_write_bytes(&op, 5, item_buf[:item.at])
+	control := Protobuf_Writer {
+		dst = control_buf[:],
+	}
+	protobuf_write_uint(&control, 2, 16)
+	protobuf_write_bytes(&control, 16, op_buf[:op.at])
+	msg := Protobuf_Writer {
+		dst = msg_buf[:],
+	}
+	protobuf_write_bytes(&msg, 12, control_buf[:control.at])
+	if key.err != .None ||
+	   item.err != .None ||
+	   op.err != .None ||
+	   control.err != .None ||
+	   msg.err != .None {
+		return nil, {kind = .Invalid_Config}
+	}
+	request := Pending_Message_Lookup {
+		request_id = generate_outbound_message_id(),
+		chat       = chat_copy,
+		target_id  = id_copy,
+	}
+	socket.message_lookup = &request
+	socket.query_depth += 1
+	socket.read_deadline_scopes += 1
+	defer {
+		socket.message_lookup = nil
+		socket.query_depth -= 1
+		socket.read_deadline_scopes -= 1
+		delete(request.request_id)
+		socket_message_destroy(request.message)
+	}
+	if err := socket_send_primary_device_message(
+		socket,
+		request.request_id,
+		msg_buf[:msg.at],
+		placeholder_resend = true,
+	); err.kind != .None {
+		return nil, err
+	}
+	deadline := time.time_add(time.now(), timeout)
+	for !request.done {
+		if _, err := socket_receive_while_waiting(socket, deadline); err.kind != .None {
+			return nil, err
+		}
+	}
+	message := request.message
+	request.message = nil
+	return message, {}
+}
+
+@(private)
+collect_private_message_response :: proc(
+	request: ^Pending_Message_Lookup,
+	store: ^State_Store,
+	protocol: []u8,
+) -> Socket_Error {
+	kind, a := read_unique_protobuf_field(protocol, 2, 0)
+	body, b := read_unique_protobuf_field(protocol, 17, 2)
+	op, c := read_unique_protobuf_field(body.data, 1, 0)
+	id, d := read_unique_protobuf_field(body.data, 2, 2)
+	if !(a && b && c && d) ||
+	   kind.value != 17 ||
+	   op.value != 4 ||
+	   string(id.data) != request.request_id {
+		return {}
+	}
+	alternate := chat_history_alternate_jid(store, request.chat)
+	at := 0
+	for at < len(body.data) {
+		result, err := protobuf_field_read(body.data, &at)
+		if err != .None {
+			return {kind = .Protocol_Error}
+		}
+		if result.number != 3 {
+			continue
+		}
+		resend, r := read_unique_protobuf_field(result.data, 4, 2)
+		info, i := read_unique_protobuf_field(resend.data, 1, 2)
+		if result.wire_type != 2 || !r || !i {
+			return {kind = .Protocol_Error}
+		}
+		if info.number == 0 {
+			continue
+		}
+		key, k := read_unique_protobuf_field(info.data, 1, 2)
+		chat, j := read_unique_protobuf_field(key.data, 1, 2)
+		target, t := read_unique_protobuf_field(key.data, 3, 2)
+		own, o := read_unique_protobuf_field(key.data, 2, 0)
+		if !(k && j && t && o) || chat.number == 0 || target.number == 0 || own.value > 1 {
+			return {kind = .Protocol_Error}
+		}
+		if own.value != 0 ||
+		   string(target.data) != request.target_id ||
+		   (string(chat.data) != request.chat &&
+				   (alternate == "" || string(chat.data) != alternate)) {
+			continue
+		}
+		payload, p := read_unique_protobuf_field(info.data, 2, 2)
+		stamp, s := read_unique_protobuf_field(info.data, 3, 0)
+		if !p || !s || len(payload.data) > MAX_PROTOBUF_MESSAGE_SIZE {
+			return {kind = .Protocol_Error}
+		}
+		if len(payload.data) == 0 {
+			continue
+		}
+		if request.message != nil {
+			return {kind = .Protocol_Error}
+		}
+		message, e := socket_message_new(
+			"",
+			request.chat,
+			request.target_id,
+			payload.data,
+			false,
+			stamp.value,
+			true,
+		)
+		if e.kind != .None {
+			return e
+		}
+		request.message = message
+	}
+	request.done = true
+	return {}
 }

@@ -1,6 +1,6 @@
 package protocol_watch_test
 
-import w "../src"
+import w "../../../tools/protocol_watcher/src"
 import "core:mem"
 import "core:testing"
 

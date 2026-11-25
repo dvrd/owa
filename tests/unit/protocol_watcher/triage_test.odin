@@ -1,7 +1,7 @@
 package protocol_watch_test
 
-import w "../src"
-import test_fixtures "../../../tests/fixtures/protocol_watch"
+import w "../../../tools/protocol_watcher/src"
+import test_fixtures "../../fixtures/protocol_watch"
 import "core:encoding/base64"
 import j "core:encoding/json"
 import "core:fmt"
@@ -52,7 +52,7 @@ triage_cases :: proc(t: ^testing.T, suffix: string) {
 	mem.dynamic_arena_init(&arena)
 	defer mem.dynamic_arena_destroy(&arena)
 	context.allocator = mem.dynamic_arena_allocator(&arena)
-	corpus, error := w.decode(#load("fixtures/triage.json"), 16 * 1024 * 1024)
+	corpus, error := w.decode(#load("../../fixtures/protocol_watch/triage.json"), 16 * 1024 * 1024)
 
 	if !testing.expect_value(t, error, "") {
 		return

@@ -1,6 +1,6 @@
 package protocol_watch_test
 
-import w "../src"
+import w "../../../tools/protocol_watcher/src"
 import j "core:encoding/json"
 import "core:fmt"
 import "core:mem"
@@ -202,7 +202,7 @@ tracker_cases :: proc(t: ^testing.T, suffix: string) {
 	defer mem.dynamic_arena_destroy(&arena)
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 
-	corpus, parse_error := j.parse(#load("fixtures/tracker.json"), .JSON, true)
+	corpus, parse_error := j.parse(#load("../../fixtures/protocol_watch/tracker.json"), .JSON, true)
 	if !testing.expect_value(t, parse_error, j.Error.None) {
 		return
 	}

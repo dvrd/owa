@@ -1,7 +1,7 @@
 package whatsapp_test
 
 import "core:os"
-import test_fixtures "fixtures/client"
+import test_fixtures "../fixtures/client"
 import "core:strings"
 import "core:testing"
 import wa "shared:whatsapp"

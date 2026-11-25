@@ -2,7 +2,7 @@ package whatsapp_test
 
 import "core:bytes"
 import "core:testing"
-import fixtures "fixtures/client"
+import fixtures "../fixtures/client"
 import wa "shared:whatsapp"
 
 @(test)

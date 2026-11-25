@@ -132,6 +132,7 @@ socket_message_destroy :: proc(message: ^Socket_Message) {
 // a fresh Socket with the SAME Auth_State, Prekey_Store and State_Store.
 Socket :: struct {
 	history_request:             ^Pending_Chat_History,
+	message_lookup:              ^Pending_Message_Lookup,
 	contact_refresh_due:         bool,
 	profile_history_pending:     bool,
 	profile_history_retry_after: time.Time,

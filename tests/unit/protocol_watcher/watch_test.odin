@@ -1,7 +1,7 @@
 package protocol_watch_test
 
-import w "../src"
-import test_fixtures "../../../tests/fixtures/protocol_watch"
+import w "../../../tools/protocol_watcher/src"
+import test_fixtures "../../fixtures/protocol_watch"
 import j "core:encoding/json"
 import "core:mem"
 import "core:os"
