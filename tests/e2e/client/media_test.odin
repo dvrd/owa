@@ -5,7 +5,7 @@ import "core:bytes"
 import "core:sync"
 import "core:testing"
 import "core:time"
-import surf "shared:surf"
+import "shared:surf"
 import wa "shared:whatsapp"
 
 @(test)

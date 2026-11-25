@@ -9,7 +9,7 @@ import "core:net"
 import "core:testing"
 import "core:thread"
 import "core:time"
-import surf "shared:surf"
+import "shared:surf"
 import ws "shared:websocket"
 import wa "shared:whatsapp"
 

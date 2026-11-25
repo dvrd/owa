@@ -7,8 +7,8 @@ import j "core:encoding/json"
 import "core:strings"
 import p "core:sys/posix"
 import "core:time"
-import http "shared:async/http"
-import surf "shared:surf"
+import "shared:async/http"
+import "shared:surf"
 
 when ODIN_OS == .Darwin {
 	foreign import libc "system:System"

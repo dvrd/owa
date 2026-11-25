@@ -5,7 +5,7 @@ import "core:crypto"
 import "core:fmt"
 import "core:testing"
 import test_fixtures "../fixtures/client"
-import surf "shared:surf"
+import "shared:surf"
 import wa "shared:whatsapp"
 
 @(test)

@@ -4,7 +4,7 @@ import test_fixtures "../../fixtures/client"
 import "core:bytes"
 import "core:testing"
 import "shared:async/http"
-import surf "shared:surf"
+import "shared:surf"
 import wa "shared:whatsapp"
 
 // Independently generated protobuf, AES-CBC, HKDF and HMAC vectors for two

@@ -4,7 +4,7 @@ import "core:crypto"
 import "core:crypto/x25519"
 import "core:encoding/hex"
 import "core:testing"
-import surf "shared:surf"
+import "shared:surf"
 import ws "shared:websocket"
 import wa "shared:whatsapp"
 

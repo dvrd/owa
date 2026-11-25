@@ -8,7 +8,7 @@ import "core:slice"
 import "core:sys/posix"
 import "core:time"
 import "shared:async/http"
-import surf "shared:surf"
+import "shared:surf"
 import ws "shared:websocket"
 import wa "shared:whatsapp"
 

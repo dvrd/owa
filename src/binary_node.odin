@@ -1,6 +1,6 @@
 package whatsapp
 
-import endian "core:encoding/endian"
+import "core:encoding/endian"
 import "core:bytes"
 import "core:fmt"
 import "core:mem"
@@ -8,7 +8,7 @@ import "core:sort"
 import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
-import zlib "vendor:zlib"
+import "vendor:zlib"
 
 MAX_BINARY_NODE_PAYLOAD :: 1 << 20
 MAX_BINARY_NODE_DEPTH :: 64

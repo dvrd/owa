@@ -7,7 +7,7 @@ import "core:strings"
 import "core:testing"
 import "core:thread"
 import "core:time"
-import surf "shared:surf"
+import "shared:surf"
 import wa "shared:whatsapp"
 
 Version_Server :: struct {

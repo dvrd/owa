@@ -8,7 +8,7 @@ import "core:crypto/aes"
 import "core:crypto/hkdf"
 import "core:crypto/hmac"
 import "core:crypto/x25519"
-import endian "core:encoding/endian"
+import "core:encoding/endian"
 import "core:mem"
 import "core:slice"
 

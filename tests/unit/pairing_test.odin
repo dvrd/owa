@@ -8,7 +8,7 @@ import "core:testing"
 import "core:time"
 import test_fixtures "../fixtures/client"
 import "shared:async/http"
-import surf "shared:surf"
+import "shared:surf"
 import wa "shared:whatsapp"
 
 @(test)

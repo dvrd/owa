@@ -2,7 +2,7 @@ package whatsapp_test
 
 import "core:testing"
 import "core:time"
-import surf "shared:surf"
+import "shared:surf"
 import wa "shared:whatsapp"
 
 Policy_Test_Details :: struct {

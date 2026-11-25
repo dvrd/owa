@@ -2,7 +2,7 @@ package whatsapp
 
 import "core:bytes"
 import "core:crypto"
-import endian "core:encoding/endian"
+import "core:encoding/endian"
 import "core:mem"
 import "core:os"
 import "core:strconv"

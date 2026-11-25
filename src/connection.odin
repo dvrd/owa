@@ -1,7 +1,7 @@
 package whatsapp
 
-import endian "core:encoding/endian"
-import surf "shared:surf"
+import "core:encoding/endian"
+import "shared:surf"
 import "core:crypto"
 import "core:crypto/x25519"
 import "core:mem"

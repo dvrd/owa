@@ -1,7 +1,7 @@
 package main
 
 import wa "shared:whatsapp"
-import surf "shared:surf"
+import "shared:surf"
 import ws "shared:websocket"
 import "core:bytes"
 import "core:crypto/hash"
