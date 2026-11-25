@@ -24,6 +24,11 @@ tasks:
         vars:
           CLI_ARGS: '-vet -warnings-as-errors -define:ODIN_TEST_THREADS=1 -define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true {{.CLI_ARGS}}'
 
+  check:locked:
+    desc: Install frozen dependencies and verify the suites and private audio example
+    cmds:
+      - bash tools/ci/check-locked.sh
+
   hooks:install:
     desc: Enable the pre-push test hook for this clone
     cmds:

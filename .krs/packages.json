@@ -3,24 +3,24 @@
   "packages": [
     {
       "name": "async",
-      "source": "local",
-      "tag": "v0.1.0",
-      "commit": "b92c05f45e552f07923abfb265360001e82d5471",
-      "hash": "22a007346c3fb4646c0f200ff5560dc85e534d236c2cbd93b2e74a7757edb5f8"
+      "source": "https://github.com/dvrd/async.git",
+      "tag": "v0.3.1",
+      "commit": "5573991e43a6d8689b57a0377413763bd1cb36e0",
+      "hash": "1c2aabc5c9806eccdfc02241bb2441eb337de3d39e791c173f0eba5e09ef8172"
     },
     {
       "name": "surf",
-      "source": "local",
-      "tag": "v0.1.0",
-      "commit": "6d5c512ecbc33351e701bd79ed2fcc5670c0cc22",
-      "hash": "78077290d47ebb1d37d0e312a3c2205c8f360b9de33a27d4a5ef3d96a502d146"
+      "source": "https://github.com/dvrd/surf.git",
+      "tag": "v0.2.0",
+      "commit": "aa317b20ae54000b819a4c4e208388a2aaae25a7",
+      "hash": "0e557af8ffd4f68fdb3e9c503445178aed61cb7b63afd302850373974f00d723"
     },
     {
       "name": "websocket",
       "source": "local",
-      "tag": "v0.1.0",
-      "commit": "4953c3a5fa99c57bbf66815e0fe96be3d8ff1e4f",
-      "hash": "0bd62223a0439926636f2fd314a96a46fb48cc2b79e128ec78b82481cded598f"
+      "tag": "v0.1.2",
+      "commit": "18cf35aef3d5dcd6f75d36a927eeac1ae4417371",
+      "hash": "9b7484afce706bc15ceaba7f37b3f89ff59240f07861656bcf8020c0d04ff844"
     }
   ]
 }

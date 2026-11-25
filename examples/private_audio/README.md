@@ -61,3 +61,18 @@ cmp -s referencia-2.ogg historica-2.ogg
 ```
 
 Un estado de salida cero verifica las tres comparaciones byte a byte. Ejecuta la tercera por separado si la sesión antigua recibió una página incompleta o agotó el tiempo de espera; registra primero si llegó a producir un archivo.
+
+### Consulta directa frente a consulta precedida por historial
+
+En cuatro conexiones nuevas a una misma sesión vinculada se solicitó por ID la segunda nota. En las dos conexiones centrales se pidió primero una página anterior usando la propia nota como referencia y su hora local de procesamiento, la única hora disponible en esa sesión antigua. Ambas páginas devolvieron 50 mensajes e incluyeron la primera nota. Nadie envió otro mensaje al chat durante las consultas.
+
+| Orden | Solicitud previa | Acuse (s) | Recibo (s) | Respuesta por ID (s) | Bytes verificados (s) |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 1 | Ninguna | 0.18 | 1.26 | 1.33 | 1.68 |
+| 2 | Historial | 0.15 | 0.66 | 0.74 | 0.84 |
+| 3 | Historial | 0.08 | 0.46 | 0.52 | 0.69 |
+| 4 | Ninguna | 0.08 | 0.57 | 0.63 | 0.79 |
+
+Los tiempos parten del envío de la solicitud por ID. Incluyendo la página previa, las pruebas 2 y 3 tardaron 2.68 y 1.88 segundos desde la conexión hasta la comparación. Las cuatro descargas coincidieron byte por byte con la referencia independiente de 137908 bytes. En ese teléfono bastó la consulta directa. Las consultas fueron consecutivas y el estado físico del teléfono no se controló. Sigue pendiente explicar los timeouts de las consultas anteriores.
+
+Para repetir con control del teléfono, usa la misma clave y referencia privada en tres rondas. En la primera mantén WhatsApp en primer plano, en la segunda déjalo en segundo plano y en la tercera desconecta el teléfono de la red. En cada ronda alterna consulta directa y consulta precedida por historial, desde conexiones nuevas y con el mismo plazo. Anota por separado el tiempo de la página, el del acuse, el del recibo, el de la respuesta correlacionada y el de la comparación. Tras el timeout sin red, reconecta el teléfono y repite por ID en el mismo socket. Registra cualquier cambio de estado durante la ronda.
