@@ -1,10 +1,10 @@
 package whatsapp
 
-import endian "core:encoding/endian"
-import "core:math/bits"
-import "core:strconv"
 import "core:bytes"
 import "core:crypto/hash"
+import "core:encoding/endian"
+import "core:math/bits"
+import "core:strconv"
 import "core:unicode/utf8"
 
 // Protobuf fields, login payloads and pairing codecs.
@@ -62,7 +62,13 @@ Certificate_Details :: struct {
 	has_not_before, has_not_after:          bool,
 }
 
-handshake_client_hello_encode :: proc(dst: []u8, ephemeral: [32]u8) -> (written: int, error: Protobuf_Error) {
+handshake_client_hello_encode :: proc(
+	dst: []u8,
+	ephemeral: [32]u8,
+) -> (
+	written: int,
+	error: Protobuf_Error,
+) {
 	if len(dst) < 36 {
 		return 0, .Destination_Undersized
 	}
@@ -82,7 +88,8 @@ handshake_client_finish_encode :: proc(
 	written: int,
 	error: Protobuf_Error,
 ) {
-	if len(encrypted_static) > MAX_PROTOBUF_MESSAGE_SIZE || len(encrypted_payload) > MAX_PROTOBUF_MESSAGE_SIZE {
+	if len(encrypted_static) > MAX_PROTOBUF_MESSAGE_SIZE ||
+	   len(encrypted_payload) > MAX_PROTOBUF_MESSAGE_SIZE {
 		return 0, .Message_Oversized
 	}
 
@@ -105,7 +112,8 @@ handshake_client_finish_encode :: proc(
 		return 0, .Destination_Undersized
 	}
 
-	if bytes.alias(dst[:required], encrypted_static) || bytes.alias(dst[:required], encrypted_payload) {
+	if bytes.alias(dst[:required], encrypted_static) ||
+	   bytes.alias(dst[:required], encrypted_payload) {
 		return 0, .Overlapping_Buffers
 	}
 
@@ -123,7 +131,12 @@ handshake_client_finish_encode :: proc(
 	return written, .None
 }
 
-handshake_message_decode :: proc(src: []u8) -> (message: Handshake_Message, error: Protobuf_Error) {
+handshake_message_decode :: proc(
+	src: []u8,
+) -> (
+	message: Handshake_Message,
+	error: Protobuf_Error,
+) {
 	if len(src) > MAX_PROTOBUF_MESSAGE_SIZE {
 		return {}, .Message_Oversized
 	}
@@ -211,7 +224,12 @@ cert_chain_decode :: proc(src: []u8) -> (chain: Cert_Chain, error: Protobuf_Erro
 	return chain, .None
 }
 
-certificate_details_decode :: proc(src: []u8) -> (details: Certificate_Details, error: Protobuf_Error) {
+certificate_details_decode :: proc(
+	src: []u8,
+) -> (
+	details: Certificate_Details,
+	error: Protobuf_Error,
+) {
 	if len(src) > MAX_PROTOBUF_MESSAGE_SIZE {
 		return {}, .Message_Oversized
 	}
@@ -232,7 +250,10 @@ certificate_details_decode :: proc(src: []u8) -> (details: Certificate_Details, 
 	return details, .None
 }
 
-certificate_details_field_decode :: proc(details: ^Certificate_Details, field: Protobuf_Field) -> Protobuf_Error {
+certificate_details_field_decode :: proc(
+	details: ^Certificate_Details,
+	field: Protobuf_Field,
+) -> Protobuf_Error {
 	switch field.number {
 	case 1, 2:
 		if field.wire_type != 0 {
@@ -319,7 +340,10 @@ protobuf_handshake_inner_decode :: proc(
 	return message, .None
 }
 
-protobuf_handshake_field_decode :: proc(message: ^Handshake_Message, field: Protobuf_Field) -> Protobuf_Error {
+protobuf_handshake_field_decode :: proc(
+	message: ^Handshake_Message,
+	field: Protobuf_Field,
+) -> Protobuf_Error {
 	if message.kind == .Client_Finish {
 		if field.number != 1 && field.number != 2 {
 			return .None
@@ -376,7 +400,12 @@ protobuf_handshake_field_decode :: proc(message: ^Handshake_Message, field: Prot
 	return .None
 }
 
-protobuf_certificate_decode :: proc(src: []u8) -> (cert: Noise_Certificate, error: Protobuf_Error) {
+protobuf_certificate_decode :: proc(
+	src: []u8,
+) -> (
+	cert: Noise_Certificate,
+	error: Protobuf_Error,
+) {
 	at := 0
 
 	for at < len(src) {
@@ -413,7 +442,13 @@ protobuf_certificate_decode :: proc(src: []u8) -> (cert: Noise_Certificate, erro
 
 // Read/skip every supported wire type in one place. Lengths are compared as
 // u64 before converting to int, so an attacker cannot wrap a slice index.
-protobuf_field_read :: proc(src: []u8, at: ^int) -> (field: Protobuf_Field, error: Protobuf_Error) {
+protobuf_field_read :: proc(
+	src: []u8,
+	at: ^int,
+) -> (
+	field: Protobuf_Field,
+	error: Protobuf_Error,
+) {
 	tag, tag_err := protobuf_varint_read(src, at)
 	if tag_err != .None {
 		return {}, tag_err
@@ -644,7 +679,15 @@ login_payload_encode :: proc(
 	writer := Protobuf_Writer {
 		dst = staging[:],
 	}
-	write_common_client_payload_fields(&writer, config, true, username, device, nil, include_device)
+	write_common_client_payload_fields(
+		&writer,
+		config,
+		true,
+		username,
+		device,
+		nil,
+		include_device,
+	)
 	return payload_copy_result(dst, config, user, &writer)
 }
 
@@ -885,7 +928,8 @@ payload_config_validate :: proc(config: Payload_Config) -> Payload_Error {
 		return .Invalid_Browser_OS
 	}
 
-	if len(config.browser_name) == 0 || len(config.browser_name) > MAX_PAYLOAD_BROWSER_STRING_SIZE {
+	if len(config.browser_name) == 0 ||
+	   len(config.browser_name) > MAX_PAYLOAD_BROWSER_STRING_SIZE {
 		return .Invalid_Browser_Name
 	}
 
@@ -1014,7 +1058,12 @@ Pairing_Device_Details :: struct {
 	has_account_type, has_device_type:        bool,
 }
 
-pairing_identity_hmac_decode :: proc(src: []u8) -> (identity: Pairing_Device_Identity_HMAC, error: Protobuf_Error) {
+pairing_identity_hmac_decode :: proc(
+	src: []u8,
+) -> (
+	identity: Pairing_Device_Identity_HMAC,
+	error: Protobuf_Error,
+) {
 	if len(src) > MAX_PROTOBUF_MESSAGE_SIZE {
 		return {}, .Message_Oversized
 	}
@@ -1067,7 +1116,12 @@ pairing_identity_hmac_decode :: proc(src: []u8) -> (identity: Pairing_Device_Ide
 	return identity, .None
 }
 
-pairing_signed_identity_decode :: proc(src: []u8) -> (identity: Pairing_Signed_Identity, error: Protobuf_Error) {
+pairing_signed_identity_decode :: proc(
+	src: []u8,
+) -> (
+	identity: Pairing_Signed_Identity,
+	error: Protobuf_Error,
+) {
 	if len(src) > MAX_PROTOBUF_MESSAGE_SIZE {
 		return {}, .Message_Oversized
 	}
@@ -1110,7 +1164,12 @@ pairing_signed_identity_decode :: proc(src: []u8) -> (identity: Pairing_Signed_I
 	return identity, .None
 }
 
-pairing_device_details_decode :: proc(src: []u8) -> (details: Pairing_Device_Details, error: Protobuf_Error) {
+pairing_device_details_decode :: proc(
+	src: []u8,
+) -> (
+	details: Pairing_Device_Details,
+	error: Protobuf_Error,
+) {
 	if len(src) > MAX_PROTOBUF_MESSAGE_SIZE {
 		return {}, .Message_Oversized
 	}
@@ -1279,7 +1338,13 @@ text_message_decode :: proc(src: []u8) -> (Text_Message, Message_Error) {
 	return message_decode_inner(src, 0)
 }
 
-message_decode_inner :: proc(src: []u8, depth: int) -> (message: Text_Message, error: Message_Error) {
+message_decode_inner :: proc(
+	src: []u8,
+	depth: int,
+) -> (
+	message: Text_Message,
+	error: Message_Error,
+) {
 	if depth > MAX_MESSAGE_NESTING {
 		return {}, .Nesting_Limit
 	}
@@ -1318,17 +1383,20 @@ message_decode_inner :: proc(src: []u8, depth: int) -> (message: Text_Message, e
 
 				message.kind, message.text = .Conversation, cast(string)field.data
 			} else if field.number == 6 {
-				if extended_error := message_extended_text_decode(&message, field, depth); extended_error != .None {
+				if extended_error := message_extended_text_decode(&message, field, depth);
+				   extended_error != .None {
 					return {}, extended_error
 				}
 			} else {
-				if wrapper_error := message_wrapper_decode(&message, field, depth); wrapper_error != .None {
+				if wrapper_error := message_wrapper_decode(&message, field, depth);
+				   wrapper_error != .None {
 					return {}, wrapper_error
 				}
 			}
 
 		case 2:
-			if distribution_error := message_sender_key_distribution_decode(&message, field); distribution_error != .None {
+			if distribution_error := message_sender_key_distribution_decode(&message, field);
+			   distribution_error != .None {
 				return {}, distribution_error
 			}
 		}
@@ -1337,7 +1405,11 @@ message_decode_inner :: proc(src: []u8, depth: int) -> (message: Text_Message, e
 	return message, .None
 }
 
-message_extended_text_decode :: proc(message: ^Text_Message, field: Protobuf_Field, depth: int) -> Message_Error {
+message_extended_text_decode :: proc(
+	message: ^Text_Message,
+	field: Protobuf_Field,
+	depth: int,
+) -> Message_Error {
 	error: Message_Error
 	message.kind = .Extended_Text
 	inner_at := 0
@@ -1386,7 +1458,11 @@ message_extended_text_decode :: proc(message: ^Text_Message, field: Protobuf_Fie
 	return .None
 }
 
-message_wrapper_decode :: proc(message: ^Text_Message, field: Protobuf_Field, depth: int) -> Message_Error {
+message_wrapper_decode :: proc(
+	message: ^Text_Message,
+	field: Protobuf_Field,
+	depth: int,
+) -> Message_Error {
 	error: Message_Error
 	wrapper_at := 0
 	seen := false
@@ -1437,7 +1513,10 @@ message_wrapper_decode :: proc(message: ^Text_Message, field: Protobuf_Field, de
 	return .None
 }
 
-message_sender_key_distribution_decode :: proc(message: ^Text_Message, field: Protobuf_Field) -> Message_Error {
+message_sender_key_distribution_decode :: proc(
+	message: ^Text_Message,
+	field: Protobuf_Field,
+) -> Message_Error {
 	if field.wire_type != 2 {
 		return .Invalid_Protobuf
 	}
@@ -1488,7 +1567,13 @@ message_sender_key_distribution_decode :: proc(message: ^Text_Message, field: Pr
 	return .None
 }
 
-message_context_decode :: proc(src: []u8, depth: int) -> (c: Message_Context, error: Message_Error) {
+message_context_decode :: proc(
+	src: []u8,
+	depth: int,
+) -> (
+	c: Message_Context,
+	error: Message_Error,
+) {
 	at := 0
 
 	for at < len(src) {
@@ -1548,7 +1633,13 @@ message_context_decode :: proc(src: []u8, depth: int) -> (c: Message_Context, er
 // Produces a normalized Message (without wrappers). Presence flags preserve
 // explicitly empty context/distribution fields. Encoding validates everything,
 // including quoted protobufs and source aliasing, before touching dst.
-text_message_encode :: proc(dst: []u8, message: Text_Message) -> (written: int, error: Message_Error) {
+text_message_encode :: proc(
+	dst: []u8,
+	message: Text_Message,
+) -> (
+	written: int,
+	error: Message_Error,
+) {
 	m := message
 	if validation_error := text_message_encode_validate(m); validation_error != .None {
 		return 0, validation_error
@@ -1569,7 +1660,8 @@ text_message_encode :: proc(dst: []u8, message: Text_Message) -> (written: int, 
 		}
 	}
 
-	if bytes.alias(dst[:required], c.quoted_message) || bytes.alias(dst[:required], s.distribution) {
+	if bytes.alias(dst[:required], c.quoted_message) ||
+	   bytes.alias(dst[:required], s.distribution) {
 		return 0, .Overlapping_Buffers
 	}
 
@@ -1597,7 +1689,8 @@ text_message_encode_validate :: proc(m: Text_Message) -> Message_Error {
 		}
 	}
 
-	if len(c.quoted_message) > MAX_PROTOBUF_MESSAGE_SIZE || len(s.distribution) > MAX_PROTOBUF_MESSAGE_SIZE {
+	if len(c.quoted_message) > MAX_PROTOBUF_MESSAGE_SIZE ||
+	   len(s.distribution) > MAX_PROTOBUF_MESSAGE_SIZE {
 		return .Message_Oversized
 	}
 
@@ -1713,7 +1806,11 @@ message_context_fields_write :: proc(dst: []u8, at: ^int, c: Message_Context) {
 	}
 }
 
-text_message_fields_write :: proc(dst: []u8, m: Text_Message, context_size, sender_size: int) -> int {
+text_message_fields_write :: proc(
+	dst: []u8,
+	m: Text_Message,
+	context_size, sender_size: int,
+) -> int {
 	written := 0
 	c, s := m.context_info, m.sender_key_distribution
 
@@ -1753,7 +1850,11 @@ text_message_fields_write :: proc(dst: []u8, m: Text_Message, context_size, send
 }
 
 message_field_size :: proc(field: u32, size: int) -> int {
-	return protobuf_varint_size(cast(u64)field << 3 | 2) + protobuf_varint_size(cast(u64)size) + size
+	return(
+		protobuf_varint_size(cast(u64)field << 3 | 2) +
+		protobuf_varint_size(cast(u64)size) +
+		size \
+	)
 }
 message_field_header :: proc(dst: []u8, at: ^int, field: u32, size: int) {
 	protobuf_varint_write(dst, at, cast(u64)field << 3 | 2)

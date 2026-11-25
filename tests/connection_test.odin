@@ -2,7 +2,7 @@ package whatsapp_test
 
 import "core:testing"
 import "core:time"
-import network_client "shared:surf"
+import surf "shared:surf"
 import wa "shared:whatsapp"
 
 Policy_Test_Details :: struct {
@@ -403,7 +403,7 @@ noise_credentials_are_random_nonzero_and_accepted_by_client_init :: proc(t: ^tes
 	testing.expect(t, second.static_private_key != zero)
 	testing.expect(t, first.static_private_key != second.static_private_key)
 
-	websocket := network_client.WebSocket_Conn {
+	websocket := surf.WebSocket_Conn {
 		phase = .Open,
 		allocator = context.allocator,
 		config = {host = "synthetic.invalid", max_message_size = 4096},

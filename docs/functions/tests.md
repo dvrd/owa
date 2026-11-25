@@ -2,7 +2,7 @@
 
 [Catalog index](README.md) · [Name changes](renames.md)
 
-545 entries across 49 source files. Select a function to open its declaration.
+551 entries across 51 source files. Select a function to open its declaration.
 
 | Source file | Functions |
 |---|---:|
@@ -12,10 +12,12 @@
 | [tests/auth_test.odin](#file-tests-auth-test-odin) | 14 |
 | [tests/binary_node_test.odin](#file-tests-binary-node-test-odin) | 1 |
 | [tests/binary_tokens_test.odin](#file-tests-binary-tokens-test-odin) | 1 |
+| [tests/chat_history_test.odin](#file-tests-chat-history-test-odin) | 3 |
 | [tests/connection_test.odin](#file-tests-connection-test-odin) | 16 |
 | [tests/contact_sync_test.odin](#file-tests-contact-sync-test-odin) | 3 |
 | [tests/contacts_test.odin](#file-tests-contacts-test-odin) | 2 |
 | [tests/e2e/child_process/child_process.odin](#file-tests-e2e-child-process-child-process-odin) | 5 |
+| [tests/e2e/client/chat_history_test.odin](#file-tests-e2e-client-chat-history-test-odin) | 3 |
 | [tests/e2e/client/contact_sync_test.odin](#file-tests-e2e-client-contact-sync-test-odin) | 3 |
 | [tests/e2e/client/media_test.odin](#file-tests-e2e-client-media-test-odin) | 6 |
 | [tests/e2e/client/receive_test.odin](#file-tests-e2e-client-receive-test-odin) | 27 |
@@ -129,6 +131,16 @@
 |---|---|
 | [`binary_token_dictionary_prefixes_select_the_expected_wire_table`](../../tests/binary_tokens_test.odin#L7) | Decode a fixed wire prefix from each dictionary and check the single-byte table endpoints used by the protocol. |
 
+<a id="file-tests-chat-history-test-odin"></a>
+
+## tests/chat_history_test.odin
+
+| Function | Behavior |
+|---|---|
+| [`chat_history_request_encodes_initial_and_anchored_pages`](../../tests/chat_history_test.odin#L9) | Compare both page request modes with independent protobuf vectors and reject invalid arguments. |
+| [`history_pages_match_request_and_chat_and_preserve_original_messages`](../../tests/chat_history_test.odin#L36) | Check request correlation, address aliases, message ownership, directions and duplicate suppression. |
+| [`private_chat_history_cursor_survives_older_deliveries_and_accepts_legacy_sent_messages`](../../tests/chat_history_test.odin#L100) | Check that delayed arrivals preserve the newest cursor and that a legacy sent record can locate a page. |
+
 <a id="file-tests-connection-test-odin"></a>
 
 ## tests/connection_test.odin
@@ -182,6 +194,16 @@
 | [`wait`](../../tests/e2e/child_process/child_process.odin#L61) | Reap the child and verify its expected exit or signal. |
 | [`kill_at_boundary`](../../tests/e2e/child_process/child_process.odin#L76) | Send SIGKILL to the owned fixture process and verify its termination. |
 | [`close`](../../tests/e2e/child_process/child_process.odin#L81) | Release the output pipe and reap a fixture that is still running. |
+
+<a id="file-tests-e2e-client-chat-history-test-odin"></a>
+
+## tests/e2e/client/chat_history_test.odin
+
+| Function | Behavior |
+|---|---|
+| [`history_test_primary_reply`](../../tests/e2e/client/chat_history_test.odin#L8) | Send a correlated encrypted history notification from the simulated primary phone. |
+| [`fetch_private_chat_history_from_primary_device`](../../tests/e2e/client/chat_history_test.odin#L60) | Authenticate a private history response and keep its messages separate from live delivery. |
+| [`history_timeout_preserves_the_live_socket`](../../tests/e2e/client/chat_history_test.odin#L77) | Check that a primary phone that stays silent yields a timeout and leaves the socket online. |
 
 <a id="file-tests-e2e-client-contact-sync-test-odin"></a>
 
@@ -246,29 +268,29 @@
 
 | Function | Behavior |
 |---|---|
-| [`send_peer_private`](../../tests/e2e/client/send_peer.odin#L49) | Generate deterministic private-key material for a peer. |
-| [`send_peer_local`](../../tests/e2e/client/send_peer.odin#L62) | Construct a peer’s local Signal identity and prekeys. |
-| [`send_peer_bundle`](../../tests/e2e/client/send_peer.odin#L74) | Build and sign a remote prekey bundle. |
-| [`send_peer_noise_key`](../../tests/e2e/client/send_peer.odin#L94) | Construct deterministic transport-key bytes. |
-| [`send_peer_server_frame`](../../tests/e2e/client/send_peer.odin#L104) | Encode the peer’s binary WebSocket frame. |
-| [`send_peer_read`](../../tests/e2e/client/send_peer.odin#L122) | Serve queued peer data through the test transport. |
-| [`send_peer_close`](../../tests/e2e/client/send_peer.odin#L144) | Close the simulated peer connection. |
-| [`send_peer_deadline`](../../tests/e2e/client/send_peer.odin#L148) | Handle a stream deadline in the fixture. |
-| [`send_peer_enqueue`](../../tests/e2e/client/send_peer.odin#L152) | Queue an encrypted peer reply. |
-| [`send_peer_device_node`](../../tests/e2e/client/send_peer.odin#L179) | Build a device child for a discovery result. |
-| [`send_peer_user_node`](../../tests/e2e/client/send_peer.odin#L186) | Build a user node with its device list. |
-| [`send_peer_participant_node`](../../tests/e2e/client/send_peer.odin#L197) | Build a participant node for the group metadata response. |
-| [`send_peer_iq`](../../tests/e2e/client/send_peer.odin#L204) | Create the peer’s IQ response envelope. |
-| [`send_peer_device_index`](../../tests/e2e/client/send_peer.odin#L255) | Locate the fixture device matching an address. |
-| [`send_peer_keys`](../../tests/e2e/client/send_peer.odin#L263) | Build a key bundle response for the requested devices. |
-| [`send_peer_unpad`](../../tests/e2e/client/send_peer.odin#L301) | Remove test message padding before verification. |
-| [`send_peer_message`](../../tests/e2e/client/send_peer.odin#L324) | Decrypt and inspect the group message at the receiving peer. |
-| [`send_peer_write`](../../tests/e2e/client/send_peer.odin#L448) | Decode and route the client’s writes through the simulated server. |
-| [`send_peer_http`](../../tests/e2e/client/send_peer.odin#L516) | Handle fixture media HTTP requests. |
-| [`send_peer_new`](../../tests/e2e/client/send_peer.odin#L543) | Create the peer and its socket, devices and stores. |
-| [`send_peer_destroy`](../../tests/e2e/client/send_peer.odin#L612) | Close the socket and release fixture secrets and files. |
-| [`send_peer_use_pipe`](../../tests/e2e/client/send_peer.odin#L646) | Attach an operating-system pipe for polling behavior. |
-| [`send_peer_announce`](../../tests/e2e/client/send_peer.odin#L652) | Signal availability of test peer data. |
+| [`send_peer_private`](../../tests/e2e/client/send_peer.odin#L50) | Generate deterministic private-key material for a peer. |
+| [`send_peer_local`](../../tests/e2e/client/send_peer.odin#L63) | Construct a peer’s local Signal identity and prekeys. |
+| [`send_peer_bundle`](../../tests/e2e/client/send_peer.odin#L75) | Build and sign a remote prekey bundle. |
+| [`send_peer_noise_key`](../../tests/e2e/client/send_peer.odin#L95) | Construct deterministic transport-key bytes. |
+| [`send_peer_server_frame`](../../tests/e2e/client/send_peer.odin#L105) | Encode the peer’s binary WebSocket frame. |
+| [`send_peer_read`](../../tests/e2e/client/send_peer.odin#L123) | Serve queued peer data through the test transport. |
+| [`send_peer_close`](../../tests/e2e/client/send_peer.odin#L145) | Close the simulated peer connection. |
+| [`send_peer_deadline`](../../tests/e2e/client/send_peer.odin#L149) | Handle a stream deadline in the fixture. |
+| [`send_peer_enqueue`](../../tests/e2e/client/send_peer.odin#L153) | Queue an encrypted peer reply. |
+| [`send_peer_device_node`](../../tests/e2e/client/send_peer.odin#L180) | Build a device child for a discovery result. |
+| [`send_peer_user_node`](../../tests/e2e/client/send_peer.odin#L187) | Build a user node with its device list. |
+| [`send_peer_participant_node`](../../tests/e2e/client/send_peer.odin#L198) | Build a participant node for the group metadata response. |
+| [`send_peer_iq`](../../tests/e2e/client/send_peer.odin#L205) | Create the peer’s IQ response envelope. |
+| [`send_peer_device_index`](../../tests/e2e/client/send_peer.odin#L256) | Locate the fixture device matching an address. |
+| [`send_peer_keys`](../../tests/e2e/client/send_peer.odin#L264) | Build a key bundle response for the requested devices. |
+| [`send_peer_unpad`](../../tests/e2e/client/send_peer.odin#L302) | Remove test message padding before verification. |
+| [`send_peer_message`](../../tests/e2e/client/send_peer.odin#L325) | Decrypt and inspect the group message at the receiving peer. |
+| [`send_peer_write`](../../tests/e2e/client/send_peer.odin#L450) | Decode and route the client’s writes through the simulated server. |
+| [`send_peer_http`](../../tests/e2e/client/send_peer.odin#L518) | Handle fixture media HTTP requests. |
+| [`send_peer_new`](../../tests/e2e/client/send_peer.odin#L545) | Create the peer and its socket, devices and stores. |
+| [`send_peer_destroy`](../../tests/e2e/client/send_peer.odin#L614) | Close the socket and release fixture secrets and files. |
+| [`send_peer_use_pipe`](../../tests/e2e/client/send_peer.odin#L648) | Attach an operating-system pipe for polling behavior. |
+| [`send_peer_announce`](../../tests/e2e/client/send_peer.odin#L654) | Signal availability of test peer data. |
 
 <a id="file-tests-e2e-client-send-test-odin"></a>
 

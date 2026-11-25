@@ -9,13 +9,6 @@
       "hash": "22a007346c3fb4646c0f200ff5560dc85e534d236c2cbd93b2e74a7757edb5f8"
     },
     {
-      "name": "http",
-      "source": "local",
-      "tag": "v0.1.0",
-      "commit": "5899d6e2839cadd7d21943554dd22ecbe1932087",
-      "hash": "ec1318e05a853822eb30bb9350d14e5097ccf55783bb5872510f28489f8eedf3"
-    },
-    {
       "name": "surf",
       "source": "local",
       "tag": "v0.1.0",

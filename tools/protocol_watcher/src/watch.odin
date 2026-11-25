@@ -7,7 +7,7 @@ import j "core:encoding/json"
 import "core:strings"
 import p "core:sys/posix"
 import "core:time"
-import http "shared:http"
+import http "shared:async/http"
 import surf "shared:surf"
 
 when ODIN_OS == .Darwin {

@@ -58,7 +58,7 @@ device_keys_response_decode :: proc(
 	int,
 	Device_Error,
 ) {
-  validation_error := device_query_response_validate(node, jids, request_id, true)
+	validation_error := device_query_response_validate(node, jids, request_id, true)
 	if validation_error.kind != .None {
 		return 0, validation_error
 	}

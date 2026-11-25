@@ -1,14 +1,14 @@
 package whatsapp
 
-import tls "core:crypto/tls"
-import network_client "shared:surf"
 import "core:crypto"
 import "core:fmt"
 import "core:mem"
 import "core:strconv"
 import "core:sync"
-import "core:time"
 import "core:sys/posix"
+import "core:time"
+import "shared:async/tls"
+import "shared:surf"
 
 // Application socket lifecycle.
 
@@ -54,8 +54,8 @@ Socket_Error_Kind :: enum {
 }
 Socket_Error :: struct {
 	kind:       Socket_Error_Kind,
-	websocket:  network_client.WebSocket_Dial_Error,
-	stream:     network_client.WebSocket_Stream_Error,
+	websocket:  surf.WebSocket_Dial_Error,
+	stream:     surf.WebSocket_Stream_Error,
 	session:    Session_Error,
 	prekey:     Prekey_Error,
 	state:      State_Error,
@@ -68,7 +68,8 @@ Socket_Error :: struct {
 	device:     Device_Error,
 }
 Socket_Config :: struct {
-	sync_contacts: bool, // Refresh the address book after login and server updates in socket_tick.
+	track_chat_history_cursors:         bool, // Keep the newest private message ID, direction and original time per chat.
+	sync_contacts:                      bool, // Refresh the address book after login and server updates in socket_tick.
 	host, target, origin:               string,
 	port:                               int,
 	tls:                                tls.Config,
@@ -78,7 +79,7 @@ Socket_Config :: struct {
 	// Applications may reject the Noise certificate before ClientFinish is sent.
 	verify_certificate:                 Certificate_Verifier,
 	payload:                            Payload_Config,
-	qr_write_format_bits:                          Pairing_QR_Format,
+	qr_write_format_bits:               Pairing_QR_Format,
 	auth_path, prekey_path, state_path: string,
 	query_timeout:                      time.Duration,
 	observe_node:                       Protocol_Node_Observer,
@@ -130,40 +131,41 @@ socket_message_destroy :: proc(message: ^Socket_Message) {
 // Only one caller may use it. Config requires trusted CA roots. Reconnect uses
 // a fresh Socket with the SAME Auth_State, Prekey_Store and State_Store.
 Socket :: struct {
-	contact_refresh_due: bool,
-	profile_history_pending: bool,
+	history_request:             ^Pending_Chat_History,
+	contact_refresh_due:         bool,
+	profile_history_pending:     bool,
 	profile_history_retry_after: time.Time,
-	contact_refresh_after: time.Time,
-	contact_write_key_id: [128]u8,
-	contact_write_key_size: int,
-	contact_key_requested: [128]u8,
-	contact_key_size: int,
-	contact_key_retry_after: time.Time,
-	phase:                Socket_Phase,
-	config:               Socket_Config,
-	auth:                 ^Auth_State,
-	prekeys:              ^Prekey_Store,
-	store:                ^State_Store,
-	websocket:            network_client.WebSocket_Conn,
-	client:               Client,
-	session:              Session,
-	sequence:             u64,
-	provision_id:         [128]u8,
-	provision_id_size:    int,
-	provision_deadline:   time.Time,
-	provision_stage:      enum {
+	contact_refresh_after:       time.Time,
+	contact_write_key_id:        [128]u8,
+	contact_write_key_size:      int,
+	contact_key_requested:       [128]u8,
+	contact_key_size:            int,
+	contact_key_retry_after:     time.Time,
+	phase:                       Socket_Phase,
+	config:                      Socket_Config,
+	auth:                        ^Auth_State,
+	prekeys:                     ^Prekey_Store,
+	store:                       ^State_Store,
+	websocket:                   surf.WebSocket_Conn,
+	client:                      Client,
+	session:                     Session,
+	sequence:                    u64,
+	provision_id:                [128]u8,
+	provision_id_size:           int,
+	provision_deadline:          time.Time,
+	provision_stage:             enum {
 		None,
 		Count,
 		Upload,
 		Active,
 	},
-	queue:                [dynamic]^Socket_Message,
-	query_depth:          int,
-	read_deadline_scopes: int,
-	deferred_retries:     [dynamic]Binary_Document,
-	pending_media_retry:  [dynamic]Binary_Document,
-	last_error:           Socket_Error,
-	last_prune:           time.Time,
+	queue:                       [dynamic]^Socket_Message,
+	query_depth:                 int,
+	read_deadline_scopes:        int,
+	deferred_retries:            [dynamic]Binary_Document,
+	pending_media_retry:         [dynamic]Binary_Document,
+	last_error:                  Socket_Error,
+	last_prune:                  time.Time,
 }
 
 socket_connect :: proc(
@@ -173,7 +175,8 @@ socket_connect :: proc(
 	store: ^State_Store,
 	config: Socket_Config,
 ) -> Socket_Error {
-	if validation_error := socket_connect_validate(socket, auth, prekeys, store, config); validation_error.kind != .None {
+	if validation_error := socket_connect_validate(socket, auth, prekeys, store, config);
+	   validation_error.kind != .None {
 		return validation_error
 	}
 	settings, settings_error := socket_connect_settings(config)
@@ -188,7 +191,10 @@ socket_connect :: proc(
 	}
 
 	if e := socket_client_init(socket, settings); e.kind != .None {
-		return socket_fail(socket, {kind = .Session_Failed, session = {kind = .Client_Failed, client = e}})
+		return socket_fail(
+			socket,
+			{kind = .Session_Failed, session = {kind = .Client_Failed, client = e}},
+		)
 	}
 
 	if e := session_init(
@@ -228,7 +234,7 @@ socket_client_init :: proc(socket: ^Socket, settings: Socket_Config) -> Client_E
 }
 
 socket_websocket_dial :: proc(socket: ^Socket, settings: Socket_Config) -> Socket_Error {
-	err := network_client.websocket_dial(
+	err := surf.websocket_dial(
 		&socket.websocket,
 		settings.host,
 		settings.port,
@@ -255,11 +261,19 @@ socket_connect_validate :: proc(
 	store: ^State_Store,
 	config: Socket_Config,
 ) -> Socket_Error {
-	if socket == nil || socket.phase != .Uninitialized || auth == nil || prekeys == nil || store == nil {
+	if socket == nil ||
+	   socket.phase != .Uninitialized ||
+	   auth == nil ||
+	   prekeys == nil ||
+	   store == nil {
 		return {kind = .Invalid_State}
 	}
 
-	if !prekeys.initialized || !store.initialized || store.requires_reload || config.prekey_path == "" || config.state_path == "" {
+	if !prekeys.initialized ||
+	   !store.initialized ||
+	   store.requires_reload ||
+	   config.prekey_path == "" ||
+	   config.state_path == "" {
 		return {kind = .Invalid_Config}
 	}
 
@@ -324,8 +338,10 @@ socket_close :: proc(socket: ^Socket) {
 	}
 
 	if socket.websocket.phase == .Open && socket.websocket.stream.set_write_deadline != nil {
-		if e := network_client.websocket_set_write_deadline(&socket.websocket, time.time_add(time.now(), time.Second));
-		   e.kind != .None {
+		if e := surf.websocket_set_write_deadline(
+			&socket.websocket,
+			time.time_add(time.now(), time.Second),
+		); e.kind != .None {
 			socket.websocket.phase = .Failed
 		}
 	}
@@ -333,7 +349,7 @@ socket_close :: proc(socket: ^Socket) {
 	if socket.session.phase != .Uninitialized {
 		session_close(&socket.session)
 	} else if socket.websocket.phase != .Uninitialized {
-		network_client.websocket_close(&socket.websocket)
+		surf.websocket_close(&socket.websocket)
 	}
 
 	for message in socket.queue {
@@ -387,11 +403,16 @@ socket_tick :: proc(socket: ^Socket, now: time.Time) -> (Socket_Event, Socket_Er
 		}
 	}
 
-	if socket.config.sync_contacts && socket.contact_refresh_due && socket.query_depth == 0 &&
-	   socket.phase == .Online && time.diff(socket.contact_refresh_after, now) >= 0 {
+	if socket.config.sync_contacts &&
+	   socket.contact_refresh_due &&
+	   socket.query_depth == 0 &&
+	   socket.phase == .Online &&
+	   time.diff(socket.contact_refresh_after, now) >= 0 {
 		socket.contact_refresh_after = time.time_add(now, time.Minute)
 		status, sync_err := socket_sync_contacts(socket)
-		if sync_err.kind != .None { return {}, sync_err }
+		if sync_err.kind != .None {
+			return {}, sync_err
+		}
 		socket.contact_refresh_due = status == .Syncing
 	}
 
@@ -405,8 +426,11 @@ socket_tick :: proc(socket: ^Socket, now: time.Time) -> (Socket_Event, Socket_Er
 		}
 	}
 
-	if socket.config.sync_contacts && socket.profile_history_pending && socket.query_depth == 0 &&
-	   socket.phase == .Online && time.diff(socket.profile_history_retry_after, now) >= 0 {
+	if socket.config.sync_contacts &&
+	   socket.profile_history_pending &&
+	   socket.query_depth == 0 &&
+	   socket.phase == .Online &&
+	   time.diff(socket.profile_history_retry_after, now) >= 0 {
 		if e := socket_import_pending_contact_history(socket); e.kind != .None {
 			socket.profile_history_retry_after = time.time_add(now, time.Minute)
 			return {}, e
@@ -424,7 +448,8 @@ socket_receive_wire :: proc(socket: ^Socket) -> (Socket_Event, Socket_Error) {
 	scoped := socket.websocket.stream.set_read_deadline != nil && socket.read_deadline_scopes == 0
 
 	if scoped {
-		if e := socket_read_deadline(socket, time.time_add(time.now(), 15 * time.Second)); e.kind != .None {
+		if e := socket_read_deadline(socket, time.time_add(time.now(), 15 * time.Second));
+		   e.kind != .None {
 			return {}, e
 		}
 	}
@@ -464,7 +489,8 @@ socket_receive_inner :: proc(socket: ^Socket) -> (Socket_Event, Socket_Error) {
 		if socket.provision_stage != .None {
 			id, _ := node_attr(event.node, "id")
 
-			if event.node.tag == "iq" && id == cast(string)socket.provision_id[:socket.provision_id_size] {
+			if event.node.tag == "iq" &&
+			   id == cast(string)socket.provision_id[:socket.provision_id_size] {
 				return socket_provision(socket, event.node)
 			}
 		}
@@ -497,11 +523,18 @@ socket_receive_inner :: proc(socket: ^Socket) -> (Socket_Event, Socket_Error) {
 	}
 }
 
-socket_login_provision_start :: proc(socket: ^Socket, event: Session_Event) -> (Socket_Event, Socket_Error) {
+socket_login_provision_start :: proc(
+	socket: ^Socket,
+	event: Session_Event,
+) -> (
+	Socket_Event,
+	Socket_Error,
+) {
 	socket.phase = .Provisioning
 
 	if lid, found := node_attr(event.node, "lid"); found && device_user_jid_valid(lid, true) {
-		if e := state_store_set(socket.store, .LID_Mapping, "self", transmute([]u8)lid); e.kind != .None {
+		if e := state_store_set(socket.store, .LID_Mapping, "self", transmute([]u8)lid);
+		   e.kind != .None {
 			return {}, socket_fail(socket, {kind = .State_Failed, state = e})
 		}
 
@@ -542,9 +575,18 @@ socket_provision :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_Event, S
 	}
 }
 
-socket_provision_count :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_Event, Socket_Error) {
+socket_provision_count :: proc(
+	socket: ^Socket,
+	node: Binary_Node,
+) -> (
+	Socket_Event,
+	Socket_Error,
+) {
 	buffer: [65536]u8
-	count, err := decode_prekey_count_response(node, cast(string)socket.provision_id[:socket.provision_id_size])
+	count, err := decode_prekey_count_response(
+		node,
+		cast(string)socket.provision_id[:socket.provision_id_size],
+	)
 
 	if err.kind != .None {
 		return {}, socket_fail(socket, {kind = .Prekey_Failed, prekey = err})
@@ -584,7 +626,13 @@ socket_provision_count :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_Ev
 	return {}, socket_request_activation(socket)
 }
 
-socket_provision_upload :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_Event, Socket_Error) {
+socket_provision_upload :: proc(
+	socket: ^Socket,
+	node: Binary_Node,
+) -> (
+	Socket_Event,
+	Socket_Error,
+) {
 	if e := prekey_upload_handle_response(socket.prekeys, node); e.kind != .None {
 		return {}, socket_fail(socket, {kind = .Prekey_Failed, prekey = e})
 	}
@@ -605,9 +653,17 @@ socket_provision_upload :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_E
 	return {}, socket_request_activation(socket)
 }
 
-socket_handle_activation_response :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_Event, Socket_Error) {
-	if e := device_response_validate(node, cast(string)socket.provision_id[:socket.provision_id_size]);
-	   e.kind != .None {
+socket_handle_activation_response :: proc(
+	socket: ^Socket,
+	node: Binary_Node,
+) -> (
+	Socket_Event,
+	Socket_Error,
+) {
+	if e := device_response_validate(
+		node,
+		cast(string)socket.provision_id[:socket.provision_id_size],
+	); e.kind != .None {
 		return {}, socket_fail(socket, {kind = .Server_Rejected})
 	}
 
@@ -705,7 +761,8 @@ socket_write :: proc(socket: ^Socket, encoded: []u8) -> Socket_Error {
 			timeout = 30 * time.Second
 		}
 
-		if e := socket_write_deadline(socket, time.time_add(time.now(), timeout)); e.kind != .None {
+		if e := socket_write_deadline(socket, time.time_add(time.now(), timeout));
+		   e.kind != .None {
 			return e
 		}
 
@@ -713,7 +770,10 @@ socket_write :: proc(socket: ^Socket, encoded: []u8) -> Socket_Error {
 	}
 
 	if err := client_write(&socket.client, encoded); err.kind != .None {
-		return socket_fail(socket, {kind = .Session_Failed, session = {kind = .Client_Failed, client = err}})
+		return socket_fail(
+			socket,
+			{kind = .Session_Failed, session = {kind = .Client_Failed, client = err}},
+		)
 	}
 
 	if deadline_set {
@@ -812,7 +872,13 @@ socket_control_node :: proc(socket: ^Socket, node: Binary_Node) -> Socket_Error 
 // Polls the native connection without consuming an incomplete TLS/WS record.
 // This keeps timers on the same thread as I/O. Once a peer starts a frame, the
 // bounded read deadline prevents a partial frame from stalling indefinitely.
-socket_poll :: proc(socket: ^Socket, timeout: time.Duration = 250 * time.Millisecond) -> (bool, Socket_Error) {
+socket_poll :: proc(
+	socket: ^Socket,
+	timeout: time.Duration = 250 * time.Millisecond,
+) -> (
+	bool,
+	Socket_Error,
+) {
 	if socket == nil {
 		return false, {kind = .Invalid_State}
 	}
@@ -1006,54 +1072,23 @@ socket_query_response_copy :: proc(node: Binary_Node) -> (Binary_Document, Socke
 	return document, {}
 }
 
-socket_query_response_receive :: proc(socket: ^Socket, id: string) -> (Binary_Document, Socket_Error) {
+socket_query_response_receive :: proc(
+	socket: ^Socket,
+	id: string,
+) -> (
+	Binary_Document,
+	Socket_Error,
+) {
 	deadline := time.time_add(time.now(), socket.config.query_timeout)
 
 	for {
-		if time.now()._nsec >= deadline._nsec {
-			return {}, socket_fail(socket, {kind = .Query_Timeout})
+		event, e := socket_receive_while_waiting(socket, deadline)
+		if e.kind == .Query_Timeout && socket.phase != .Failed {
+			return {}, socket_fail(socket, e)
 		}
-
-		if _, err := socket_tick(socket, time.now()); err.kind != .None {
-			return {}, err
-		}
-
-		ready, poll_err := socket_network_poll(socket, 100 * time.Millisecond)
-		if poll_err.kind != .None {
-			return {}, poll_err
-		}
-
-		if !ready {
-			continue
-		}
-
-		if e := socket_read_deadline(socket, deadline); e.kind != .None {
+		if e.kind != .None {
 			return {}, e
 		}
-
-		event, err := socket_receive_wire(socket)
-		if err.kind != .None {
-			return {}, err
-		}
-
-		if e := socket_read_deadline(socket, {}); e.kind != .None {
-			if event.message != nil {
-				socket_message_destroy(event.message)
-			}
-
-			return {}, e
-		}
-
-		if event.kind == .Message {
-			if enqueue_error := socket_query_message_enqueue(socket, event); enqueue_error.kind != .None {
-				return {}, enqueue_error
-			}
-		}
-
-		if event.kind == .Restart_Required {
-			return {}, {kind = .Invalid_State}
-		}
-
 		if event.kind != .Node || event.node.tag != "iq" {
 			continue
 		}
@@ -1067,8 +1102,66 @@ socket_query_response_receive :: proc(socket: ^Socket, id: string) -> (Binary_Do
 	}
 }
 
+// Read one frame during a synchronous operation. Preserve unrelated live messages for socket_read.
+socket_receive_while_waiting :: proc(
+	socket: ^Socket,
+	deadline: time.Time,
+) -> (
+	Socket_Event,
+	Socket_Error,
+) {
+	if time.now()._nsec >= deadline._nsec {
+		return {}, {kind = .Query_Timeout}
+	}
+
+	if _, err := socket_tick(socket, time.now()); err.kind != .None {
+		return {}, err
+	}
+
+	ready, poll_err := socket_network_poll(socket, 100 * time.Millisecond)
+	if poll_err.kind != .None {
+		return {}, poll_err
+	}
+
+	if !ready {
+		return {}, {}
+	}
+
+	if e := socket_read_deadline(socket, deadline); e.kind != .None {
+		return {}, e
+	}
+
+	event, err := socket_receive_wire(socket)
+	if err.kind != .None {
+		return {}, err
+	}
+
+	if e := socket_read_deadline(socket, {}); e.kind != .None {
+		if event.message != nil {
+			socket_message_destroy(event.message)
+		}
+
+		return {}, e
+	}
+
+	if event.kind == .Message {
+		if enqueue_error := socket_query_message_enqueue(socket, event);
+		   enqueue_error.kind != .None {
+			return {}, enqueue_error
+		}
+		return {}, {}
+	}
+
+	if event.kind == .Restart_Required {
+		return {}, {kind = .Invalid_State}
+	}
+
+	return event, {}
+}
+
 socket_read_deadline :: proc(socket: ^Socket, deadline: time.Time) -> Socket_Error {
-	if deadline == (time.Time{}) && (socket.websocket.phase == .Closed || socket.websocket.phase == .Failed) {
+	if deadline == (time.Time{}) &&
+	   (socket.websocket.phase == .Closed || socket.websocket.phase == .Failed) {
 		return {}
 	}
 
@@ -1076,7 +1169,8 @@ socket_read_deadline :: proc(socket: ^Socket, deadline: time.Time) -> Socket_Err
 		return {}
 	}
 
-	if e := socket.websocket.stream.set_read_deadline(socket.websocket.stream.data, deadline); e.kind != .None {
+	if e := socket.websocket.stream.set_read_deadline(socket.websocket.stream.data, deadline);
+	   e.kind != .None {
 		return socket_fail(socket, {kind = .Deadline_Failed, stream = e})
 	}
 
@@ -1087,7 +1181,8 @@ socket_write_deadline :: proc(socket: ^Socket, deadline: time.Time) -> Socket_Er
 		return {}
 	}
 
-	if e := socket.websocket.stream.set_write_deadline(socket.websocket.stream.data, deadline); e.kind != .None {
+	if e := socket.websocket.stream.set_write_deadline(socket.websocket.stream.data, deadline);
+	   e.kind != .None {
 		return socket_fail(socket, {kind = .Deadline_Failed, stream = e})
 	}
 

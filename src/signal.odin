@@ -1,16 +1,16 @@
 package whatsapp
 
-import "core:slice"
 import "core:bytes"
 import "core:crypto"
+import field "core:crypto/_fiat/field_curve25519"
 import subtle "core:crypto/_subtle"
 import "core:crypto/aes"
 import "core:crypto/hkdf"
 import "core:crypto/hmac"
-import field "core:crypto/_fiat/field_curve25519"
 import "core:crypto/x25519"
 import endian "core:encoding/endian"
 import "core:mem"
+import "core:slice"
 
 // Each record belongs to ONE (group JID, sender device) tuple. The caller must
 // authenticate that tuple before processing a distribution (normally pairwise
@@ -136,7 +136,14 @@ signal_group_distribution_encode :: proc(
 		return 0, .Counter_Exhausted
 	}
 
-	required := 1 + 1 + protobuf_varint_size(cast(u64)s.id) + 1 + protobuf_varint_size(s.next_iteration) + 34 + 35
+	required :=
+		1 +
+		1 +
+		protobuf_varint_size(cast(u64)s.id) +
+		1 +
+		protobuf_varint_size(s.next_iteration) +
+		34 +
+		35
 	if len(dst) < required {
 		return 0, .Destination_Undersized
 	}
@@ -157,7 +164,12 @@ signal_group_distribution_encode :: proc(
 	return written, .None
 }
 
-signal_group_distribution_decode :: proc(src: []u8) -> (d: Signal_Group_Distribution, err: Signal_Group_Error) {
+signal_group_distribution_decode :: proc(
+	src: []u8,
+) -> (
+	d: Signal_Group_Distribution,
+	err: Signal_Group_Error,
+) {
 	if len(src) > MAX_PROTOBUF_MESSAGE_SIZE {
 		return {}, .Payload_Oversized
 	}
@@ -236,7 +248,10 @@ signal_group_distribution_decode :: proc(src: []u8) -> (d: Signal_Group_Distribu
 // the chain for recovery after a long gap. Changing signing identity is rejected.
 // Sender rotation must allocate a new ID. This intentionally avoids the pinned
 // JS implementation's duplicate-state behavior, which can resurrect old keys.
-signal_group_distribution_process :: proc(record: ^Signal_Group_Record, wire: []u8) -> Signal_Group_Error {
+signal_group_distribution_process :: proc(
+	record: ^Signal_Group_Record,
+	wire: []u8,
+) -> Signal_Group_Error {
 	if e := group_record_validate(record); e != .None {
 		return e
 	}
@@ -283,7 +298,12 @@ signal_group_distribution_process :: proc(record: ^Signal_Group_Record, wire: []
 	return .None
 }
 
-signal_group_message_decode :: proc(src: []u8) -> (m: Signal_Group_Message, err: Signal_Group_Error) {
+signal_group_message_decode :: proc(
+	src: []u8,
+) -> (
+	m: Signal_Group_Message,
+	err: Signal_Group_Error,
+) {
 	if len(src) > MAX_SIGNAL_CIPHERTEXT_SIZE + 128 {
 		return {}, .Payload_Oversized
 	}
@@ -460,7 +480,12 @@ signal_group_encrypt :: proc(
 
 	keys := signal_group_message_keys(seed)
 	defer crypto.zero_explicit(&keys, size_of(keys))
-	_, ce := signal_cbc_encrypt(dst[header_size:][:cipher_size], keys.cipher_key, keys.iv, plaintext)
+	_, ce := signal_cbc_encrypt(
+		dst[header_size:][:cipher_size],
+		keys.cipher_key,
+		keys.iv,
+		plaintext,
+	)
 	if ce != .None {
 		return 0, .Cipher_Failed
 	}
@@ -510,7 +535,9 @@ signal_group_decrypt :: proc(
 		return 0, e
 	}
 
-	if bytes.alias(dst, wire) || group_record_overlaps_buffer(record, dst) || group_record_overlaps_buffer(record, wire) {
+	if bytes.alias(dst, wire) ||
+	   group_record_overlaps_buffer(record, dst) ||
+	   group_record_overlaps_buffer(record, wire) {
 		return 0, .Overlapping_Buffers
 	}
 
@@ -553,7 +580,13 @@ signal_group_decrypt :: proc(
 	return count, .None
 }
 
-group_message_seed :: proc(state: ^Signal_Group_State, iteration: u32) -> (seed: [32]u8, err: Signal_Group_Error) {
+group_message_seed :: proc(
+	state: ^Signal_Group_State,
+	iteration: u32,
+) -> (
+	seed: [32]u8,
+	err: Signal_Group_Error,
+) {
 	if state.next_iteration > cast(u64)iteration {
 		for key, i in state.skipped[:state.skipped_count] {
 			if key.iteration != iteration {
@@ -565,7 +598,10 @@ group_message_seed :: proc(state: ^Signal_Group_State, iteration: u32) -> (seed:
 				state.skipped[j] = state.skipped[j + 1]
 			}
 			state.skipped_count -= 1
-			crypto.zero_explicit(&state.skipped[state.skipped_count], size_of(Signal_Group_Skipped_Key))
+			crypto.zero_explicit(
+				&state.skipped[state.skipped_count],
+				size_of(Signal_Group_Skipped_Key),
+			)
 			return seed, .None
 		}
 
@@ -657,7 +693,8 @@ group_record_validate :: proc(record: ^Signal_Group_Record) -> Signal_Group_Erro
 		previous: u64
 
 		for key, j in s.skipped[:s.skipped_count] {
-			if cast(u64)key.iteration >= s.next_iteration || (j > 0 && cast(u64)key.iteration <= previous) {
+			if cast(u64)key.iteration >= s.next_iteration ||
+			   (j > 0 && cast(u64)key.iteration <= previous) {
 				return .Invalid_State
 			}
 
@@ -699,7 +736,13 @@ write_group_message_header :: proc(dst: []u8, id, iteration: u32, size: int) -> 
 // Versioned private snapshot. SHA256 detects corruption, not malicious edits;
 // confidentiality, storage identity binding and atomic durable commits belong
 // to the caller's store. Never load an older snapshot after a successful commit.
-signal_group_record_encode :: proc(dst: []u8, record: ^Signal_Group_Record) -> (int, Signal_Group_Error) {
+signal_group_record_encode :: proc(
+	dst: []u8,
+	record: ^Signal_Group_Record,
+) -> (
+	int,
+	Signal_Group_Error,
+) {
 	if e := group_record_validate(record); e != .None {
 		return 0, e
 	}
@@ -816,7 +859,12 @@ signal_group_record_decode :: proc(record: ^Signal_Group_Record, src: []u8) -> S
 	return .None
 }
 
-group_snapshot_states_decode :: proc(next: ^Signal_Group_Record, src: []u8, at: ^int, end: int) -> Signal_Group_Error {
+group_snapshot_states_decode :: proc(
+	next: ^Signal_Group_Record,
+	src: []u8,
+	at: ^int,
+	end: int,
+) -> Signal_Group_Error {
 	for &s in next.states[:next.count] {
 		if end - at^ < 111 {
 			return .Invalid_Snapshot
@@ -1063,7 +1111,12 @@ signal_cbc_decrypt :: proc(
 	return written, .None
 }
 
-signal_cbc_blocks_decrypt :: proc(ctx: ^aes.Context_ECB, dst, ciphertext: []u8, iv: [16]u8, final_at: int) {
+signal_cbc_blocks_decrypt :: proc(
+	ctx: ^aes.Context_ECB,
+	dst, ciphertext: []u8,
+	iv: [16]u8,
+	final_at: int,
+) {
 	chain := iv
 	block: [16]u8
 	defer crypto.zero_explicit(&chain, size_of(chain))
@@ -1136,7 +1189,12 @@ signal_message_mac_verify :: proc(
 		return .Invalid_MAC_Length
 	}
 
-	expected, err := signal_message_mac(mac_key, sender_identity, receiver_identity, serialized_message)
+	expected, err := signal_message_mac(
+		mac_key,
+		sender_identity,
+		receiver_identity,
+		serialized_message,
+	)
 	if err != .None {
 		return err
 	}
@@ -1153,7 +1211,8 @@ SIGNAL_SESSION_WIRE_VERSION :: cast(u8)0x33
 MAX_SIGNAL_SKIPPED_KEYS :: 2000
 MAX_SIGNAL_RECEIVING_CHAINS :: 32
 MAX_SIGNAL_PACKET_SIZE :: MAX_SIGNAL_CIPHERTEXT_SIZE + 256
-MAX_SIGNAL_SESSION_STORE_SIZE :: 330 + MAX_SIGNAL_RECEIVING_CHAINS * 74 + MAX_SIGNAL_SKIPPED_KEYS * 39
+MAX_SIGNAL_SESSION_STORE_SIZE ::
+	330 + MAX_SIGNAL_RECEIVING_CHAINS * 74 + MAX_SIGNAL_SKIPPED_KEYS * 39
 SIGNAL_SESSION_STORE_MAGIC :: "ODWSIGS\x00"
 
 Signal_Prekey_Bundle :: struct {
@@ -1305,16 +1364,19 @@ signal_session_init_initiator :: proc(
 	next.local_identity_public = signal_curve_public(identity)
 	next.remote_identity_public = bundle.identity_public
 	next.remote_ratchet_public = bundle.signed_prekey_public
-	next.local_registration_id, next.remote_registration_id = registration_id, bundle.registration_id
+	next.local_registration_id, next.remote_registration_id =
+		registration_id, bundle.registration_id
 	next.pending_signed_prekey_id = bundle.signed_prekey_id
 	next.has_pending_prekey, next.pending_prekey_id = bundle.has_prekey, bundle.prekey_id
 	next.pending_prekey, next.initiator = true, true
-	if root_error := signal_initiator_root_derive(&next, identity, base_private, bundle); root_error.kind != .None {
+	if root_error := signal_initiator_root_derive(&next, identity, base_private, bundle);
+	   root_error.kind != .None {
 		return root_error
 	}
 	dh: [32]u8
 	defer crypto.zero_explicit(&dh, size_of(dh))
-	if err := signal_agreement(dh[:], next.local_ratchet_private, bundle.signed_prekey_public); err.kind != .None {
+	if err := signal_agreement(dh[:], next.local_ratchet_private, bundle.signed_prekey_public);
+	   err.kind != .None {
 		return err
 	}
 
@@ -1327,7 +1389,8 @@ signal_session_init_initiator :: proc(
 }
 
 signal_initiator_bundle_validate :: proc(bundle: Signal_Prekey_Bundle) -> Signal_Session_Error {
-	if bundle.signed_prekey_id > MAX_DEVICE_PREKEY_ID || bundle.has_prekey && bundle.prekey_id > MAX_DEVICE_PREKEY_ID {
+	if bundle.signed_prekey_id > MAX_DEVICE_PREKEY_ID ||
+	   bundle.has_prekey && bundle.prekey_id > MAX_DEVICE_PREKEY_ID {
 		return {kind = .Invalid_Prekey}
 	}
 
@@ -1337,7 +1400,8 @@ signal_initiator_bundle_validate :: proc(bundle: Signal_Prekey_Bundle) -> Signal
 	copy(signed[1:], public[:])
 	prekey_signature := bundle.signed_prekey_signature
 
-	if err := signal_curve_verify(bundle.identity_public, signed[:], prekey_signature[:]); err != .None {
+	if err := signal_curve_verify(bundle.identity_public, signed[:], prekey_signature[:]);
+	   err != .None {
 		return {kind = .Invalid_Prekey_Signature, signal = err}
 	}
 
@@ -1352,21 +1416,25 @@ signal_initiator_root_derive :: proc(
 	material: [160]u8
 	defer crypto.zero_explicit(&material, size_of(material))
 	slice.fill(material[:32], 0xff)
-	if err := signal_agreement(material[32:64], identity, bundle.signed_prekey_public); err.kind != .None {
+	if err := signal_agreement(material[32:64], identity, bundle.signed_prekey_public);
+	   err.kind != .None {
 		return err
 	}
 
-	if err := signal_agreement(material[64:96], base_private, bundle.identity_public); err.kind != .None {
+	if err := signal_agreement(material[64:96], base_private, bundle.identity_public);
+	   err.kind != .None {
 		return err
 	}
 
-	if err := signal_agreement(material[96:128], base_private, bundle.signed_prekey_public); err.kind != .None {
+	if err := signal_agreement(material[96:128], base_private, bundle.signed_prekey_public);
+	   err.kind != .None {
 		return err
 	}
 
 	length := 128
 	if bundle.has_prekey {
-		if err := signal_agreement(material[128:160], base_private, bundle.prekey_public); err.kind != .None {
+		if err := signal_agreement(material[128:160], base_private, bundle.prekey_public);
+		   err.kind != .None {
 			return err
 		}
 
@@ -1438,7 +1506,12 @@ Signal_Prekey_Message :: struct {
 	message:                                      []u8,
 }
 
-signal_whisper_decode :: proc(wire: []u8) -> (message: Signal_Whisper, error: Signal_Session_Error) {
+signal_whisper_decode :: proc(
+	wire: []u8,
+) -> (
+	message: Signal_Whisper,
+	error: Signal_Session_Error,
+) {
 	if len(wire) > MAX_SIGNAL_PACKET_SIZE {
 		return {}, {kind = .Payload_Oversized}
 	}
@@ -1490,7 +1563,10 @@ signal_whisper_decode :: proc(wire: []u8) -> (message: Signal_Whisper, error: Si
 	return message, {}
 }
 
-signal_whisper_decode_field :: proc(message: ^Signal_Whisper, part: Protobuf_Field) -> Signal_Session_Error {
+signal_whisper_decode_field :: proc(
+	message: ^Signal_Whisper,
+	part: Protobuf_Field,
+) -> Signal_Session_Error {
 	switch part.number {
 	case 1:
 		if part.wire_type != 2 || len(part.data) != 33 || part.data[0] != 5 {
@@ -1528,7 +1604,12 @@ signal_whisper_decode_field :: proc(message: ^Signal_Whisper, part: Protobuf_Fie
 // Header inspection does not authenticate the identity or consume a prekey.
 // message.message borrows wire; use the matching trusted identity explicitly
 // when processing this envelope through signal_session_decrypt_prekey.
-signal_prekey_message_decode :: proc(wire: []u8) -> (message: Signal_Prekey_Message, error: Signal_Session_Error) {
+signal_prekey_message_decode :: proc(
+	wire: []u8,
+) -> (
+	message: Signal_Prekey_Message,
+	error: Signal_Session_Error,
+) {
 	if len(wire) > MAX_SIGNAL_PACKET_SIZE {
 		return {}, {kind = .Payload_Oversized}
 	}
@@ -1561,7 +1642,8 @@ signal_prekey_message_decode :: proc(wire: []u8) -> (message: Signal_Prekey_Mess
 		}
 
 		seen[part.number - 1] = true
-		if field_error := signal_prekey_message_decode_field(&message, part); field_error.kind != .None {
+		if field_error := signal_prekey_message_decode_field(&message, part);
+		   field_error.kind != .None {
 			return {}, field_error
 		}
 	}
@@ -1654,13 +1736,18 @@ signal_session_encrypt :: proc(
 
 	counter := cast(u32)(session.send_counter + 1)
 	cipher_size := (len(plaintext) / 16 + 1) * 16
-	packet_kind, prefix_size, whisper_size, suffix_size := signal_session_encrypt_sizes(session, counter, cipher_size)
+	packet_kind, prefix_size, whisper_size, suffix_size := signal_session_encrypt_sizes(
+		session,
+		counter,
+		cipher_size,
+	)
 	required := prefix_size + whisper_size + suffix_size
 	if len(dst) < required {
 		return {}, required, {kind = .Destination_Undersized}
 	}
 
-	if bytes.alias(dst[:required], plaintext) || signal_session_overlaps_buffer(session, dst[:required]) {
+	if bytes.alias(dst[:required], plaintext) ||
+	   signal_session_overlaps_buffer(session, dst[:required]) {
 		return {}, 0, {kind = .Overlapping_Buffers}
 	}
 
@@ -1669,7 +1756,14 @@ signal_session_encrypt :: proc(
 	keys := signal_message_keys(step.message_seed)
 	defer crypto.zero_explicit(&keys, size_of(keys))
 	whisper := dst[prefix_size:][:whisper_size]
-	if encryption_error := signal_session_whisper_encrypt(session, whisper, plaintext, &keys, counter, cipher_size); encryption_error.kind != .None {
+	if encryption_error := signal_session_whisper_encrypt(
+		session,
+		whisper,
+		plaintext,
+		&keys,
+		counter,
+		cipher_size,
+	); encryption_error.kind != .None {
 		return {}, 0, encryption_error
 	}
 	if session.pending_prekey {
@@ -1737,7 +1831,12 @@ signal_session_whisper_encrypt :: proc(
 	whisper[at] = 34
 	at += 1
 	protobuf_varint_write(whisper, &at, cast(u64)cipher_size)
-	_, crypto_err := signal_cbc_encrypt(whisper[at:][:cipher_size], keys.cipher_key, keys.iv, plaintext)
+	_, crypto_err := signal_cbc_encrypt(
+		whisper[at:][:cipher_size],
+		keys.cipher_key,
+		keys.iv,
+		plaintext,
+	)
 	if crypto_err != .None {
 		return {kind = .Encryption_Failed, crypto = crypto_err}
 	}
@@ -1757,7 +1856,11 @@ signal_session_whisper_encrypt :: proc(
 	return {}
 }
 
-signal_session_prekey_wrap :: proc(session: ^Signal_Session, dst: []u8, prefix_size, whisper_size, required: int) {
+signal_session_prekey_wrap :: proc(
+	session: ^Signal_Session,
+	dst: []u8,
+	prefix_size, whisper_size, required: int,
+) {
 	dst[0] = SIGNAL_SESSION_WIRE_VERSION
 	at := 1
 
@@ -1850,7 +1953,12 @@ signal_session_decrypt_prekey :: proc(
 	next: Signal_Session
 	defer signal_session_clear(&next)
 	if session.initialized {
-		if session_error := signal_prekey_existing_session_validate(session, trusted_identity, prekey, local); session_error.kind != .None {
+		if session_error := signal_prekey_existing_session_validate(
+			session,
+			trusted_identity,
+			prekey,
+			local,
+		); session_error.kind != .None {
 			return 0, 0, session_error
 		}
 
@@ -1888,7 +1996,10 @@ signal_prekey_existing_session_validate :: proc(
 		return {kind = .Session_Mismatch}
 	}
 
-	if !signal_identity_equal(session.local_identity_public, signal_curve_public(local.identity_private)) {
+	if !signal_identity_equal(
+		session.local_identity_public,
+		signal_curve_public(local.identity_private),
+	) {
 		return {kind = .Invalid_Key}
 	}
 
@@ -1907,22 +2018,28 @@ signal_session_init_recipient :: proc(
 	material: [160]u8
 	defer crypto.zero_explicit(&material, size_of(material))
 	slice.fill(material[:32], 0xff)
-	if err := signal_agreement(material[32:64], local.signed_prekey_private, message.identity_public);
+	if err := signal_agreement(
+		material[32:64],
+		local.signed_prekey_private,
+		message.identity_public,
+	); err.kind != .None {
+		return err
+	}
+
+	if err := signal_agreement(material[64:96], local.identity_private, message.base_public);
 	   err.kind != .None {
 		return err
 	}
 
-	if err := signal_agreement(material[64:96], local.identity_private, message.base_public); err.kind != .None {
-		return err
-	}
-
-	if err := signal_agreement(material[96:128], local.signed_prekey_private, message.base_public); err.kind != .None {
+	if err := signal_agreement(material[96:128], local.signed_prekey_private, message.base_public);
+	   err.kind != .None {
 		return err
 	}
 
 	length := 128
 	if message.has_prekey {
-		if err := signal_agreement(material[128:160], local.prekey_private, message.base_public); err.kind != .None {
+		if err := signal_agreement(material[128:160], local.prekey_private, message.base_public);
+		   err.kind != .None {
 			return err
 		}
 
@@ -1960,7 +2077,9 @@ signal_recipient_keys_validate :: proc(
 	}
 
 	if message.has_prekey &&
-	   (!local.has_prekey || local.prekey_id != message.prekey_id || !signal_private_valid(local.prekey_private)) {
+	   (!local.has_prekey ||
+			   local.prekey_id != message.prekey_id ||
+			   !signal_private_valid(local.prekey_private)) {
 		return {kind = .Missing_Prekey}
 	}
 
@@ -1977,7 +2096,8 @@ signal_session_decrypt_next :: proc(
 ) {
 	index := signal_receiving_chain_find(next, message.ratchet_public)
 	if index < 0 {
-		if err := signal_session_ratchet(next, message.ratchet_public, message.previous_counter); err.kind != .None {
+		if err := signal_session_ratchet(next, message.ratchet_public, message.previous_counter);
+		   err.kind != .None {
 			return 0, err
 		}
 
@@ -2016,7 +2136,11 @@ signal_session_decrypt_next :: proc(
 	return body_size, {}
 }
 
-signal_session_ratchet :: proc(next: ^Signal_Session, remote: [32]u8, previous_counter: u32) -> Signal_Session_Error {
+signal_session_ratchet :: proc(
+	next: ^Signal_Session,
+	remote: [32]u8,
+	previous_counter: u32,
+) -> Signal_Session_Error {
 	old := signal_receiving_chain_find(next, next.remote_ratchet_public)
 
 	if old >= 0 && !next.receiving[old].closed {
@@ -2084,7 +2208,9 @@ signal_session_message_seed :: proc(
 	chain := &next.receiving[index]
 	if cast(i64)counter <= chain.counter {
 		for &skipped in next.skipped {
-			if skipped.in_use && skipped.chain_index == cast(u16)index && skipped.counter == counter {
+			if skipped.in_use &&
+			   skipped.chain_index == cast(u16)index &&
+			   skipped.counter == counter {
 				seed = skipped.seed
 				crypto.zero_explicit(&skipped, size_of(Signal_Skipped_Key))
 				next.skipped_count -= 1
@@ -2123,7 +2249,11 @@ signal_session_message_seed :: proc(
 	unreachable()
 }
 
-signal_session_skip_through :: proc(next: ^Signal_Session, index: int, counter: u32) -> Signal_Session_Error {
+signal_session_skip_through :: proc(
+	next: ^Signal_Session,
+	index: int,
+	counter: u32,
+) -> Signal_Session_Error {
 	chain := &next.receiving[index]
 	if chain.counter >= cast(i64)counter {
 		return {}
@@ -2265,7 +2395,10 @@ signal_session_validate :: proc(session: ^Signal_Session) -> Signal_Session_Erro
 	}
 
 	if !signal_private_valid(session.local_ratchet_private) ||
-	   !signal_identity_equal(signal_curve_public(session.local_ratchet_private), session.local_ratchet_public) ||
+	   !signal_identity_equal(
+			   signal_curve_public(session.local_ratchet_private),
+			   session.local_ratchet_public,
+		   ) ||
 	   !signal_public_valid(session.local_identity_public) ||
 	   !signal_public_valid(session.remote_identity_public) ||
 	   !signal_public_valid(session.base_public) ||
@@ -2273,7 +2406,8 @@ signal_session_validate :: proc(session: ^Signal_Session) -> Signal_Session_Erro
 		return {kind = .Invalid_Key}
 	}
 
-	if session.pending_prekey && (!session.initiator || session.pending_signed_prekey_id > MAX_DEVICE_PREKEY_ID) {
+	if session.pending_prekey &&
+	   (!session.initiator || session.pending_signed_prekey_id > MAX_DEVICE_PREKEY_ID) {
 		return {kind = .Invalid_Prekey}
 	}
 
@@ -2292,7 +2426,9 @@ signal_session_chains_validate :: proc(session: ^Signal_Session) -> Signal_Sessi
 			continue
 		}
 
-		if !signal_public_valid(chain.ratchet_public) || chain.counter < -1 || chain.counter > cast(i64)max(u32) {
+		if !signal_public_valid(chain.ratchet_public) ||
+		   chain.counter < -1 ||
+		   chain.counter > cast(i64)max(u32) {
 			return {kind = .Invalid_State}
 		}
 
@@ -2335,7 +2471,9 @@ signal_session_chains_validate :: proc(session: ^Signal_Session) -> Signal_Sessi
 		}
 
 		for other in session.skipped[:i] {
-			if other.in_use && other.chain_index == key.chain_index && other.counter == key.counter {
+			if other.in_use &&
+			   other.chain_index == key.chain_index &&
+			   other.counter == key.counter {
 				return {kind = .Invalid_State}
 			}
 		}
@@ -2351,7 +2489,13 @@ signal_session_chains_validate :: proc(session: ^Signal_Session) -> Signal_Sessi
 // Bounded versioned snapshot; contains private keys and skipped message seeds.
 // The caller's atomic state store must protect these bytes and commit consumed
 // one-time-key markers alongside them before releasing plaintext/ciphertext.
-signal_session_encode :: proc(dst: []u8, session: ^Signal_Session) -> (written: int, error: Signal_Session_Error) {
+signal_session_encode :: proc(
+	dst: []u8,
+	session: ^Signal_Session,
+) -> (
+	written: int,
+	error: Signal_Session_Error,
+) {
 	if err := signal_session_validate(session); err.kind != .None {
 		return 0, err
 	}
@@ -2509,7 +2653,8 @@ signal_session_decode :: proc(session: ^Signal_Session, src: []u8) -> Signal_Ses
 		return {kind = .Invalid_Format}
 	}
 
-	if chains_error := signal_session_chains_decode(&next, src, &at, chains, skipped); chains_error.kind != .None {
+	if chains_error := signal_session_chains_decode(&next, src, &at, chains, skipped);
+	   chains_error.kind != .None {
 		return chains_error
 	}
 

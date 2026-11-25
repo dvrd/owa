@@ -7,8 +7,8 @@ import "core:strings"
 import "core:testing"
 import "core:time"
 import test_fixtures "fixtures/client"
-import "shared:http"
-import network_client "shared:surf"
+import "shared:async/http"
+import surf "shared:surf"
 import wa "shared:whatsapp"
 
 @(test)
@@ -30,10 +30,10 @@ Official_Version_Peer :: struct {
 official_version_peer_get :: proc(
 	data: rawptr,
 	url: string,
-	config: network_client.Config,
+	config: surf.Config,
 ) -> (
-	network_client.Response,
-	network_client.HTTP_Error,
+	surf.Response,
+	surf.HTTP_Error,
 ) {
 	peer := cast(^Official_Version_Peer)data
 	peer.calls += 1
@@ -910,10 +910,10 @@ Version_Test_Fetch :: struct {
 version_test_fetch :: proc(
 	data: rawptr,
 	url: string,
-	config: network_client.Config,
+	config: surf.Config,
 ) -> (
-	network_client.Response,
-	network_client.HTTP_Error,
+	surf.Response,
+	surf.HTTP_Error,
 ) {
 	peer := cast(^Version_Test_Fetch)data
 	peer.calls += 1
@@ -1100,15 +1100,15 @@ Owned_Version_Peer :: struct {
 owned_version_fetch :: proc(
 	data: rawptr,
 	url: string,
-	config: network_client.Config,
+	config: surf.Config,
 ) -> (
-	network_client.Response,
-	network_client.HTTP_Error,
+	surf.Response,
+	surf.HTTP_Error,
 ) {
 	peer := cast(^Owned_Version_Peer)data
 	storage := make([dynamic]u8, 0, len(peer.body))
 	append(&storage, peer.body)
-	response := network_client.Response {
+	response := surf.Response {
 		status       = peer.status,
 		body         = storage[:],
 		body_storage = storage,

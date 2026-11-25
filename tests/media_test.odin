@@ -6,8 +6,8 @@ import "core:sync"
 import "core:testing"
 import "core:time"
 import test_fixtures "fixtures/client"
-import "shared:http"
-import network_client "shared:surf"
+import "shared:async/http"
+import surf "shared:surf"
 import wa "shared:whatsapp"
 
 Media_Deadline_Test :: struct {
@@ -20,10 +20,10 @@ Media_Deadline_Test :: struct {
 
 media_deadline_test_execute :: proc(
 	request: http.Request,
-	config: network_client.Config,
+	config: surf.Config,
 ) -> (
-	network_client.Response,
-	network_client.HTTP_Error,
+	surf.Response,
+	surf.HTTP_Error,
 ) {
 	state := cast(^Media_Deadline_Test)context.user_ptr
 	state.calls += 1
@@ -145,10 +145,10 @@ Media_Retry_Test_State :: struct {
 
 media_retry_test_http :: proc(
 	request: http.Request,
-	config: network_client.Config,
+	config: surf.Config,
 ) -> (
-	network_client.Response,
-	network_client.HTTP_Error,
+	surf.Response,
+	surf.HTTP_Error,
 ) {
 	state := cast(^Media_Retry_Test_State)context.user_ptr
 	state.calls += 1
@@ -157,18 +157,18 @@ media_retry_test_http :: proc(
 	return {status = 410}, {}
 }
 
-media_retry_test_write :: proc(data: rawptr, src: []u8) -> (int, network_client.WebSocket_Stream_Error) {
+media_retry_test_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Stream_Error) {
 	state := cast(^Media_Retry_Test_State)context.user_ptr
 	state.writes += 1
 
 	return len(src), {}
 }
 
-media_retry_test_read :: proc(data: rawptr, dst: []u8) -> (int, network_client.WebSocket_Stream_Error) {
+media_retry_test_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Stream_Error) {
 	return 0, {kind = .EOF}
 }
 
-media_retry_test_close :: proc(data: rawptr) -> network_client.WebSocket_Stream_Error {
+media_retry_test_close :: proc(data: rawptr) -> surf.WebSocket_Stream_Error {
 	return {}
 }
 
@@ -248,7 +248,7 @@ media_retry_preserves_caller_routing_metadata :: proc(t: ^testing.T) {
 		"a480b04f11ee5fa82b42320a244eff457db59d7239cf27a03dcf5b25925fc805fe" +
 		"6962c6769ece6da65780c8c9c3327a81670ea589ec153fdcacab8f06bf93b46e76a0"
 	ciphertext, valid := hex.decode(transmute([]u8)cipher_hex)
-	testing.expect(t, valid)
+	testing.expect_value(t, valid, nil)
 	defer delete(ciphertext)
 	nonce: [12]u8
 	for &value, index in nonce {
@@ -767,11 +767,11 @@ http_execute_requires_an_online_socket_and_never_runs_the_request_otherwise :: p
 download_private_voice_note_and_audio_attachment :: proc(t: ^testing.T) {
 	// Independently generated HKDF-SHA256 / AES-256-CBC / HMAC test vector.
 	ciphertext, ok := hex.decode(transmute([]u8)string("d874b3233c0dcef4e9a268bc3b415bd2a7ec798e1433f153fc5499bd4392ef89f01b545fe9a517a297aa"))
-	assert(ok)
+	assert(ok == nil)
 	defer delete(ciphertext)
 	plain_hash, a := hex.decode(transmute([]u8)string("a69b9f40bedbabf3e12dfc7196016db2025b82ab86a6685d3e61fadeb3cbe658"))
 	enc_hash, b := hex.decode(transmute([]u8)string("57b9cee7e10ae671167ef34896b1de2854a55defa4df5268c43d6400ca81447d"))
-	assert(a && b)
+	assert(a == nil && b == nil)
 	defer delete(plain_hash)
 	defer delete(enc_hash)
 	f := new(Download_Fixture)

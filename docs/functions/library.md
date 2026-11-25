@@ -2,7 +2,7 @@
 
 [Catalog index](README.md) · [Name changes](renames.md)
 
-630 entries across 15 source files. Select a function to open its declaration.
+642 entries across 16 source files. Select a function to open its declaration.
 
 | Source file | Functions |
 |---|---:|
@@ -10,16 +10,17 @@
 | [src/ascii.odin](#file-src-ascii-odin) | 5 |
 | [src/auth.odin](#file-src-auth-odin) | 41 |
 | [src/binary_node.odin](#file-src-binary-node-odin) | 35 |
+| [src/chat_history.odin](#file-src-chat-history-odin) | 9 |
 | [src/connection.odin](#file-src-connection-odin) | 56 |
-| [src/contact_sync.odin](#file-src-contact-sync-odin) | 23 |
+| [src/contact_sync.odin](#file-src-contact-sync-odin) | 24 |
 | [src/contacts.odin](#file-src-contacts-odin) | 5 |
 | [src/media.odin](#file-src-media-odin) | 89 |
 | [src/pairing.odin](#file-src-pairing-odin) | 64 |
 | [src/protobuf.odin](#file-src-protobuf-odin) | 47 |
 | [src/receive.odin](#file-src-receive-odin) | 65 |
-| [src/send.odin](#file-src-send-odin) | 38 |
+| [src/send.odin](#file-src-send-odin) | 39 |
 | [src/signal.odin](#file-src-signal-odin) | 75 |
-| [src/socket.odin](#file-src-socket-odin) | 33 |
+| [src/socket.odin](#file-src-socket-odin) | 34 |
 | [src/state_store.odin](#file-src-state-store-odin) | 21 |
 
 <a id="file-src-addressing-odin"></a>
@@ -164,6 +165,22 @@
 | [`binary_read_jid_pair`](../../src/binary_node.odin#L1088) | Read a user/server JID pair and join its components. |
 | [`binary_reader_join_jid`](../../src/binary_node.odin#L1107) | Format decoded JID components into document-owned storage. |
 
+<a id="file-src-chat-history-odin"></a>
+
+## src/chat_history.odin
+
+| Function | Behavior |
+|---|---|
+| [`decode_chat_history_cursor`](../../src/chat_history.odin#L26) | Read the direction, original timestamp and message ID from a stored chat cursor. |
+| [`store_chat_history_cursor`](../../src/chat_history.odin#L39) | Keep the latest timestamped private message reference for the chat. |
+| [`latest_chat_history_cursor`](../../src/chat_history.odin#L71) | Find the newest usable message reference across the chat’s phone number, LID and legacy sent records. |
+| [`chat_history_request_encode`](../../src/chat_history.odin#L123) | Encode the requested private chat, page size and optional message boundary for the primary phone. |
+| [`collect_chat_history_notification`](../../src/chat_history.odin#L177) | Collect bounded on-demand notifications matching the active request ID. |
+| [`chat_history_alternate_jid`](../../src/chat_history.odin#L206) | Resolve the alternate private chat address using the linked account’s mappings or saved contact. |
+| [`decode_chat_history_message`](../../src/chat_history.odin#L220) | Read a historical message key and body and preserve its original direction and timestamp. |
+| [`decode_chat_history_chunk`](../../src/chat_history.odin#L263) | Validate the selected conversation and collect distinct messages within the page limits. |
+| [`socket_fetch_chat_history`](../../src/chat_history.odin#L336) | Request a private conversation page from the primary phone and return owned messages. |
+
 <a id="file-src-connection-odin"></a>
 
 ## src/connection.odin
@@ -246,16 +263,17 @@
 | [`rebase_contact_collection`](../../src/contact_sync.odin#L494) | Merge the authenticated address book and index MACs into the latest socket state after processing concurrent network events. |
 | [`socket_sync_contacts`](../../src/contact_sync.odin#L521) | Fetch and persist authenticated contact pages or request a missing key from the primary device. |
 | [`socket_request_contact_key`](../../src/contact_sync.odin#L677) | Send the missing key ID to the primary device in a durably staged pairwise-encrypted peer message. |
-| [`socket_note_contact_update`](../../src/contact_sync.odin#L821) | Mark the address book incomplete when a server notification announces a newer version. |
-| [`store_historical_contact_profiles`](../../src/contact_sync.odin#L879) | Import profile names from a history notification or persist its external reference for the socket loop. |
-| [`download_contact_history`](../../src/contact_sync.odin#L899) | Copy a history reference across socket reads and fetch its authenticated compressed content. |
-| [`socket_import_pending_contact_history`](../../src/contact_sync.odin#L909) | Download one persisted profile-history reference and atomically import it into the current store. |
-| [`contact_history_media`](../../src/contact_sync.odin#L932) | Read the media key, path, size and hashes from an external contact-history reference. |
-| [`import_compressed_contact_profiles`](../../src/contact_sync.odin#L953) | Decompress a push-name history chunk and persist previously unknown profile names. |
-| [`download_contact_media`](../../src/contact_sync.odin#L1002) | Download and authenticate a bounded contact sync or history payload with an optional declared length. |
-| [`contact_value_mac`](../../src/contact_sync.odin#L1087) | Authenticate an encrypted contact mutation with its operation and app-state key identifier. |
-| [`encode_contact_add_patch`](../../src/contact_sync.odin#L1103) | Encode and sign a saved contact update against the current address-book hash and version. |
-| [`socket_add_contact`](../../src/contact_sync.odin#L1199) | Create a saved WhatsApp contact by phone-number JID and verify its name through the linked session. |
+| [`socket_note_contact_update`](../../src/contact_sync.odin#L712) | Mark the address book incomplete when a server notification announces a newer version. |
+| [`store_historical_contact_profiles`](../../src/contact_sync.odin#L770) | Import profile names from a history notification or persist its external reference for the socket loop. |
+| [`download_contact_history`](../../src/contact_sync.odin#L790) | Copy a history reference across socket reads and fetch its authenticated compressed content. |
+| [`socket_import_pending_contact_history`](../../src/contact_sync.odin#L800) | Download one persisted profile-history reference and atomically import it into the current store. |
+| [`contact_history_media`](../../src/contact_sync.odin#L823) | Read the media key, path, size and hashes from an external contact-history reference. |
+| [`decompress_history_chunk`](../../src/contact_sync.odin#L844) | Inflate a complete compressed history chunk into a caller-sized buffer. |
+| [`import_compressed_contact_profiles`](../../src/contact_sync.odin#L857) | Decompress a push-name history chunk and persist previously unknown profile names. |
+| [`download_contact_media`](../../src/contact_sync.odin#L899) | Download and authenticate a bounded contact sync or history payload with an optional declared length. |
+| [`contact_value_mac`](../../src/contact_sync.odin#L984) | Authenticate an encrypted contact mutation with its operation and app-state key identifier. |
+| [`encode_contact_add_patch`](../../src/contact_sync.odin#L1000) | Encode and sign a saved contact update against the current address-book hash and version. |
+| [`socket_add_contact`](../../src/contact_sync.odin#L1096) | Create a saved WhatsApp contact by phone-number JID and verify its name through the linked session. |
 
 <a id="file-src-contacts-odin"></a>
 
@@ -508,66 +526,66 @@ before allocating a destination. Pass the original message and buffer to
 | [`socket_message_node_process`](../../src/receive.odin#L95) | Process an incoming message node and send acknowledgements or a retry request. |
 | [`socket_message_ack_process`](../../src/receive.odin#L133) | Apply a server acknowledgement to the durable outbound message record. |
 | [`socket_process_message`](../../src/receive.odin#L173) | Validate the message route, decrypt it and commit its durable outcome. |
-| [`socket_message_route_decode`](../../src/receive.odin#L263) | Extract and validate the group, participant and stanza ID of an incoming message. |
-| [`socket_message_processed_commit`](../../src/receive.odin#L291) | Persist a processed-message marker alongside staged state changes. |
-| [`socket_message_cipher_decrypt`](../../src/receive.odin#L299) | Decrypt a group or pairwise ciphertext with the correct sender state. |
-| [`socket_message_distribution_install`](../../src/receive.odin#L354) | Install a sender-key distribution carried in a decrypted message. |
-| [`socket_message_child_decrypt`](../../src/receive.odin#L402) | Decrypt one encrypted child, remove padding and process key distributions. |
-| [`message_encryption_nack_reason`](../../src/receive.odin#L461) | Choose a negative-acknowledgement reason for unsupported encryption. |
-| [`socket_message_payload_decrypt`](../../src/receive.odin#L486) | Dispatch encrypted children and select the decrypted message payload. |
-| [`socket_message_control_commit`](../../src/receive.odin#L551) | Recognize an internal control message and commit its processed marker. |
-| [`socket_message_event_commit`](../../src/receive.odin#L607) | Stage the incoming message for durable delivery and return a socket event. |
-| [`socket_pairwise_decrypt`](../../src/receive.odin#L658) | Decrypt pairwise data with current or archived sessions and stage resulting state. |
-| [`socket_pairwise_state_load`](../../src/receive.odin#L728) | Load the current session and stored identity pin for a sender. |
-| [`socket_pairwise_prekey_archive_select`](../../src/receive.odin#L756) | Select an archived session matching the incoming prekey message. |
-| [`socket_pairwise_one_time_prekey_load`](../../src/receive.odin#L804) | Load the one-time prekey needed by the incoming session. |
-| [`socket_pairwise_prekey_open`](../../src/receive.odin#L826) | Open a prekey envelope with the appropriate session and key material. |
-| [`socket_pairwise_whisper_open`](../../src/receive.odin#L875) | Try current or archived receiving sessions for a Whisper message. |
-| [`socket_pairwise_decryption_stage`](../../src/receive.odin#L929) | Stage identity, session and consumed-key changes following successful decryption. |
-| [`socket_stage_group`](../../src/receive.odin#L959) | Serialize and stage an updated group sender-key record. |
-| [`socket_message_unpad`](../../src/receive.odin#L980) | Check and strip the repeated padding bytes from a message. |
-| [`socket_store_clone`](../../src/receive.odin#L1000) | Clone the socket's durable store for a transaction. |
-| [`socket_store_commit`](../../src/receive.odin#L1012) | Persist and install a candidate store, then clean up consumed prekeys. |
-| [`socket_inbox_id_valid`](../../src/receive.odin#L1029) | Check a stanza ID before using it in an inbox record name. |
-| [`socket_receive_group_valid`](../../src/receive.odin#L1042) | Validate an inbound group address for the receive path. |
-| [`socket_inbox_key`](../../src/receive.odin#L1061) | Compute an inbox record key using the socket's current address mappings. |
-| [`socket_inbox_key_store`](../../src/receive.odin#L1068) | Build the inbox key from the group, canonical sender and stanza ID. |
-| [`socket_sender_is_self`](../../src/receive.odin#L1082) | Check whether the address identifies this account using the socket's state. |
-| [`socket_sender_is_self_store`](../../src/receive.odin#L1089) | Resolve a sender against the supplied store and account identities. |
-| [`socket_message_new`](../../src/receive.odin#L1148) | Construct a received message with owned copies of its data. |
-| [`socket_inbox_stage`](../../src/receive.odin#L1209) | Serialize a received message into a candidate inbox record. |
-| [`socket_message_complete`](../../src/receive.odin#L1257) | Commit completion of delivery by marking it processed and deleting its inbox entry. |
-| [`socket_inbox_restore`](../../src/receive.odin#L1290) | Rebuild the pending message queue from durable inbox entries. |
-| [`socket_inbox_record_restore`](../../src/receive.odin#L1337) | Decode and validate a stored inbox entry as a received message. |
-| [`socket_cleanup_consumed_prekeys`](../../src/receive.odin#L1392) | Remove prekeys marked consumed by committed decryption and save the prekey store. |
-| [`socket_retry_counter_read`](../../src/receive.odin#L1441) | Decode the retry attempt count and timestamp from a stored record. |
-| [`socket_retry_counter_set`](../../src/receive.odin#L1461) | Store the retry count with the current timestamp. |
-| [`socket_retry_prekeys_exhausted`](../../src/receive.odin#L1481) | Persist the terminal retry count when a new prekey cannot be issued. |
-| [`socket_retry_keys_prepare`](../../src/receive.odin#L1524) | Generate and persist the keys required for a retry receipt. |
-| [`socket_retry_body_prepare`](../../src/receive.odin#L1573) | Build the retry count, registration and optional key child nodes. |
-| [`socket_retry_receipt_send`](../../src/receive.odin#L1608) | Write the encoded retry receipt to the socket. |
-| [`socket_request_retry`](../../src/receive.odin#L1640) | Validate an incoming message's retry eligibility, persist the attempt and send the receipt. |
-| [`socket_archive_session`](../../src/receive.odin#L1692) | Archive a pairwise session under its identity and prune displaced archives. |
-| [`socket_send_delivery_receipt`](../../src/receive.odin#L1727) | Build and send a delivery receipt for the incoming stanza. |
-| [`encode_current_unix_timestamp`](../../src/receive.odin#L1786) | Encode the current time as a processed-message timestamp. |
-| [`processed_history_receipt`](../../src/receive.odin#L1793) | Check whether a durable processed marker requests a history-sync receipt on redelivery. |
-| [`socket_processed_set`](../../src/receive.odin#L1797) | Store a timestamped marker for a processed message. |
-| [`unwrap_protocol_message`](../../src/receive.odin#L1810) | Find the protocol payload in a decrypted message through supported wrappers. |
-| [`message_contains_history_sync_notification`](../../src/receive.odin#L1878) | Detect a history sync notification inside supported message wrappers. |
-| [`socket_protocol_has_history`](../../src/receive.odin#L1882) | Check a protocol message for a history sync field. |
-| [`socket_send_history_receipt`](../../src/receive.odin#L1887) | Send the history-sync receipt to the appropriate account address. |
-| [`socket_defer_retry`](../../src/receive.odin#L1922) | Queue an owned copy of an incoming retry request for deferred processing. |
-| [`socket_acknowledge`](../../src/receive.odin#L1962) | Send the stanza acknowledgement with the original routing attributes. |
-| [`socket_retry_outgoing`](../../src/receive.odin#L2016) | Process a peer retry request using the saved outbound message. |
-| [`socket_retry_session_archive`](../../src/receive.odin#L2081) | Resolve and archive the current session before retrying delivery. |
-| [`socket_replay_outbox`](../../src/receive.odin#L2112) | Resend the wire bytes for durable pending outbound messages. |
-| [`socket_trust_identity`](../../src/receive.odin#L2132) | Commit an explicitly trusted identity for the device. |
-| [`socket_prune_pending_ids`](../../src/receive.odin#L2185) | Collect pending message IDs that must survive pruning. |
-| [`socket_retry_record_id`](../../src/receive.odin#L2219) | Extract a message ID from a retry record name. |
-| [`socket_prune_retry_record`](../../src/receive.odin#L2239) | Check retry metadata for expiry and migrate its timestamp when needed. |
-| [`socket_prune_record`](../../src/receive.odin#L2277) | Determine whether a stored record is eligible for expiry. |
-| [`socket_prune_state`](../../src/receive.odin#L2324) | Prune eligible expired records in a single store transaction. |
-| [`socket_message_alias_stage`](../../src/receive.odin#L2414) | Stage phone/LID aliases learned from an incoming message. |
+| [`socket_message_route_decode`](../../src/receive.odin#L264) | Extract and validate the group, participant and stanza ID of an incoming message. |
+| [`socket_message_processed_commit`](../../src/receive.odin#L292) | Persist a processed-message marker alongside staged state changes. |
+| [`socket_message_cipher_decrypt`](../../src/receive.odin#L300) | Decrypt a group or pairwise ciphertext with the correct sender state. |
+| [`socket_message_distribution_install`](../../src/receive.odin#L355) | Install a sender-key distribution carried in a decrypted message. |
+| [`socket_message_child_decrypt`](../../src/receive.odin#L403) | Decrypt one encrypted child, remove padding and process key distributions. |
+| [`message_encryption_nack_reason`](../../src/receive.odin#L462) | Choose a negative-acknowledgement reason for unsupported encryption. |
+| [`socket_message_payload_decrypt`](../../src/receive.odin#L487) | Dispatch encrypted children and select the decrypted message payload. |
+| [`socket_message_control_commit`](../../src/receive.odin#L552) | Recognize an internal control message and commit its processed marker. |
+| [`socket_message_event_commit`](../../src/receive.odin#L616) | Stage the incoming message for durable delivery and return a socket event. |
+| [`socket_pairwise_decrypt`](../../src/receive.odin#L672) | Decrypt pairwise data with current or archived sessions and stage resulting state. |
+| [`socket_pairwise_state_load`](../../src/receive.odin#L742) | Load the current session and stored identity pin for a sender. |
+| [`socket_pairwise_prekey_archive_select`](../../src/receive.odin#L770) | Select an archived session matching the incoming prekey message. |
+| [`socket_pairwise_one_time_prekey_load`](../../src/receive.odin#L818) | Load the one-time prekey needed by the incoming session. |
+| [`socket_pairwise_prekey_open`](../../src/receive.odin#L840) | Open a prekey envelope with the appropriate session and key material. |
+| [`socket_pairwise_whisper_open`](../../src/receive.odin#L889) | Try current or archived receiving sessions for a Whisper message. |
+| [`socket_pairwise_decryption_stage`](../../src/receive.odin#L943) | Stage identity, session and consumed-key changes following successful decryption. |
+| [`socket_stage_group`](../../src/receive.odin#L973) | Serialize and stage an updated group sender-key record. |
+| [`socket_message_unpad`](../../src/receive.odin#L994) | Check and strip the repeated padding bytes from a message. |
+| [`socket_store_clone`](../../src/receive.odin#L1014) | Clone the socket's durable store for a transaction. |
+| [`socket_store_commit`](../../src/receive.odin#L1026) | Persist and install a candidate store, then clean up consumed prekeys. |
+| [`socket_inbox_id_valid`](../../src/receive.odin#L1043) | Check a stanza ID before using it in an inbox record name. |
+| [`socket_receive_group_valid`](../../src/receive.odin#L1056) | Validate an inbound group address for the receive path. |
+| [`socket_inbox_key`](../../src/receive.odin#L1075) | Compute an inbox record key using the socket's current address mappings. |
+| [`socket_inbox_key_store`](../../src/receive.odin#L1082) | Build the inbox key from the group, canonical sender and stanza ID. |
+| [`socket_sender_is_self`](../../src/receive.odin#L1096) | Check whether the address identifies this account using the socket's state. |
+| [`socket_sender_is_self_store`](../../src/receive.odin#L1103) | Resolve a sender against the supplied store and account identities. |
+| [`socket_message_new`](../../src/receive.odin#L1162) | Construct a received message with owned copies of its data. |
+| [`socket_inbox_stage`](../../src/receive.odin#L1223) | Serialize a received message into a candidate inbox record. |
+| [`socket_message_complete`](../../src/receive.odin#L1271) | Commit completion of delivery by marking it processed and deleting its inbox entry. |
+| [`socket_inbox_restore`](../../src/receive.odin#L1304) | Rebuild the pending message queue from durable inbox entries. |
+| [`socket_inbox_record_restore`](../../src/receive.odin#L1351) | Decode and validate a stored inbox entry as a received message. |
+| [`socket_cleanup_consumed_prekeys`](../../src/receive.odin#L1406) | Remove prekeys marked consumed by committed decryption and save the prekey store. |
+| [`socket_retry_counter_read`](../../src/receive.odin#L1455) | Decode the retry attempt count and timestamp from a stored record. |
+| [`socket_retry_counter_set`](../../src/receive.odin#L1475) | Store the retry count with the current timestamp. |
+| [`socket_retry_prekeys_exhausted`](../../src/receive.odin#L1495) | Persist the terminal retry count when a new prekey cannot be issued. |
+| [`socket_retry_keys_prepare`](../../src/receive.odin#L1538) | Generate and persist the keys required for a retry receipt. |
+| [`socket_retry_body_prepare`](../../src/receive.odin#L1587) | Build the retry count, registration and optional key child nodes. |
+| [`socket_retry_receipt_send`](../../src/receive.odin#L1622) | Write the encoded retry receipt to the socket. |
+| [`socket_request_retry`](../../src/receive.odin#L1654) | Validate an incoming message's retry eligibility, persist the attempt and send the receipt. |
+| [`socket_archive_session`](../../src/receive.odin#L1706) | Archive a pairwise session under its identity and prune displaced archives. |
+| [`socket_send_delivery_receipt`](../../src/receive.odin#L1741) | Build and send a delivery receipt for the incoming stanza. |
+| [`encode_current_unix_timestamp`](../../src/receive.odin#L1800) | Encode the current time as a processed-message timestamp. |
+| [`processed_history_receipt`](../../src/receive.odin#L1807) | Check whether a durable processed marker requests a history-sync receipt on redelivery. |
+| [`socket_processed_set`](../../src/receive.odin#L1811) | Store a timestamped marker for a processed message. |
+| [`unwrap_protocol_message`](../../src/receive.odin#L1824) | Find the protocol payload in a decrypted message through supported wrappers. |
+| [`message_contains_history_sync_notification`](../../src/receive.odin#L1892) | Detect a history sync notification inside supported message wrappers. |
+| [`socket_protocol_has_history`](../../src/receive.odin#L1896) | Check a protocol message for a history sync field. |
+| [`socket_send_history_receipt`](../../src/receive.odin#L1901) | Send the history-sync receipt to the appropriate account address. |
+| [`socket_defer_retry`](../../src/receive.odin#L1936) | Queue an owned copy of an incoming retry request for deferred processing. |
+| [`socket_acknowledge`](../../src/receive.odin#L1976) | Send the stanza acknowledgement with the original routing attributes. |
+| [`socket_retry_outgoing`](../../src/receive.odin#L2030) | Process a peer retry request using the saved outbound message. |
+| [`socket_retry_session_archive`](../../src/receive.odin#L2095) | Resolve and archive the current session before retrying delivery. |
+| [`socket_replay_outbox`](../../src/receive.odin#L2126) | Resend the wire bytes for durable pending outbound messages. |
+| [`socket_trust_identity`](../../src/receive.odin#L2146) | Commit an explicitly trusted identity for the device. |
+| [`socket_prune_pending_ids`](../../src/receive.odin#L2199) | Collect pending message IDs that must survive pruning. |
+| [`socket_retry_record_id`](../../src/receive.odin#L2233) | Extract a message ID from a retry record name. |
+| [`socket_prune_retry_record`](../../src/receive.odin#L2253) | Check retry metadata for expiry and migrate its timestamp when needed. |
+| [`socket_prune_record`](../../src/receive.odin#L2291) | Determine whether a stored record is eligible for expiry. |
+| [`socket_prune_state`](../../src/receive.odin#L2338) | Prune eligible expired records in a single store transaction. |
+| [`socket_message_alias_stage`](../../src/receive.odin#L2428) | Stage phone/LID aliases learned from an incoming message. |
 
 <a id="file-src-send-odin"></a>
 
@@ -613,6 +631,7 @@ before allocating a destination. Pass the original message and buffer to
 | [`pad_outbound_message`](../../src/send.odin#L1252) | Append a randomly chosen length of repeated padding bytes to a message. |
 | [`generate_outbound_message_id`](../../src/send.odin#L1264) | Generate a WhatsApp outbound message ID using random bytes. |
 | [`socket_same_device`](../../src/send.odin#L1270) | Compare the user, device and addressing domain of two device JIDs. |
+| [`socket_send_primary_device_message`](../../src/send.odin#L1285) | Encrypt a control message for the primary device and durably stage its ciphertext before writing. |
 
 <a id="file-src-signal-odin"></a>
 
@@ -704,39 +723,40 @@ Application loops can call `socket_read` or its alias `socket_receive`. Both ret
 
 | Function | Behavior |
 |---|---|
-| [`socket_message_destroy`](../../src/socket.odin#L114) | Release all allocations owned by a received socket message. |
-| [`socket_connect`](../../src/socket.odin#L169) | Validate settings, open the WebSocket and start the WhatsApp session. |
-| [`socket_client_init`](../../src/socket.odin#L219) | Initialize the Noise client on the socket's existing transport. |
-| [`socket_websocket_dial`](../../src/socket.odin#L230) | Dial the configured WhatsApp WebSocket and retain it on the socket. |
-| [`socket_connect_validate`](../../src/socket.odin#L251) | Validate credentials and stores before opening the connection. |
-| [`socket_connect_settings`](../../src/socket.odin#L279) | Fill in socket defaults and validate the pairing configuration. |
-| [`socket_close`](../../src/socket.odin#L321) | Close the session and release pending messages and transport resources. |
-| [`socket_tick`](../../src/socket.odin#L359) | Advance timers, retry work and maintenance for an open socket. |
-| [`socket_receive_wire`](../../src/socket.odin#L419) | Receive the next network event under a temporary read deadline while synchronous waiters retain queued messages. |
-| [`socket_receive_inner`](../../src/socket.odin#L446) | Route incoming session events through provisioning or online processing. |
-| [`socket_login_provision_start`](../../src/socket.odin#L500) | Start the post-login prekey check and record the socket's own LID. |
-| [`socket_provision`](../../src/socket.odin#L531) | Dispatch the IQ reply for the current provisioning stage. |
-| [`socket_provision_count`](../../src/socket.odin#L545) | Handle the reported prekey count and upload keys or request activation. |
-| [`socket_provision_upload`](../../src/socket.odin#L587) | Record an accepted prekey upload and request activation. |
-| [`socket_handle_activation_response`](../../src/socket.odin#L608) | Handle the activation reply, restore messages and move the socket online. |
-| [`socket_request_activation`](../../src/socket.odin#L656) | Send the active-state IQ and wait for its provisioning reply. |
-| [`socket_provision_write`](../../src/socket.odin#L683) | Send a provisioning request under its write deadline. |
-| [`socket_next_iq_id`](../../src/socket.odin#L694) | Generate the next IQ ID from time and the socket sequence. |
-| [`socket_write`](../../src/socket.odin#L699) | Write encrypted stanza bytes under a bounded write deadline. |
-| [`socket_fail`](../../src/socket.odin#L727) | Close the socket and retain its terminal error. |
-| [`socket_read`](../../src/socket.odin#L741) | Return a queued message first or receive the next socket event. |
-| [`socket_control_node`](../../src/socket.odin#L754) | Handle control stanzas such as offline previews and key notifications. |
-| [`socket_poll`](../../src/socket.odin#L815) | Check for queued or network activity within a timeout. |
-| [`socket_network_poll`](../../src/socket.odin#L836) | Poll the transport file descriptor for readable network events. |
-| [`query_observer_set`](../../src/socket.odin#L875) | Install the process-wide IQ query observer. |
-| [`query_observe`](../../src/socket.odin#L879) | Report a query observation to the installed observer. |
-| [`socket_query`](../../src/socket.odin#L889) | Send an IQ and wait for the reply with the matching ID. |
-| [`socket_query_send`](../../src/socket.odin#L939) | Encode a query node and write it to the socket. |
-| [`socket_query_message_enqueue`](../../src/socket.odin#L966) | Retain an unrelated incoming message while waiting for a query result. |
-| [`socket_query_response_copy`](../../src/socket.odin#L980) | Make an owning copy of the response node. |
-| [`socket_query_response_receive`](../../src/socket.odin#L1009) | Read events until the matching IQ arrives or the deadline expires. |
-| [`socket_read_deadline`](../../src/socket.odin#L1070) | Set the transport stream's read deadline. |
-| [`socket_write_deadline`](../../src/socket.odin#L1085) | Set the transport stream's write deadline. |
+| [`socket_message_destroy`](../../src/socket.odin#L115) | Release all allocations owned by a received socket message. |
+| [`socket_connect`](../../src/socket.odin#L171) | Validate settings, open the WebSocket and start the WhatsApp session. |
+| [`socket_client_init`](../../src/socket.odin#L221) | Initialize the Noise client on the socket's existing transport. |
+| [`socket_websocket_dial`](../../src/socket.odin#L232) | Dial the configured WhatsApp WebSocket and retain it on the socket. |
+| [`socket_connect_validate`](../../src/socket.odin#L253) | Validate credentials and stores before opening the connection. |
+| [`socket_connect_settings`](../../src/socket.odin#L281) | Fill in socket defaults and validate the pairing configuration. |
+| [`socket_close`](../../src/socket.odin#L323) | Close the session and release pending messages and transport resources. |
+| [`socket_tick`](../../src/socket.odin#L361) | Advance timers, retry work and maintenance for an open socket. |
+| [`socket_receive_wire`](../../src/socket.odin#L421) | Receive the next network event under a temporary read deadline while synchronous waiters retain queued messages. |
+| [`socket_receive_inner`](../../src/socket.odin#L448) | Route incoming session events through provisioning or online processing. |
+| [`socket_login_provision_start`](../../src/socket.odin#L502) | Start the post-login prekey check and record the socket's own LID. |
+| [`socket_provision`](../../src/socket.odin#L533) | Dispatch the IQ reply for the current provisioning stage. |
+| [`socket_provision_count`](../../src/socket.odin#L547) | Handle the reported prekey count and upload keys or request activation. |
+| [`socket_provision_upload`](../../src/socket.odin#L589) | Record an accepted prekey upload and request activation. |
+| [`socket_handle_activation_response`](../../src/socket.odin#L610) | Handle the activation reply, restore messages and move the socket online. |
+| [`socket_request_activation`](../../src/socket.odin#L658) | Send the active-state IQ and wait for its provisioning reply. |
+| [`socket_provision_write`](../../src/socket.odin#L685) | Send a provisioning request under its write deadline. |
+| [`socket_next_iq_id`](../../src/socket.odin#L696) | Generate the next IQ ID from time and the socket sequence. |
+| [`socket_write`](../../src/socket.odin#L701) | Write encrypted stanza bytes under a bounded write deadline. |
+| [`socket_fail`](../../src/socket.odin#L729) | Close the socket and retain its terminal error. |
+| [`socket_read`](../../src/socket.odin#L743) | Return a queued message first or receive the next socket event. |
+| [`socket_control_node`](../../src/socket.odin#L756) | Handle control stanzas such as offline previews and key notifications. |
+| [`socket_poll`](../../src/socket.odin#L817) | Check for queued or network activity within a timeout. |
+| [`socket_network_poll`](../../src/socket.odin#L838) | Poll the transport file descriptor for readable network events. |
+| [`query_observer_set`](../../src/socket.odin#L877) | Install the process-wide IQ query observer. |
+| [`query_observe`](../../src/socket.odin#L881) | Report a query observation to the installed observer. |
+| [`socket_query`](../../src/socket.odin#L891) | Send an IQ and wait for the reply with the matching ID. |
+| [`socket_query_send`](../../src/socket.odin#L941) | Encode a query node and write it to the socket. |
+| [`socket_query_message_enqueue`](../../src/socket.odin#L968) | Retain an unrelated incoming message while waiting for a query result. |
+| [`socket_query_response_copy`](../../src/socket.odin#L982) | Make an owning copy of the response node. |
+| [`socket_query_response_receive`](../../src/socket.odin#L1011) | Read events until the matching IQ arrives or the deadline expires. |
+| [`socket_receive_while_waiting`](../../src/socket.odin#L1032) | Poll for one frame during a synchronous request and queue unrelated live messages. |
+| [`socket_read_deadline`](../../src/socket.odin#L1081) | Set the transport stream's read deadline. |
+| [`socket_write_deadline`](../../src/socket.odin#L1096) | Set the transport stream's write deadline. |
 
 <a id="file-src-state-store-odin"></a>
 
@@ -746,24 +766,24 @@ If a save returns `.Directory_Flush_Failed`, the replacement file is visible and
 
 | Function | Behavior |
 |---|---|
-| [`state_store_init`](../../src/state_store.odin#L74) | Initialize a record store bound to its owner identity. |
-| [`state_store_clear`](../../src/state_store.odin#L96) | Erase stored record bytes and free the record list. |
-| [`state_store_get`](../../src/state_store.odin#L116) | Look up record data by kind and name. |
-| [`state_store_find_record`](../../src/state_store.odin#L121) | Find a stored record by kind and name and return its store-owned key and data. |
-| [`state_store_delete`](../../src/state_store.odin#L135) | Erase and remove a matching record from the store. |
-| [`state_store_set`](../../src/state_store.odin#L163) | Insert or replace a validated record while enforcing store limits. |
-| [`state_store_find_upsert_index`](../../src/state_store.odin#L219) | Find the replacement index and check projected store size for an upsert. |
-| [`state_store_encode`](../../src/state_store.odin#L253) | Serialize all records with the owner, revision and checksum. |
-| [`state_store_clone`](../../src/state_store.odin#L305) | Deep-copy the store into independently owned records. |
-| [`state_store_append_owned`](../../src/state_store.odin#L379) | Append a record with owned copies of its name and data. |
-| [`state_store_decode_header`](../../src/state_store.odin#L410) | Check snapshot identity and integrity and read its revision and record count. |
-| [`state_store_decode_records`](../../src/state_store.odin#L454) | Decode and validate snapshot records into the candidate store. |
-| [`state_store_decode`](../../src/state_store.odin#L513) | Decode a complete snapshot before replacing the destination store. |
-| [`state_store_save`](../../src/state_store.odin#L541) | Serialize the store and atomically replace the on-disk snapshot. |
-| [`state_atomic_write`](../../src/state_store.odin#L577) | Translate durable file replacement failures into state-store errors. |
-| [`state_store_load`](../../src/state_store.odin#L596) | Read a bounded snapshot from disk and restore the store. |
-| [`state_record_valid`](../../src/state_store.odin#L649) | Check a record's kind, name and size constraints. |
-| [`replace_file_durably`](../../src/state_store.odin#L701) | Write a temporary file, flush it, rename it and sync its directory. |
-| [`read_file_into_bounded_buffer`](../../src/state_store.odin#L765) | Fill a bounded buffer from a file and detect oversized input. |
-| [`sha256`](../../src/state_store.odin#L785) | Return the 32-byte SHA-256 digest of the input. |
-| [`state_store_export_v0_2`](../../src/state_store.odin#L793) | Export a durable snapshot with the contact cursor, version hint and processed-message timestamps supported by owa v0.2.0 through v0.2.2. |
+| [`state_store_init`](../../src/state_store.odin#L75) | Initialize a record store bound to its owner identity. |
+| [`state_store_clear`](../../src/state_store.odin#L97) | Erase stored record bytes and free the record list. |
+| [`state_store_get`](../../src/state_store.odin#L117) | Look up record data by kind and name. |
+| [`state_store_find_record`](../../src/state_store.odin#L122) | Find a stored record by kind and name and return its store-owned key and data. |
+| [`state_store_delete`](../../src/state_store.odin#L136) | Erase and remove a matching record from the store. |
+| [`state_store_set`](../../src/state_store.odin#L164) | Insert or replace a validated record while enforcing store limits. |
+| [`state_store_find_upsert_index`](../../src/state_store.odin#L220) | Find the replacement index and check projected store size for an upsert. |
+| [`state_store_encode`](../../src/state_store.odin#L254) | Serialize all records with the owner, revision and checksum. |
+| [`state_store_clone`](../../src/state_store.odin#L306) | Deep-copy the store into independently owned records. |
+| [`state_store_append_owned`](../../src/state_store.odin#L380) | Append a record with owned copies of its name and data. |
+| [`state_store_decode_header`](../../src/state_store.odin#L411) | Check snapshot identity and integrity and read its revision and record count. |
+| [`state_store_decode_records`](../../src/state_store.odin#L455) | Decode and validate snapshot records into the candidate store. |
+| [`state_store_decode`](../../src/state_store.odin#L514) | Decode a complete snapshot before replacing the destination store. |
+| [`state_store_save`](../../src/state_store.odin#L542) | Serialize the store and atomically replace the on-disk snapshot. |
+| [`state_atomic_write`](../../src/state_store.odin#L578) | Translate durable file replacement failures into state-store errors. |
+| [`state_store_load`](../../src/state_store.odin#L597) | Read a bounded snapshot from disk and restore the store. |
+| [`state_record_valid`](../../src/state_store.odin#L650) | Check a record's kind, name and size constraints. |
+| [`replace_file_durably`](../../src/state_store.odin#L705) | Write a temporary file, flush it, rename it and sync its directory. |
+| [`read_file_into_bounded_buffer`](../../src/state_store.odin#L769) | Fill a bounded buffer from a file and detect oversized input. |
+| [`sha256`](../../src/state_store.odin#L789) | Return the 32-byte SHA-256 digest of the input. |
+| [`state_store_export_v0_2`](../../src/state_store.odin#L797) | Export a durable snapshot with the contact cursor, version hint and processed-message timestamps supported by owa v0.2.0 through v0.2.2. |

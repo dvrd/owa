@@ -7,14 +7,14 @@ import "core:os"
 import "core:sync"
 import "core:testing"
 import "core:time"
-import "shared:http"
-import network_client "shared:surf"
+import "shared:async/http"
+import surf "shared:surf"
 import ws "shared:websocket"
 import wa "shared:whatsapp"
 
 codec_api_hex :: proc(text: string) -> []u8 {
 	decoded, ok := hex.decode(transmute([]u8)text, context.temp_allocator)
-	assert(ok)
+	assert(ok == nil)
 
 	return decoded
 }
@@ -32,10 +32,10 @@ Download_State :: struct {
 
 download_http :: proc(
 	request: http.Request,
-	config: network_client.Config,
+	config: surf.Config,
 ) -> (
-	network_client.Response,
-	network_client.HTTP_Error,
+	surf.Response,
+	surf.HTTP_Error,
 ) {
 	state := cast(^Download_State)context.user_ptr
 	state.calls += 1
@@ -58,10 +58,10 @@ Http_Marker :: struct {
 
 http_marker_execute :: proc(
 	request: http.Request,
-	config: network_client.Config,
+	config: surf.Config,
 ) -> (
-	network_client.Response,
-	network_client.HTTP_Error,
+	surf.Response,
+	surf.HTTP_Error,
 ) {
 	marker := cast(^Http_Marker)raw_data(request.body)
 	marker.worker_id = sync.current_thread_id()
@@ -227,10 +227,10 @@ send_id_http_calls: int
 
 send_id_http :: proc(
 	request: http.Request,
-	config: network_client.Config,
+	config: surf.Config,
 ) -> (
-	network_client.Response,
-	network_client.HTTP_Error,
+	surf.Response,
+	surf.HTTP_Error,
 ) {
 	send_id_http_calls += 1
 	return {}, {kind = .IO_Failed}
@@ -257,7 +257,7 @@ send_id_wire_connect :: proc(socket: ^wa.Socket, wire: ^Send_Id_Wire) {
 	send_id_http_calls = 0
 }
 
-send_id_wire_write :: proc(data: rawptr, source: []u8) -> (int, network_client.WebSocket_Stream_Error) {
+send_id_wire_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Stream_Error) {
 	wire := cast(^Send_Id_Wire)data
 	assert(len(source) <= len(wire.data) - wire.used)
 	wire.used += copy(wire.data[wire.used:], source)
@@ -265,11 +265,11 @@ send_id_wire_write :: proc(data: rawptr, source: []u8) -> (int, network_client.W
 	return len(source), {}
 }
 
-send_id_wire_read :: proc(data: rawptr, destination: []u8) -> (int, network_client.WebSocket_Stream_Error) {
+send_id_wire_read :: proc(data: rawptr, destination: []u8) -> (int, surf.WebSocket_Stream_Error) {
 	return 0, {kind = .EOF}
 }
 
-send_id_wire_close :: proc(data: rawptr) -> network_client.WebSocket_Stream_Error {
+send_id_wire_close :: proc(data: rawptr) -> surf.WebSocket_Stream_Error {
 	return {}
 }
 

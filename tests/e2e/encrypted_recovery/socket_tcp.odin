@@ -28,7 +28,7 @@ socket_tcp_connect :: proc(peer: ^Socket_Recovery) {
 	}
 
 	connection := net.tcp_connection(&peer.tcp)
-	assert(net.set_deadline(connection, time.time_add(time.now(), 10 * time.Second)).kind == .None)
+	assert(net.set_deadline(connection, time.time_add(time.now(), 10 * time.Second)) == nil)
 	peer.native_stream = surf.websocket_tcp_stream(&peer.tcp)
 	peer.tcp_enabled = true
 	peer.socket.websocket.config.host = "127.0.0.1"
@@ -72,11 +72,11 @@ socket_tcp_packet :: proc(connection: net.Connection, buffer: []u8) -> []u8 {
 	for used < len(buffer) {
 		count, error := connection.read(connection.data, buffer[used:][:min(3, len(buffer) - used)])
 
-		if error.kind == .Peer_Closed && used == 0 {
+		if error == net.Connection_Error.Peer_Closed && used == 0 {
 			return nil
 		}
 
-		assert(error.kind == .None && count > 0)
+		assert(error == nil && count > 0)
 		used += count
 		header, offset, decoded := ws.frame_header_decode(buffer[:used], true)
 
@@ -163,7 +163,7 @@ socket_tcp_peer :: proc(directory, mode: string) {
 
 	connection := net.tcp_connection(&tcp)
 	defer connection.close(connection.data)
-	assert(net.set_deadline(connection, time.time_add(time.now(), 10 * time.Second)).kind == .None)
+	assert(net.set_deadline(connection, time.time_add(time.now(), 10 * time.Second)) == nil)
 	buffer: [8192]u8
 	packet := socket_tcp_packet(connection, buffer[:])
 	received, ack := len(packet) > 0, false
@@ -175,7 +175,7 @@ socket_tcp_peer :: proc(directory, mode: string) {
 			output: [2048]u8
 			size := socket_recovery_ack_frame(output[:])
 			count, written := net.write_all(connection, output[:size])
-			assert(written.kind == .None && count == size)
+			assert(written == nil && count == size)
 			ack = true
 			fmt.printf("ENCRYPTED_TCP_ACK_SENT bytes=%d\n", count)
 		}
@@ -183,9 +183,9 @@ socket_tcp_peer :: proc(directory, mode: string) {
 		// The owner kills/closes the client; no second application frame is allowed.
 		trailing: [1]u8
 		count, closed := connection.read(connection.data, trailing[:])
-		assert(count == 0 && closed.kind == .Peer_Closed)
+		assert(count == 0 && closed == net.Connection_Error.Peer_Closed)
 	}
 
-	assert(connection.close(connection.data).kind == .None && tcp.closed)
+	assert(connection.close(connection.data) == nil && tcp.closed)
 	fmt.printf("ENCRYPTED_TCP_PEER_DONE received=%t ack=%t replay=%t closed=true\n", received, ack, replay)
 }
