@@ -1,6 +1,6 @@
 package whatsapp
 
-import tls "core:crypto/tls"
+import tls "shared:async/tls"
 import network_client "shared:surf"
 import "core:crypto"
 import "core:fmt"

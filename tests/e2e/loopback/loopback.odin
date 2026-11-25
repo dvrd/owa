@@ -18,18 +18,18 @@ accept :: proc(listener: net.TCP_Socket, tcp: ^net.TCP_Connection) -> net.Connec
 	assert(err == .None && source.address == net.IP4_Loopback)
 	tcp.socket = socket
 	conn := net.tcp_connection(tcp)
-	assert(net.set_deadline(conn, time.time_add(time.now(), 3*time.Second)).kind == .None)
+	assert(net.set_deadline(conn, time.time_add(time.now(), 3*time.Second)) == nil)
 	return conn
 }
 
 read_exact :: proc(conn: net.Connection, dst: []u8) {
 	n, err := net.read_exact(conn, dst)
-	assert(err.kind == .None && n == len(dst))
+	assert(err == nil && n == len(dst))
 }
 
 send_all :: proc(conn: net.Connection, data: []u8) {
 	n, err := net.write_all(conn, data)
-	assert(err.kind == .None && n == len(data))
+	assert(err == nil && n == len(data))
 }
 
 read_headers :: proc(socket: net.Connection, buffer: []u8) -> string {

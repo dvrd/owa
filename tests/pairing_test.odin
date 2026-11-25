@@ -7,7 +7,7 @@ import "core:strings"
 import "core:testing"
 import "core:time"
 import test_fixtures "fixtures/client"
-import "shared:http"
+import "shared:async/http"
 import network_client "shared:surf"
 import wa "shared:whatsapp"
 

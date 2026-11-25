@@ -3,7 +3,7 @@ package whatsapp_test
 import test_fixtures "../../fixtures/client"
 import "core:bytes"
 import "core:testing"
-import "shared:http"
+import "shared:async/http"
 import network_client "shared:surf"
 import wa "shared:whatsapp"
 

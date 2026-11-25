@@ -7,14 +7,14 @@ import "core:os"
 import "core:sync"
 import "core:testing"
 import "core:time"
-import "shared:http"
+import "shared:async/http"
 import network_client "shared:surf"
 import ws "shared:websocket"
 import wa "shared:whatsapp"
 
 codec_api_hex :: proc(text: string) -> []u8 {
 	decoded, ok := hex.decode(transmute([]u8)text, context.temp_allocator)
-	assert(ok)
+	assert(ok == nil)
 
 	return decoded
 }

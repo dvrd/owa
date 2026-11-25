@@ -1,6 +1,6 @@
 package whatsapp
 
-import http "shared:http"
+import http "shared:async/http"
 import "core:crypto"
 import "core:crypto/hmac"
 import "core:encoding/base64"

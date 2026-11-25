@@ -87,7 +87,7 @@ fixture_run :: proc(port: int, mode: string) {
 
 		if mode == "timeout" {
 			assert(elapsed >= 150 * time.Millisecond)
-			assert(error.transport.websocket.stream.transport.kind == .Timeout)
+			assert(error.transport.websocket.stream.transport == net.TCP_Recv_Error.Timeout)
 		}
 
 		assert(crypto.is_zero_constant_time(client.static_private[:]) == 1)
@@ -99,7 +99,7 @@ fixture_run :: proc(port: int, mode: string) {
 			"WA_LOOPBACK_OK mode=%s error=%v transport=%v\n",
 			mode,
 			error.kind,
-			error.transport.websocket.stream.transport.kind,
+			error.transport.websocket.stream.transport,
 		)
 		return
 	}

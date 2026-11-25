@@ -117,7 +117,7 @@ socket_cert_test_frames :: proc(output: []u8) -> int {
 
 socket_cert_test_case :: proc(t: ^testing.T, verify: wa.Certificate_Verifier, expected: wa.Certificate_Error) {
 	hello, decode_error := hex.decode(transmute([]u8)string(SOCKET_CERT_TEST_HELLO))
-	assert(decode_error)
+	assert(decode_error == nil)
 	defer delete(hello)
 	input, output: [1024]u8
 	// One unmasked binary WebSocket message containing one WhatsApp envelope.

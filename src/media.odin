@@ -1,6 +1,6 @@
 package whatsapp
 
-import http "shared:http"
+import http "shared:async/http"
 import network_client "shared:surf"
 import "core:bytes"
 import "core:crypto"
