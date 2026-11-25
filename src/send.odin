@@ -1282,7 +1282,13 @@ socket_same_device :: proc(a, b: string) -> bool {
 }
 
 // Atomically persist the primary device ratchet and ciphertext before writing the peer stanza.
-socket_send_primary_device_message :: proc(socket: ^Socket, id: string, message: []u8, history := false) -> Socket_Error {
+socket_send_primary_device_message :: proc(
+	socket: ^Socket,
+	id: string,
+	message: []u8,
+	history := false,
+	placeholder_resend := false,
+) -> Socket_Error {
 	me := string(socket.auth.account.jid[:socket.auth.account.jid_size])
 	user, _, e := pairing_jid_decode(me)
 	if e.kind != .None {
@@ -1361,7 +1367,7 @@ socket_send_primary_device_message :: proc(socket: ^Socket, id: string, message:
 		{"id", id}, {"type", "text"}, {"category", "peer"}, {"to", jid},
 		{"push_priority", "high"}, {"privacy_sensitive", "1"},
 	}
-	attr_count := 5
+	attr_count := 4 if placeholder_resend else 5
 	if history {
 		attrs[4].value = "high_force"
 		attr_count = 6

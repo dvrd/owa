@@ -87,7 +87,7 @@ inbound_alias_local :: proc(start: int, registration: u32) -> wa.Signal_Recipien
 	}
 }
 
-inbound_alias_fixture :: proc(existing_lid: bool) -> (^test_fixtures.Negative_Ack_Fixture, []u8) {
+inbound_alias_fixture :: proc(existing_lid: bool, first: []u8 = nil, second: []u8 = nil, next_wire: ^[]u8 = nil) -> (^test_fixtures.Negative_Ack_Fixture, []u8) {
 	f := test_fixtures.negative_ack_fixture()
 	a, b := inbound_alias_local(0, 100), inbound_alias_local(96, 200)
 	public_a, public_b := wa.signal_curve_public(a.identity_private), wa.signal_curve_public(b.identity_private)
@@ -123,16 +123,24 @@ inbound_alias_fixture :: proc(existing_lid: bool) -> (^test_fixtures.Negative_Ac
 	assert(error.kind == .None && kind == .Whisper)
 	_, error = wa.signal_session_decrypt(&sender, plaintext[:], wire[:size], public_b)
 	assert(error.kind == .None && !sender.pending_prekey)
-	length, message_error := wa.text_message_encode(
-		plaintext[:],
-		{kind = .Conversation, text = "synthetic inbound alias"},
-	)
-	assert(message_error == .None)
+	length := copy(plaintext[:], first)
+	if first == nil {
+		message_error: wa.Message_Error
+		length, message_error = wa.text_message_encode(plaintext[:], {kind = .Conversation, text = "synthetic inbound alias"})
+		assert(message_error == .None)
+	}
 	plaintext[length] = 1
 	kind, size, error = wa.signal_session_encrypt(&sender, wire[:], plaintext[:length + 1], public_b)
 	assert(error.kind == .None && kind == .Whisper)
 	encrypted := make([]u8, size)
 	copy(encrypted, wire[:size])
+	if next_wire != nil {
+		length = copy(plaintext[:], second)
+		plaintext[length] = 1
+		kind, size, error = wa.signal_session_encrypt(&sender, wire[:], plaintext[:length+1], public_b)
+		assert(error.kind == .None && kind == .Whisper)
+		next_wire^ = bytes.clone(wire[:size])
+	}
 	count, encoded := wa.signal_session_encode(nil, &receiver)
 	assert(encoded.kind == .Destination_Undersized)
 	data := make([]u8, count)
@@ -1270,4 +1278,132 @@ history_redelivery_restores_receipt_after_reopening_store :: proc(t: ^testing.T)
 	node := wa.Binary_Node{tag = "message", attrs = []wa.Binary_Node_Attribute{{"from", from}, {"id", id}}}
 	_, err := wa.socket_process_message(&f.socket, node, &receipt)
 	testing.expect(t, err.kind == .None && receipt)
+}
+
+@(test)
+private_voice_capture_survives_reopen :: proc(t: ^testing.T) {
+	chat :: "111@s.whatsapp.net"
+	alias :: "999@lid"
+	ids := [2]string{"note-one", "note-two"}
+	for capture in ([]bool{false, true}) {
+		second: []u8
+		f, first := inbound_alias_fixture(
+			false,
+			test_fixtures.codec_api_hex(test_fixtures.VOICE_1_PROTO),
+			test_fixtures.codec_api_hex(test_fixtures.VOICE_2_PROTO),
+			&second,
+		)
+		defer test_fixtures.negative_ack_destroy(f)
+		defer delete(first)
+		defer delete(second)
+		for cipher, i in ([2][]u8{first, second}) {
+			node := inbound_alias_node(cipher, i == 1, false)
+			defer inbound_alias_node_destroy(node)
+			node.attrs[0].value = ids[i]
+			node.attrs[1] = {"t", "103" if i == 0 else "104"}
+			event, recv := inbound_alias_process(f, node)
+			assert(recv.kind == .None && event.message != nil)
+			defer wa.socket_message_destroy(event.message)
+			m := event.message
+			testing.expect_value(
+				t,
+				wa.socket_complete_private_audio(&f.socket, m, "555@lid").kind,
+				.Invalid_Config,
+			)
+			if capture {
+				for _ in 0 ..< 2 {
+					testing.expect_value(
+						t,
+						wa.socket_complete_private_audio(&f.socket, m, chat).kind,
+						.None,
+					)
+				}
+			} else {
+				testing.expect_value(t, wa.socket_message_complete(&f.socket, m).kind, .None)
+			}
+			replay, e := inbound_alias_process(f, node)
+			testing.expect(t, replay.kind == .None && e.kind == .None)
+		}
+		identity := f.store.identity
+		wa.state_store_clear(&f.store)
+		assert(wa.state_store_load(&f.store, f.path, identity).kind == .None)
+		retained := 0
+		for record in f.store.records {
+			if record.kind == .Private_Audio {
+				retained += 1
+			}
+			testing.expect(t, record.kind != .Inbox_Message)
+		}
+		testing.expect_value(t, retained, 2 if capture else 0)
+		for id, i in ids {
+			m, e := wa.load_private_audio(&f.store, alias, id)
+			assert(e.kind == .None)
+			if !capture {
+				testing.expect(t, m == nil); continue
+			}
+			assert(m != nil)
+			defer wa.socket_message_destroy(m)
+			testing.expect(t, m.id == id && m.timestamp == u64(103 + i))
+			state := test_fixtures.Download_State {
+				encrypted = test_fixtures.codec_api_hex(
+					test_fixtures.VOICE_1_CIPHER if i == 0 else test_fixtures.VOICE_2_CIPHER,
+				),
+			}
+			context.user_ptr = &state
+			f.socket.phase = .Online
+			f.socket.config.http_execute = test_fixtures.download_http
+			dst: [64]u8
+			n, download := wa.socket_download_media(&f.socket, m, dst[:])
+			testing.expect(
+				t,
+				download.kind == .None &&
+				string(dst[:n]) ==
+					("OggS synthetic voice 1" if i == 0 else "OggS synthetic voice 2"),
+			)
+		}
+	}
+}
+
+@(test)
+private_audio_capture_evicts_oldest_and_preserves_inbox_on_save_failure :: proc(t: ^testing.T) {
+	f := test_fixtures.negative_ack_fixture()
+	defer test_fixtures.negative_ack_destroy(f)
+	chat :: "111@s.whatsapp.net"
+	m := wa.Socket_Message {
+		participant = chat,
+		protobuf    = test_fixtures.codec_api_hex(test_fixtures.VOICE_1_PROTO),
+	}
+	for i in 0 ..= wa.MAX_CAPTURED_PRIVATE_AUDIO {
+		id := fmt.aprintf("synthetic-%d", i)
+		defer delete(id)
+		m.id, m.timestamp = id, u64(100 + i)
+		key, ke := wa.socket_inbox_key(&f.socket, "", chat, id)
+		assert(ke.kind == .None)
+		defer delete(key)
+		assert(wa.socket_inbox_stage(&f.store, key, &m).kind == .None)
+		if i == wa.MAX_CAPTURED_PRIVATE_AUDIO {
+			f.socket.config.state_path = ""
+			testing.expect(t, wa.socket_complete_private_audio(&f.socket, &m, chat).kind != .None)
+			_, pending := wa.state_store_get(&f.store, .Inbox_Message, key)
+			_, first := wa.state_store_get(
+				&f.store,
+				.Private_Audio,
+				"111@s.whatsapp.net|synthetic-0",
+			)
+			testing.expect(t, pending && first)
+			f.socket.config.state_path = f.path
+		}
+		assert(wa.socket_complete_private_audio(&f.socket, &m, chat).kind == .None)
+	}
+	retained := 0
+	for record in f.store.records {
+		if record.kind == .Private_Audio {
+			retained += 1
+		}
+	}
+	oldest, e := wa.load_private_audio(&f.store, chat, "synthetic-0")
+	testing.expect(
+		t,
+		e.kind == .None && oldest == nil && retained == wa.MAX_CAPTURED_PRIVATE_AUDIO,
+	)
 }

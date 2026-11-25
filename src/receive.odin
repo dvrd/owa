@@ -582,10 +582,22 @@ socket_message_control_commit :: proc(
 			return true, {kind = .State_Failed, state = e}
 		}
 
+		// Authenticate the primary against the previously committed routing state.
+		lookup := socket.message_lookup
+		primary_lookup := false
+		if lookup != nil && !lookup.done && group == "" && socket_sender_is_self(socket, participant) {
+			_, device, pe := pairing_jid_decode(participant)
+			primary_lookup = pe.kind == .None && device == 0
+		}
 		if e := socket_store_commit(socket, candidate); e.kind != .None {
 			return true, e
 		}
 
+		if primary_lookup {
+			if e := collect_private_message_response(lookup, socket.store, protocol); e.kind != .None {
+				return true, e
+			}
+		}
 		if history && socket.history_request != nil {
 			_, device, pe := pairing_jid_decode(participant)
 			control_type, valid := read_unique_protobuf_field(protocol, 2, 0)
@@ -1269,6 +1281,142 @@ socket_inbox_stage :: proc(store: ^State_Store, name: string, message: ^Socket_M
 // Completing work is durable; destroying an event alone intentionally leaves
 // it in the inbox for redelivery after a crash. Completion does not free it.
 socket_message_complete :: proc(socket: ^Socket, message: ^Socket_Message) -> Socket_Error {
+	return socket_complete_inbox(socket, message, "")
+}
+
+// Call only for incoming audio in a chat the consumer explicitly selected.
+socket_complete_private_audio :: proc(
+	socket: ^Socket,
+	message: ^Socket_Message,
+	authorized_chat: string,
+) -> Socket_Error {
+	if !device_user_jid_valid(authorized_chat, false) {
+		return {kind = .Invalid_Config}
+	}
+	return socket_complete_inbox(socket, message, authorized_chat)
+}
+
+MAX_CAPTURED_PRIVATE_AUDIO :: 64
+MAX_CAPTURED_AUDIO_RECORD :: 64 << 10
+
+// A missing entry returns nil with success. A restored message owns its bytes.
+load_private_audio :: proc(
+	store: ^State_Store,
+	chat, id: string,
+) -> (
+	^Socket_Message,
+	Socket_Error,
+) {
+	if store == nil ||
+	   !store.initialized ||
+	   !device_user_jid_valid(chat, false) ||
+	   !socket_inbox_id_valid(id) {
+		return nil, {kind = .Invalid_Config}
+	}
+	for jid in ([2]string{chat, chat_history_alternate_jid(store, chat)}) {
+		if jid == "" {
+			continue
+		}
+		key := fmt.aprintf("%s|%s", jid, id)
+		defer delete(key)
+		if data, have := state_store_get(store, .Private_Audio, key); have {
+			return socket_message_new(
+				"",
+				jid,
+				id,
+				data[8:],
+				false,
+				endian.unchecked_get_u64be(data[:8]),
+			)
+		}
+	}
+	return nil, {}
+}
+
+@(private)
+private_audio_chat_matches :: proc(
+	store: ^State_Store,
+	chat: string,
+	message: ^Socket_Message,
+) -> bool {
+	if message.group != "" ||
+	   message.from_me ||
+	   !device_user_jid_valid(message.participant, true) {
+		return false
+	}
+	user, _, _ := pairing_jid_decode(message.participant)
+	jid := strings.concatenate(
+		{user, message.participant[strings.index_byte(message.participant, '@'):]},
+	)
+	defer delete(jid)
+	return jid == chat || jid == chat_history_alternate_jid(store, chat)
+}
+
+@(private)
+stage_private_audio :: proc(
+	store: ^State_Store,
+	chat: string,
+	message: ^Socket_Message,
+) -> Socket_Error {
+	if !private_audio_chat_matches(store, chat, message) {
+		return {kind = .Invalid_Config}
+	}
+	media, err := media_message_decode(message.protobuf)
+	if err.kind != .None {
+		return {kind = .Media_Failed, media = err}
+	}
+	if media.kind != .Audio {
+		return {kind = .Media_Failed, media = {kind = .Invalid_Kind}}
+	}
+	metadata, validation := media_metadata_from_message(media)
+	defer media_metadata_clear(&metadata)
+	if validation.kind != .None {
+		return {kind = .Media_Failed, media = validation}
+	}
+	url: [MAX_MEDIA_URL_SIZE]u8
+	if _, e := media_download_url(url[:], media); e.kind != .None {
+		return {kind = .Media_Failed, media = e}
+	}
+	if len(message.protobuf) > MAX_CAPTURED_AUDIO_RECORD - 8 {
+		return {kind = .Queue_Full}
+	}
+	key := fmt.aprintf("%s|%s", chat, message.id)
+	defer delete(key)
+	oldest: string
+	count := 0
+	for record in store.records {
+		if record.kind == .Private_Audio {
+			if count == 0 {
+				oldest = record.name
+			}
+			count += 1
+		}
+	}
+	if _, exists := state_store_get(store, .Private_Audio, key);
+	   !exists && count >= MAX_CAPTURED_PRIVATE_AUDIO {
+		if e := state_store_delete(store, .Private_Audio, oldest); e.kind != .None {
+			return {kind = .State_Failed, state = e}
+		}
+	}
+	data, ae := make([]u8, 8 + len(message.protobuf))
+	if ae != nil {
+		return {kind = .Allocation_Failed, allocation = ae}
+	}
+	defer {crypto.zero_explicit(raw_data(data), len(data)); delete(data)}
+	endian.unchecked_put_u64be(data[:8], message.timestamp)
+	copy(data[8:], message.protobuf)
+	if e := state_store_set(store, .Private_Audio, key, data); e.kind != .None {
+		return {kind = .State_Failed, state = e}
+	}
+	return {}
+}
+
+@(private)
+socket_complete_inbox :: proc(
+	socket: ^Socket,
+	message: ^Socket_Message,
+	authorized_chat: string,
+) -> Socket_Error {
 	if socket == nil || socket.store == nil || message == nil {
 		return {kind = .Invalid_State}
 	}
@@ -1286,8 +1434,37 @@ socket_message_complete :: proc(socket: ^Socket, message: ^Socket_Message) -> So
 		return e
 	}
 
-	if _, have := state_store_get(&candidate, .Inbox_Message, name); !have {
+	inbox, have := state_store_get(&candidate, .Inbox_Message, name)
+	if !have {
+		if authorized_chat != "" &&
+		   private_audio_chat_matches(&candidate, authorized_chat, message) {
+			retained, e := load_private_audio(&candidate, authorized_chat, message.id)
+			if e.kind != .None {
+				return e
+			}
+			if retained != nil {
+				defer socket_message_destroy(retained)
+				if _, processed := state_store_get(&candidate, .Processed_Message, name);
+				   processed {
+					return {}
+				}
+			}
+		}
 		return {kind = .Invalid_State}
+	}
+	if authorized_chat != "" {
+		original, e := socket_inbox_record_restore(
+			socket,
+			{kind = .Inbox_Message, name = name, data = inbox},
+		)
+		if e.kind != .None {
+			return e
+		}
+		defer socket_message_destroy(original)
+		if staged := stage_private_audio(&candidate, authorized_chat, original);
+		   staged.kind != .None {
+			return staged
+		}
 	}
 
 	if e := socket_processed_set(&candidate, name); e.kind != .None {

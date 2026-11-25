@@ -131,9 +131,10 @@ socket_message_destroy :: proc(message: ^Socket_Message) {
 // Only one caller may use it. Config requires trusted CA roots. Reconnect uses
 // a fresh Socket with the SAME Auth_State, Prekey_Store and State_Store.
 Socket :: struct {
-	history_request: ^Pending_Chat_History,
-	contact_refresh_due: bool,
-	profile_history_pending: bool,
+	history_request:             ^Pending_Chat_History,
+	message_lookup:              ^Pending_Message_Lookup,
+	contact_refresh_due:         bool,
+	profile_history_pending:     bool,
 	profile_history_retry_after: time.Time,
 	contact_refresh_after: time.Time,
 	contact_write_key_id: [128]u8,
