@@ -1,10 +1,10 @@
 package whatsapp
 
-import endian "core:encoding/endian"
-import "core:slice"
 import "core:bytes"
 import "core:crypto"
+import "core:encoding/endian"
 import "core:fmt"
+import "core:slice"
 import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
@@ -29,7 +29,12 @@ socket_group_summaries_destroy :: proc(groups: ^[dynamic]Socket_Group_Summary) {
 
 // Sends the participating-groups IQ. The returned
 // summaries own their strings and remain valid after the response is freed.
-socket_groups_participating :: proc(socket: ^Socket) -> ([dynamic]Socket_Group_Summary, Socket_Error) {
+socket_groups_participating :: proc(
+	socket: ^Socket,
+) -> (
+	[dynamic]Socket_Group_Summary,
+	Socket_Error,
+) {
 	if socket == nil {
 		return {}, {kind = .Invalid_Config}
 	}
@@ -40,9 +45,17 @@ socket_groups_participating :: proc(socket: ^Socket) -> ([dynamic]Socket_Group_S
 		socket,
 		{
 			tag = "iq",
-			attrs = []Binary_Node_Attribute{{"type", "get"}, {"xmlns", "w:g2"}, {"to", "@g.us"}, {"id", id}},
+			attrs = []Binary_Node_Attribute {
+				{"type", "get"},
+				{"xmlns", "w:g2"},
+				{"to", "@g.us"},
+				{"id", id},
+			},
 			content = []Binary_Node {
-				{tag = "participating", content = []Binary_Node{{tag = "participants"}, {tag = "description"}}},
+				{
+					tag = "participating",
+					content = []Binary_Node{{tag = "participants"}, {tag = "description"}},
+				},
 			},
 		},
 	)
@@ -55,7 +68,13 @@ socket_groups_participating :: proc(socket: ^Socket) -> ([dynamic]Socket_Group_S
 	return socket_groups_decode(doc.root, id)
 }
 
-socket_groups_decode :: proc(root: Binary_Node, request_id: string) -> ([dynamic]Socket_Group_Summary, Socket_Error) {
+socket_groups_decode :: proc(
+	root: Binary_Node,
+	request_id: string,
+) -> (
+	[dynamic]Socket_Group_Summary,
+	Socket_Error,
+) {
 	children, children_error := socket_groups_children_decode(root, request_id)
 	if children_error.kind != .None {
 		return {}, children_error
@@ -119,7 +138,13 @@ socket_groups_decode :: proc(root: Binary_Node, request_id: string) -> ([dynamic
 	return groups, {}
 }
 
-socket_groups_children_decode :: proc(root: Binary_Node, request_id: string) -> ([]Binary_Node, Socket_Error) {
+socket_groups_children_decode :: proc(
+	root: Binary_Node,
+	request_id: string,
+) -> (
+	[]Binary_Node,
+	Socket_Error,
+) {
 	id, _ := node_attr(root, "id")
 	kind, _ := node_attr(root, "type")
 
@@ -171,8 +196,15 @@ socket_group_metadata :: proc(socket: ^Socket, jid: string) -> (Socket_Group, So
 		socket,
 		{
 			tag = "iq",
-			attrs = []Binary_Node_Attribute{{"type", "get"}, {"xmlns", "w:g2"}, {"to", jid}, {"id", id}},
-			content = []Binary_Node{{tag = "query", attrs = []Binary_Node_Attribute{{"request", "interactive"}}}},
+			attrs = []Binary_Node_Attribute {
+				{"type", "get"},
+				{"xmlns", "w:g2"},
+				{"to", jid},
+				{"id", id},
+			},
+			content = []Binary_Node {
+				{tag = "query", attrs = []Binary_Node_Attribute{{"request", "interactive"}}},
+			},
 		},
 	)
 	if query_err.kind != .None {
@@ -185,7 +217,8 @@ socket_group_metadata :: proc(socket: ^Socket, jid: string) -> (Socket_Group, So
 		socket_group_destroy(&result)
 	}
 
-	if metadata_error := socket_group_metadata_decode(&result, doc, jid, id); metadata_error.kind != .None {
+	if metadata_error := socket_group_metadata_decode(&result, doc, jid, id);
+	   metadata_error.kind != .None {
 		return {}, metadata_error
 	}
 	metadata := result.metadata
@@ -199,7 +232,11 @@ socket_group_metadata :: proc(socket: ^Socket, jid: string) -> (Socket_Group, So
 	return result, {}
 }
 
-socket_group_metadata_decode :: proc(result: ^Socket_Group, doc: Binary_Document, jid, id: string) -> Socket_Error {
+socket_group_metadata_decode :: proc(
+	result: ^Socket_Group,
+	doc: Binary_Document,
+	jid, id: string,
+) -> Socket_Error {
 	result.jid = strings.clone(jid)
 	_, measured := group_metadata_decode(doc.root, result.jid, id, nil)
 
@@ -250,7 +287,13 @@ socket_send_text :: proc(
 		}
 	}
 
-	buffer := make([]u8, min(MAX_SIGNAL_PLAINTEXT_SIZE, len(text) + 1024 + (quote == nil ? 0 : len(quote.protobuf))))
+	buffer := make(
+		[]u8,
+		min(
+			MAX_SIGNAL_PLAINTEXT_SIZE,
+			len(text) + 1024 + (quote == nil ? 0 : len(quote.protobuf)),
+		),
+	)
 	defer delete(buffer)
 	n, err := text_message_encode(buffer, message)
 	if err != .None {
@@ -277,8 +320,14 @@ socket_send_group :: proc(
 		return "", {kind = .Invalid_State}
 	}
 
-	if id, handled, error := socket_group_existing_send(socket, group, media_type, message_id, only_device, protobuf);
-	   handled {
+	if id, handled, error := socket_group_existing_send(
+		socket,
+		group,
+		media_type,
+		message_id,
+		only_device,
+		protobuf,
+	); handled {
 		return id, error
 	}
 	metadata, meta_err := socket_group_metadata(socket, group)
@@ -409,7 +458,8 @@ socket_group_sender_prepare :: proc(
 	// Fresh metadata/device discovery is used for every send. A changed
 	// recipient set rotates the sender key, excluding removed devices.
 	old_members, have_members := state_store_get(socket.store, .Sender_Key_Membership, key_name)
-	if record.count == 0 || only_device == "" && (!have_members || !bytes.equal(old_members, transmute([]u8)members)) {
+	if record.count == 0 ||
+	   only_device == "" && (!have_members || !bytes.equal(old_members, transmute([]u8)members)) {
 		seed, signing: [32]u8
 		id_bytes: [4]u8
 		crypto.rand_bytes(seed[:])
@@ -427,7 +477,13 @@ socket_group_sender_prepare :: proc(
 	return {}
 }
 
-socket_group_distribution_pad :: proc(group: string, record: ^Signal_Group_Record) -> ([]u8, Socket_Error) {
+socket_group_distribution_pad :: proc(
+	group: string,
+	record: ^Signal_Group_Record,
+) -> (
+	[]u8,
+	Socket_Error,
+) {
 	distribution: [256]u8
 	distribution_size, dist_err := signal_group_distribution_encode(distribution[:], record)
 
@@ -497,7 +553,12 @@ socket_group_distribution_encrypt :: proc(
 		return {}, 0, e
 	}
 
-	kind, size, e := signal_session_encrypt(session, ciphertext, padded_distribution, session.remote_identity_public)
+	kind, size, e := signal_session_encrypt(
+		session,
+		ciphertext,
+		padded_distribution,
+		session.remote_identity_public,
+	)
 	if e.kind != .None {
 		return {}, 0, {kind = .Signal_Failed, signal = e}
 	}
@@ -549,7 +610,11 @@ socket_group_participants_prepare :: proc(
 		result.enc_attrs[i] = {{"v", "2"}, {"type", type}, {"mediatype", media_type}}
 		attr_count := media_type == "" ? 2 : 3
 		result.participant_children[i] = {
-			{tag = "enc", attrs = result.enc_attrs[i][:attr_count], content = result.ciphertexts[i][:size]},
+			{
+				tag = "enc",
+				attrs = result.enc_attrs[i][:attr_count],
+				content = result.ciphertexts[i][:size],
+			},
 		}
 
 		result.participant_attrs[i] = {{"jid", jid}}
@@ -577,13 +642,18 @@ socket_group_sender_stage :: proc(
 		return {kind = .Group_Failed, group = stored}
 	}
 
-	if e := state_store_set(socket.store, .Sender_Key, key_name, group_snapshot[:group_size]); e.kind != .None {
+	if e := state_store_set(socket.store, .Sender_Key, key_name, group_snapshot[:group_size]);
+	   e.kind != .None {
 		return {kind = .State_Failed, state = e}
 	}
 
 	if only_device == "" {
-		if e := state_store_set(socket.store, .Sender_Key_Membership, key_name, transmute([]u8)members);
-		   e.kind != .None {
+		if e := state_store_set(
+			socket.store,
+			.Sender_Key_Membership,
+			key_name,
+			transmute([]u8)members,
+		); e.kind != .None {
 			return {kind = .State_Failed, state = e}
 		}
 	}
@@ -601,7 +671,11 @@ socket_group_stanza_wire :: proc(
 	Socket_Error,
 ) {
 	children := [?]Binary_Node {
-		{tag = "enc", attrs = []Binary_Node_Attribute{{"v", "2"}, {"type", "skmsg"}}, content = ciphertext},
+		{
+			tag = "enc",
+			attrs = []Binary_Node_Attribute{{"v", "2"}, {"type", "skmsg"}},
+			content = ciphertext,
+		},
 		{tag = "participants", content = participant_nodes[:]},
 		{tag = "device-identity", content = identity},
 	}
@@ -686,14 +760,22 @@ socket_group_stanza_encode :: proc(
 	)
 }
 
-socket_group_content_stage :: proc(socket: ^Socket, group, media_type, id: string, protobuf: []u8) -> Socket_Error {
+socket_group_content_stage :: proc(
+	socket: ^Socket,
+	group, media_type, id: string,
+	protobuf: []u8,
+) -> Socket_Error {
 	// Ratchets and the exact ciphertext share one atomic transaction. Reconnect
 	// can replay this stanza without ever regenerating a used message key.
 	created := fmt.aprintf("%d", time.to_unix_seconds(time.now()))
 	defer delete(created)
 	saved_content := Binary_Node {
 		tag     = "saved",
-		attrs   = []Binary_Node_Attribute{{"to", group}, {"mediatype", media_type}, {"t", created}},
+		attrs   = []Binary_Node_Attribute {
+			{"to", group},
+			{"mediatype", media_type},
+			{"t", created},
+		},
 		content = protobuf,
 	}
 
@@ -726,7 +808,8 @@ socket_group_existing_send :: proc(
 	if id == "" {
 		return "", false, {}
 	}
-	if _, error := socket_group_existing_intent(socket, group, media_type, id, protobuf); error.kind != .None {
+	if _, error := socket_group_existing_intent(socket, group, media_type, id, protobuf);
+	   error.kind != .None {
 		return "", true, error
 	}
 	if only_device == "" {
@@ -786,7 +869,14 @@ socket_group_existing_intent :: proc(
 
 // Replay uses the committed packet, never a second Signal encryption. A retained
 // content record without pending wire is not treated as an ACK receipt here.
-socket_group_pending_replay :: proc(socket: ^Socket, message_id: string, pending: []u8) -> (string, Socket_Error) {
+socket_group_pending_replay :: proc(
+	socket: ^Socket,
+	message_id: string,
+	pending: []u8,
+) -> (
+	string,
+	Socket_Error,
+) {
 	id, id_error := strings.clone(message_id)
 
 	if id_error != nil {
@@ -819,7 +909,8 @@ socket_group_outbound_commit :: proc(
 	   intent_error.kind != .None {
 		return intent_error
 	}
-	if content_error := socket_group_content_stage(socket, group, media_type, id, protobuf); content_error.kind != .None {
+	if content_error := socket_group_content_stage(socket, group, media_type, id, protobuf);
+	   content_error.kind != .None {
 		return content_error
 	}
 	if e := state_store_set(socket.store, .Outbound_Message, id, wire); e.kind != .None {
@@ -853,7 +944,15 @@ socket_group_dispatch :: proc(
 		delete(id)
 	}
 
-	wire, wire_error := socket_group_stanza_encode(socket, group, mode, only_device, id, ciphertext, participants)
+	wire, wire_error := socket_group_stanza_encode(
+		socket,
+		group,
+		mode,
+		only_device,
+		id,
+		ciphertext,
+		participants,
+	)
 	if wire_error.kind != .None {
 		return "", wire_error
 	}
@@ -893,7 +992,8 @@ socket_group_payload_send :: proc(
 		return "", {kind = .Group_Failed, group = group_err}
 	}
 
-	if stage_error := socket_group_sender_stage(socket, record, key_name, members, only_device); stage_error.kind != .None {
+	if stage_error := socket_group_sender_stage(socket, record, key_name, members, only_device);
+	   stage_error.kind != .None {
 		return "", stage_error
 	}
 	return socket_group_dispatch(
@@ -927,7 +1027,8 @@ socket_group_send_prepared :: proc(
 	}
 	members := strings.join(devices[:], "\n")
 	defer delete(members)
-	if sender_error := socket_group_sender_prepare(socket, record, key_name, members, only_device); sender_error.kind != .None {
+	if sender_error := socket_group_sender_prepare(socket, record, key_name, members, only_device);
+	   sender_error.kind != .None {
 		return "", sender_error
 	}
 	padded_distribution, distribution_error := socket_group_distribution_pad(group, record)
@@ -935,7 +1036,8 @@ socket_group_send_prepared :: proc(
 		return "", distribution_error
 	}
 	defer {
-		crypto.zero_explicit(raw_data(padded_distribution), len(padded_distribution)); delete(padded_distribution)
+		crypto.zero_explicit(raw_data(padded_distribution), len(padded_distribution))
+		delete(padded_distribution)
 	}
 	participants, participant_error := socket_group_participants_prepare(
 		socket,
@@ -962,7 +1064,11 @@ socket_group_send_prepared :: proc(
 	)
 }
 
-socket_stage_session :: proc(socket: ^Socket, jid: string, session: ^Signal_Session) -> Socket_Error {
+socket_stage_session :: proc(
+	socket: ^Socket,
+	jid: string,
+	session: ^Signal_Session,
+) -> Socket_Error {
 	base, suffix := jid, ""
 
 	if at := strings.index_byte(jid, '#'); at >= 0 {
@@ -997,7 +1103,11 @@ socket_stage_session :: proc(socket: ^Socket, jid: string, session: ^Signal_Sess
 	return {}
 }
 
-socket_outgoing_session :: proc(socket: ^Socket, jid: string, session: ^Signal_Session) -> Socket_Error {
+socket_outgoing_session :: proc(
+	socket: ^Socket,
+	jid: string,
+	session: ^Signal_Session,
+) -> Socket_Error {
 	address, address_err := socket_signal_address(socket, jid)
 	if address_err.kind != .None {
 		return address_err
@@ -1026,7 +1136,8 @@ socket_outgoing_session :: proc(socket: ^Socket, jid: string, session: ^Signal_S
 	}
 
 	bundle := bundles[0].bundle
-	if identity_error := socket_outgoing_identity_validate(socket, address, &bundle); identity_error.kind != .None {
+	if identity_error := socket_outgoing_identity_validate(socket, address, &bundle);
+	   identity_error.kind != .None {
 		return identity_error
 	}
 
@@ -1040,7 +1151,8 @@ socket_outgoing_session :: proc(socket: ^Socket, jid: string, session: ^Signal_S
 		return {kind = .Signal_Failed, signal = err}
 	}
 
-	if e := state_store_set(socket.store, .Identity, address, bundle.identity_public[:]); e.kind != .None {
+	if e := state_store_set(socket.store, .Identity, address, bundle.identity_public[:]);
+	   e.kind != .None {
 		return {kind = .State_Failed, state = e}
 	}
 
@@ -1081,7 +1193,13 @@ socket_outgoing_session_cached :: proc(
 	return {}
 }
 
-socket_outgoing_keys_query :: proc(socket: ^Socket, jid, id: string) -> (Binary_Document, Socket_Error) {
+socket_outgoing_keys_query :: proc(
+	socket: ^Socket,
+	jid, id: string,
+) -> (
+	Binary_Document,
+	Socket_Error,
+) {
 	return socket_query(
 		socket,
 		{
@@ -1093,13 +1211,24 @@ socket_outgoing_keys_query :: proc(socket: ^Socket, jid, id: string) -> (Binary_
 				{"id", id},
 			},
 			content = []Binary_Node {
-				{tag = "key", content = []Binary_Node{{tag = "user", attrs = []Binary_Node_Attribute{{"jid", jid}}}}},
+				{
+					tag = "key",
+					content = []Binary_Node {
+						{tag = "user", attrs = []Binary_Node_Attribute{{"jid", jid}}},
+					},
+				},
 			},
 		},
 	)
 }
 
-socket_group_devices :: proc(socket: ^Socket, group: Group_Metadata) -> (result: []string, err: Socket_Error) {
+socket_group_devices :: proc(
+	socket: ^Socket,
+	group: Group_Metadata,
+) -> (
+	result: []string,
+	err: Socket_Error,
+) {
 	users := make([dynamic]string)
 	defer {
 		for user in users {
@@ -1128,7 +1257,8 @@ socket_group_devices :: proc(socket: ^Socket, group: Group_Metadata) -> (result:
 
 	for start := 0; start < len(users); start += MAX_DEVICE_QUERY_USERS {
 		batch := users[start:min(start + MAX_DEVICE_QUERY_USERS, len(users))]
-		if batch_error := socket_group_devices_batch(socket, batch, &devices, me, lid, have_lid); batch_error.kind != .None {
+		if batch_error := socket_group_devices_batch(socket, batch, &devices, me, lid, have_lid);
+		   batch_error.kind != .None {
 			return nil, batch_error
 		}
 	}
@@ -1141,7 +1271,10 @@ socket_group_devices :: proc(socket: ^Socket, group: Group_Metadata) -> (result:
 	return result, {}
 }
 
-socket_group_users_collect :: proc(group: Group_Metadata, users: ^[dynamic]string) -> Socket_Error {
+socket_group_users_collect :: proc(
+	group: Group_Metadata,
+	users: ^[dynamic]string,
+) -> Socket_Error {
 	for p in group.participants {
 		jid := p.jid
 
@@ -1282,7 +1415,12 @@ socket_same_device :: proc(a, b: string) -> bool {
 }
 
 // Atomically persist the primary device ratchet and ciphertext before writing the peer stanza.
-socket_send_primary_device_message :: proc(socket: ^Socket, id: string, message: []u8, history := false) -> Socket_Error {
+socket_send_primary_device_message :: proc(
+	socket: ^Socket,
+	id: string,
+	message: []u8,
+	history := false,
+) -> Socket_Error {
 	me := string(socket.auth.account.jid[:socket.auth.account.jid_size])
 	user, _, e := pairing_jid_decode(me)
 	if e.kind != .None {
@@ -1357,16 +1495,24 @@ socket_send_primary_device_message :: proc(socket: ^Socket, id: string, message:
 		}
 		count = 3
 	}
-	attrs := [6]Binary_Node_Attribute{
-		{"id", id}, {"type", "text"}, {"category", "peer"}, {"to", jid},
-		{"push_priority", "high"}, {"privacy_sensitive", "1"},
+	attrs := [6]Binary_Node_Attribute {
+		{"id", id},
+		{"type", "text"},
+		{"category", "peer"},
+		{"to", jid},
+		{"push_priority", "high"},
+		{"privacy_sensitive", "1"},
 	}
 	attr_count := 5
 	if history {
 		attrs[4].value = "high_force"
 		attr_count = 6
 	}
-	node := Binary_Node{tag = "message", attrs = attrs[:attr_count], content = children[:count]}
+	node := Binary_Node {
+		tag     = "message",
+		attrs   = attrs[:attr_count],
+		content = children[:count],
+	}
 	wire: [8192]u8
 	size, error := binary_node_encode(wire[:], node)
 	if error.kind != .None {

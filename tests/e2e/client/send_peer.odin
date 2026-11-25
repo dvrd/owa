@@ -8,7 +8,7 @@ import "core:slice"
 import "core:sys/posix"
 import "core:time"
 import "shared:async/http"
-import network_client "shared:surf"
+import surf "shared:surf"
 import ws "shared:websocket"
 import wa "shared:whatsapp"
 
@@ -120,7 +120,7 @@ send_peer_server_frame :: proc(dst: []u8, payload: []u8) -> int {
 	return at + len(payload)
 }
 
-send_peer_read :: proc(data: rawptr, dst: []u8) -> (int, network_client.WebSocket_Stream_Error) {
+send_peer_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Stream_Error) {
 	peer := cast(^Send_Peer)data
 
 	if peer.pipe_pending {
@@ -142,11 +142,11 @@ send_peer_read :: proc(data: rawptr, dst: []u8) -> (int, network_client.WebSocke
 	return n, {}
 }
 
-send_peer_close :: proc(data: rawptr) -> network_client.WebSocket_Stream_Error {
+send_peer_close :: proc(data: rawptr) -> surf.WebSocket_Stream_Error {
 	return {}
 }
 
-send_peer_deadline :: proc(data: rawptr, deadline: time.Time) -> network_client.WebSocket_Stream_Error {
+send_peer_deadline :: proc(data: rawptr, deadline: time.Time) -> surf.WebSocket_Stream_Error {
 	return {}
 }
 
@@ -447,7 +447,7 @@ send_peer_message :: proc(peer: ^Send_Peer, node: wa.Binary_Node, raw: []u8) {
 	}
 }
 
-send_peer_write :: proc(data: rawptr, wire: []u8) -> (int, network_client.WebSocket_Stream_Error) {
+send_peer_write :: proc(data: rawptr, wire: []u8) -> (int, surf.WebSocket_Stream_Error) {
 	peer := cast(^Send_Peer)data
 	header, at, frame_error := ws.frame_header_decode(wire, true)
 
@@ -517,10 +517,10 @@ send_peer_write :: proc(data: rawptr, wire: []u8) -> (int, network_client.WebSoc
 // upload descriptor. context.user_ptr carries the peer.
 send_peer_http :: proc(
 	request: http.Request,
-	config: network_client.Config,
+	config: surf.Config,
 ) -> (
-	network_client.Response,
-	network_client.HTTP_Error,
+	surf.Response,
+	surf.HTTP_Error,
 ) {
 	peer := cast(^Send_Peer)context.user_ptr
 

@@ -3,9 +3,9 @@ package whatsapp
 import "core:bytes"
 import "core:crypto"
 import "core:crypto/hash"
+import "core:encoding/endian"
 import "core:fmt"
 import "core:io"
-import endian "core:encoding/endian"
 import "core:mem"
 import "core:os"
 import "core:path/filepath"
@@ -72,7 +72,11 @@ State_Error :: struct {
 	allocation: mem.Allocator_Error,
 }
 
-state_store_init :: proc(store: ^State_Store, identity: [32]u8, allocator := context.allocator) -> State_Error {
+state_store_init :: proc(
+	store: ^State_Store,
+	identity: [32]u8,
+	allocator := context.allocator,
+) -> State_Error {
 	if store == nil || store.initialized {
 		return {kind = .Invalid_State}
 	}
@@ -114,12 +118,26 @@ state_store_clear :: proc(store: ^State_Store) {
 
 // Returned bytes borrow the store until its next mutation/clear. Never mutate
 // them: stage changes in a candidate, then set and save before exposing effects.
-state_store_get :: proc(store: ^State_Store, kind: State_Record_Kind, name: string) -> ([]u8, bool) {
+state_store_get :: proc(
+	store: ^State_Store,
+	kind: State_Record_Kind,
+	name: string,
+) -> (
+	[]u8,
+	bool,
+) {
 	record, found := state_store_find_record(store, kind, name)
 	return record.data, found
 }
 
-state_store_find_record :: proc(store: ^State_Store, kind: State_Record_Kind, name: string) -> (State_Record, bool) {
+state_store_find_record :: proc(
+	store: ^State_Store,
+	kind: State_Record_Kind,
+	name: string,
+) -> (
+	State_Record,
+	bool,
+) {
 	if store == nil || !store.initialized {
 		return {}, false
 	}
@@ -133,7 +151,11 @@ state_store_find_record :: proc(store: ^State_Store, kind: State_Record_Kind, na
 	return {}, false
 }
 
-state_store_delete :: proc(store: ^State_Store, kind: State_Record_Kind, name: string) -> State_Error {
+state_store_delete :: proc(
+	store: ^State_Store,
+	kind: State_Record_Kind,
+	name: string,
+) -> State_Error {
 	if store == nil || !store.initialized || store.requires_reload {
 		return {kind = .Invalid_State}
 	}
@@ -161,7 +183,12 @@ state_store_delete :: proc(store: ^State_Store, kind: State_Record_Kind, name: s
 // Multiple set operations form one transaction when followed by save. A
 // session snapshot and its consumed-prekey marker must be saved together.
 // Until then, runtime code must neither ack plaintext nor send ciphertext.
-state_store_set :: proc(store: ^State_Store, kind: State_Record_Kind, name: string, data: []u8) -> State_Error {
+state_store_set :: proc(
+	store: ^State_Store,
+	kind: State_Record_Kind,
+	name: string,
+	data: []u8,
+) -> State_Error {
 	if store == nil || !store.initialized || store.requires_reload {
 		return {kind = .Invalid_State}
 	}
@@ -270,7 +297,8 @@ state_store_encode :: proc(dst: []u8, store: ^State_Store) -> (int, State_Error)
 	}
 
 	for record in store.records {
-		if bytes.alias(dst[:size], record.data) || bytes.alias(dst[:size], transmute([]u8)record.name) {
+		if bytes.alias(dst[:size], record.data) ||
+		   bytes.alias(dst[:size], transmute([]u8)record.name) {
 			return 0, {kind = .Invalid_Record}
 		}
 	}
@@ -303,10 +331,14 @@ state_store_encode :: proc(dst: []u8, store: ^State_Store) -> (int, State_Error)
 
 // Copy records directly rather than encoding and reparsing the whole store.
 // The source owns all borrowed inputs until the complete replacement succeeds.
-state_store_clone :: proc(destination, source: ^State_Store, allocator := context.allocator) -> State_Error {
+state_store_clone :: proc(
+	destination, source: ^State_Store,
+	allocator := context.allocator,
+) -> State_Error {
 	if destination == nil ||
 	   source == nil ||
-	   !source.initialized || source.requires_reload ||
+	   !source.initialized ||
+	   source.requires_reload ||
 	   source.revision == 0 ||
 	   source.durable_revision > source.revision {
 		return {kind = .Invalid_State}
@@ -396,8 +428,10 @@ state_store_append_owned :: proc(store: ^State_Store, source: State_Record) -> S
 	}
 
 	copy(name, transmute([]u8)source.name)
-	if _, append_error := append(&store.records, State_Record{source.kind, cast(string)name, data});
-	   append_error != nil {
+	if _, append_error := append(
+		&store.records,
+		State_Record{source.kind, cast(string)name, data},
+	); append_error != nil {
 		crypto.zero_explicit(raw_data(data), len(data))
 		delete(data, store.allocator)
 		delete(name, store.allocator)
@@ -408,7 +442,14 @@ state_store_append_owned :: proc(store: ^State_Store, source: State_Record) -> S
 }
 
 // Validate framing/checksum before any record allocations or live replacement.
-state_store_decode_header :: proc(source: []u8, identity: [32]u8) -> (revision: u64, count: int, error: State_Error) {
+state_store_decode_header :: proc(
+	source: []u8,
+	identity: [32]u8,
+) -> (
+	revision: u64,
+	count: int,
+	error: State_Error,
+) {
 	if len(source) < STATE_STORE_HEADER_SIZE + 32 || len(source) > MAX_STATE_STORE_SIZE {
 		return 0, 0, {kind = .Invalid_Format}
 	}
@@ -476,7 +517,9 @@ state_store_decode_records :: proc(store: ^State_Store, source: []u8, count: int
 		data_size := cast(int)endian.unchecked_get_u32be(source[position:][:4])
 		position += 4
 
-		if name_size > 512 || data_size > MAX_STATE_RECORD_SIZE || name_size + data_size > end - position {
+		if name_size > 512 ||
+		   data_size > MAX_STATE_RECORD_SIZE ||
+		   name_size + data_size > end - position {
 			return {kind = .Invalid_Format}
 		}
 
@@ -529,7 +572,8 @@ state_store_decode :: proc(
 	if init_error := state_store_init(&next, identity, allocator); init_error.kind != .None {
 		return init_error
 	}
-	if record_error := state_store_decode_records(&next, source, count); record_error.kind != .None {
+	if record_error := state_store_decode_records(&next, source, count);
+	   record_error.kind != .None {
 		return record_error
 	}
 	next.revision = revision
@@ -540,7 +584,9 @@ state_store_decode :: proc(
 }
 
 state_store_save :: proc(store: ^State_Store, path: string, create_only := false) -> State_Error {
-	if store != nil && store.requires_reload { return {kind = .Directory_Flush_Failed} }
+	if store != nil && store.requires_reload {
+		return {kind = .Directory_Flush_Failed}
+	}
 	size, measured := state_store_encode(nil, store)
 
 	if measured.kind != .Destination_Undersized {
@@ -632,7 +678,9 @@ state_store_load :: proc(store: ^State_Store, path: string, identity: [32]u8) ->
 	// Establish durability before adopting the visible file as the new baseline.
 	if store != nil && store.requires_reload {
 		parent, open_error := os.open(filepath.dir(path))
-		if open_error != nil { return {kind = .Directory_Flush_Failed, io = open_error} }
+		if open_error != nil {
+			return {kind = .Directory_Flush_Failed, io = open_error}
+		}
 		defer os.close(parent)
 		if flush_error := os.flush(parent); flush_error != nil {
 			return {kind = .Directory_Flush_Failed, io = flush_error}
@@ -667,23 +715,39 @@ state_record_valid :: proc(kind: State_Record_Kind, name: string, data: []u8) ->
 		return valid && device_user_jid_valid(name, false)
 	case .Contact_Name:
 		contact, ok := decode_saved_contact(name, data)
-		return ok && device_user_jid_valid(name, false) && contact_name_valid(contact.full_name) &&
-			contact_name_valid(contact.first_name) && (contact.alternate_jid == "" || device_user_jid_valid(contact.alternate_jid, false))
+		return(
+			ok &&
+			device_user_jid_valid(name, false) &&
+			contact_name_valid(contact.full_name) &&
+			contact_name_valid(contact.first_name) &&
+			(contact.alternate_jid == "" || device_user_jid_valid(contact.alternate_jid, false)) \
+		)
 	case .Contact_Profile:
 		return device_user_jid_valid(name, false) && contact_name_valid(string(data))
 	case .Contact_Index_MAC, .Contact_Sync_Key:
-		if len(data) != 32 || len(name) > 256 || len(name) % 2 != 0 ||
-		   (kind == .Contact_Index_MAC && len(name) != 64) { return false }
+		if len(data) != 32 ||
+		   len(name) > 256 ||
+		   len(name) % 2 != 0 ||
+		   (kind == .Contact_Index_MAC && len(name) != 64) {
+			return false
+		}
 		for c in name {
-			if !is_digit(c) && (c < 'a' || c > 'f') { return false }
+			if !is_digit(c) && (c < 'a' || c > 'f') {
+				return false
+			}
 		}
 	case .Contact_Sync_State:
 		switch name {
-		case "contacts-key-id": return len(data) > 0 && len(data) <= 128
-		case "ready": return len(data) == 1 && data[0] == 1
-		case "cursor", "contacts-cursor": return len(data) == 136
-		case "required-version", "server-version": return len(data) == 8
-		case: return false
+		case "contacts-key-id":
+			return len(data) > 0 && len(data) <= 128
+		case "ready":
+			return len(data) == 1 && data[0] == 1
+		case "cursor", "contacts-cursor":
+			return len(data) == 136
+		case "required-version", "server-version":
+			return len(data) == 8
+		case:
+			return false
 		}
 	}
 
@@ -702,7 +766,14 @@ Durable_Write_Step :: enum {
 // directory fsync: flushing the file protects its contents, but the directory
 // entry must be durable too. Reports the step that failed. Serialize writers;
 // this is a local single-process store, not a multi-writer database.
-replace_file_durably :: proc(path: string, data: []u8, create_only := false) -> (Durable_Write_Step, os.Error) {
+replace_file_durably :: proc(
+	path: string,
+	data: []u8,
+	create_only := false,
+) -> (
+	Durable_Write_Step,
+	os.Error,
+) {
 	random: [8]u8
 	crypto.rand_bytes(random[:])
 	tmp := fmt.aprintf("%s.tmp-%016x", path, transmute(u64)random)
@@ -745,8 +816,12 @@ replace_file_durably :: proc(path: string, data: []u8, create_only := false) -> 
 
 	if create_only {
 		// Publish the flushed inode only if the destination is still absent.
-		if err := os.link(tmp, path); err != nil {return .Rename, err}
-		if err := os.remove(tmp); err != nil {return .Directory, err}
+		if err := os.link(tmp, path); err != nil {
+			return .Rename, err
+		}
+		if err := os.remove(tmp); err != nil {
+			return .Directory, err
+		}
 	} else if err := os.rename(tmp, path); err != nil {
 		return .Rename, err
 	}
@@ -794,41 +869,67 @@ sha256 :: proc(src: []u8) -> [32]u8 {
 
 // Build a v0.2.0–v0.2.2 snapshot for an offline handoff. The source remains
 // authoritative until the caller transfers ownership to the older process.
-state_store_export_v0_2 :: proc(source: ^State_Store, path: string) -> (deferred_profiles: int, error: State_Error) {
+state_store_export_v0_2 :: proc(
+	source: ^State_Store,
+	path: string,
+) -> (
+	deferred_profiles: int,
+	error: State_Error,
+) {
 	if source == nil || !source.initialized || source.revision != source.durable_revision {
 		return 0, {kind = .Invalid_State}
 	}
 	exported: State_Store
 	defer state_store_clear(&exported)
-	if e := state_store_clone(&exported, source); e.kind != .None {return 0, e}
+	if e := state_store_clone(&exported, source); e.kind != .None {
+		return 0, e
+	}
 	for record in source.records {
 		#partial switch record.kind {
 		case .Contact_Sync_State:
 			legacy_name: string
 			switch record.name {
-			case "contacts-cursor": legacy_name = "cursor"
-			case "server-version": legacy_name = "required-version"
+			case "contacts-cursor":
+				legacy_name = "cursor"
+			case "server-version":
+				legacy_name = "required-version"
 			case "contacts-key-id": // This transient key hint has no v0.2 representation.
-			case "ready", "cursor", "required-version": continue
-			case: return 0, {kind = .Invalid_Record}
+			case "ready", "cursor", "required-version":
+				continue
+			case:
+				return 0, {kind = .Invalid_Record}
 			}
-			if e := state_store_delete(&exported, record.kind, record.name); e.kind != .None {return 0, e}
+			if e := state_store_delete(&exported, record.kind, record.name); e.kind != .None {
+				return 0, e
+			}
 			if legacy_name != "" {
-				if e := state_store_set(&exported, record.kind, legacy_name, record.data); e.kind != .None {return 0, e}
+				if e := state_store_set(&exported, record.kind, legacy_name, record.data);
+				   e.kind != .None {
+					return 0, e
+				}
 			}
 		case .Chat_History_Cursor:
-			if e := state_store_delete(&exported, record.kind, record.name); e.kind != .None {return 0, e}
+			if e := state_store_delete(&exported, record.kind, record.name); e.kind != .None {
+				return 0, e
+			}
 		case .Pending_Profile_History:
 			// Older clients cannot import deferred profile names. The original
 			// snapshot retains the references and all previously imported names.
-			if e := state_store_delete(&exported, record.kind, record.name); e.kind != .None {return 0, e}
+			if e := state_store_delete(&exported, record.kind, record.name); e.kind != .None {
+				return 0, e
+			}
 			deferred_profiles += 1
 		case .Processed_Message:
 			if processed_history_receipt(record.data) {
-				if e := state_store_set(&exported, record.kind, record.name, record.data[:8]); e.kind != .None {return 0, e}
+				if e := state_store_set(&exported, record.kind, record.name, record.data[:8]);
+				   e.kind != .None {
+					return 0, e
+				}
 			}
 		}
-		if record.kind > .Chat_History_Cursor {return 0, {kind = .Invalid_Record}}
+		if record.kind > .Chat_History_Cursor {
+			return 0, {kind = .Invalid_Record}
+		}
 	}
 	return deferred_profiles, state_store_save(&exported, path, create_only = true)
 }

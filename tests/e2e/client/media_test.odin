@@ -5,7 +5,7 @@ import "core:bytes"
 import "core:sync"
 import "core:testing"
 import "core:time"
-import network_client "shared:surf"
+import surf "shared:surf"
 import wa "shared:whatsapp"
 
 @(test)
@@ -152,7 +152,7 @@ http_execute_runs_off_thread_while_the_socket_keeps_serving_the_connection :: pr
 	send_peer_announce(peer)
 
 	response, error := wa.socket_http_execute(&peer.socket, test_fixtures.http_marker_request(&marker), {}, execute = test_fixtures.http_marker_execute)
-	defer network_client.response_destroy(&response)
+	defer surf.response_destroy(&response)
 
 	testing.expect_value(t, error.kind, wa.Socket_Error_Kind.None)
 	testing.expect_value(t, response.status, 200)
@@ -177,7 +177,7 @@ http_execute_reports_executor_failure_as_media_http_failure :: proc(t: ^testing.
 	}
 
 	response, error := wa.socket_http_execute(&peer.socket, test_fixtures.http_marker_request(&marker), {}, execute = test_fixtures.http_marker_execute)
-	defer network_client.response_destroy(&response)
+	defer surf.response_destroy(&response)
 
 	testing.expect_value(t, error.kind, wa.Socket_Error_Kind.Media_Failed)
 	testing.expect_value(t, error.media.kind, wa.Media_Error_Kind.HTTP_Failed)

@@ -5,7 +5,7 @@ import "core:crypto"
 import "core:fmt"
 import "core:testing"
 import test_fixtures "fixtures/client"
-import network_client "shared:surf"
+import surf "shared:surf"
 import wa "shared:whatsapp"
 
 @(test)
@@ -1018,7 +1018,7 @@ status_ack_malformed_envelopes_fail_without_output_or_store_changes :: proc(t: ^
 	}
 }
 
-status_ack_failed_write :: proc(_: rawptr, _: []u8) -> (int, network_client.WebSocket_Stream_Error) {
+status_ack_failed_write :: proc(_: rawptr, _: []u8) -> (int, surf.WebSocket_Stream_Error) {
 	return 0, {kind = .No_Progress}
 }
 
@@ -1201,7 +1201,7 @@ unsupported_encryption_rejects_mixed_children_before_any_ratchet_mutation :: pro
 	}
 }
 
-unsupported_enc_write_fail :: proc(data: rawptr, source: []u8) -> (int, network_client.WebSocket_Stream_Error) {
+unsupported_enc_write_fail :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Stream_Error) {
 	return 0, {kind = .No_Progress}
 }
 

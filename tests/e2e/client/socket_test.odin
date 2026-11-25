@@ -4,7 +4,7 @@ import "core:crypto"
 import "core:crypto/x25519"
 import "core:encoding/hex"
 import "core:testing"
-import network_client "shared:surf"
+import surf "shared:surf"
 import ws "shared:websocket"
 import wa "shared:whatsapp"
 
@@ -21,7 +21,7 @@ Socket_Cert_Test :: struct {
 	reject:                          bool,
 }
 
-socket_cert_test_read :: proc(data: rawptr, dst: []u8) -> (int, network_client.WebSocket_Stream_Error) {
+socket_cert_test_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Stream_Error) {
 	state := cast(^Socket_Cert_Test)data
 	n := min(len(dst), len(state.input) - state.read_at, 5)
 	copy(dst[:n], state.input[state.read_at:][:n])
@@ -34,7 +34,7 @@ socket_cert_test_read :: proc(data: rawptr, dst: []u8) -> (int, network_client.W
 	return n, {}
 }
 
-socket_cert_test_write :: proc(data: rawptr, src: []u8) -> (int, network_client.WebSocket_Stream_Error) {
+socket_cert_test_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Stream_Error) {
 	state := cast(^Socket_Cert_Test)data
 	n := min(len(src), len(state.output) - state.written)
 	copy(state.output[state.written:][:n], src[:n])
@@ -43,7 +43,7 @@ socket_cert_test_write :: proc(data: rawptr, src: []u8) -> (int, network_client.
 	return n, {}
 }
 
-socket_cert_test_close :: proc(data: rawptr) -> network_client.WebSocket_Stream_Error {
+socket_cert_test_close :: proc(data: rawptr) -> surf.WebSocket_Stream_Error {
 	state := cast(^Socket_Cert_Test)data
 	state.closed += 1
 

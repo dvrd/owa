@@ -1,7 +1,7 @@
 package whatsapp
 
 import endian "core:encoding/endian"
-import network_client "shared:surf"
+import surf "shared:surf"
 import "core:crypto"
 import "core:crypto/x25519"
 import "core:mem"
@@ -87,8 +87,8 @@ Client_Error :: struct {
 	protobuf:    Protobuf_Error,
 	noise:       Noise_Error,
 	certificate: Certificate_Error,
-	websocket:   network_client.WebSocket_Error,
-	stream:      network_client.WebSocket_Stream_Error,
+	websocket:   surf.WebSocket_Error,
+	stream:      surf.WebSocket_Stream_Error,
 	allocation:  mem.Allocator_Error,
 }
 
@@ -96,7 +96,7 @@ Client_Error :: struct {
 // responsibility for websocket to this client. Noise_Ready means encryption
 // is established, not that this device has been paired or logged in.
 Client :: struct {
-	websocket:         ^network_client.WebSocket_Conn,
+	websocket:         ^surf.WebSocket_Conn,
 	config:            Client_Config,
 	phase:             Client_Phase,
 	frames:            Frame_Transport,
@@ -119,7 +119,7 @@ noise_credentials_generate :: proc() -> (credentials: Noise_Credentials, error: 
 
 client_init :: proc(
 	client: ^Client,
-	websocket: ^network_client.WebSocket_Conn,
+	websocket: ^surf.WebSocket_Conn,
 	credentials: Noise_Credentials,
 	config: Client_Config = {},
 ) -> Client_Error {
@@ -202,7 +202,7 @@ client_handshake :: proc(client: ^Client, client_payload: []u8) -> Client_Error 
 
 	defer {
 		if deadlines_set && (client.phase != .Failed && client.phase != .Closed) && client.websocket.phase == .Open {
-			network_client.websocket_set_deadline(client.websocket, {})
+			surf.websocket_set_deadline(client.websocket, {})
 		}
 	}
 
@@ -218,7 +218,7 @@ client_handshake :: proc(client: ^Client, client_payload: []u8) -> Client_Error 
 	client_secret_keys_clear(client)
 
 	if deadlines_set {
-		if err := network_client.websocket_set_deadline(client.websocket, {}); err.kind != .None {
+		if err := surf.websocket_set_deadline(client.websocket, {}); err.kind != .None {
 			return client_fail(client, {kind = .Deadline_Failed, stream = err})
 		}
 
@@ -239,7 +239,7 @@ client_handshake_deadline_start :: proc(client: ^Client) -> (bool, Client_Error)
 			timeout = 10 * time.Second
 		}
 
-		if err := network_client.websocket_set_deadline(client.websocket, time.time_add(time.now(), timeout));
+		if err := surf.websocket_set_deadline(client.websocket, time.time_add(time.now(), timeout));
 		   err.kind != .None {
 			return false, client_fail(client, {kind = .Deadline_Failed, stream = err})
 		}
@@ -608,7 +608,7 @@ client_close :: proc(client: ^Client) -> Client_Error {
 	client_secret_keys_clear(client)
 	client.phase = .Closed
 
-	if err := network_client.websocket_close(client.websocket); err.kind != .None {
+	if err := surf.websocket_close(client.websocket); err.kind != .None {
 		return {kind = .WebSocket_Close_Failed, websocket = err}
 	}
 
@@ -621,7 +621,7 @@ client_fail :: proc(client: ^Client, err: Client_Error) -> Client_Error {
 	frame_transport_clear(&client.frames)
 	noise_clear(&client.noise)
 	client_secret_keys_clear(client)
-	network_client.websocket_close(client.websocket, 1008)
+	surf.websocket_close(client.websocket, 1008)
 
 	return err
 }
@@ -878,7 +878,7 @@ Frame_Transport_Error_Kind :: enum {
 
 Frame_Transport_Error :: struct {
 	kind:       Frame_Transport_Error_Kind,
-	websocket:  network_client.WebSocket_Error,
+	websocket:  surf.WebSocket_Error,
 	frame:      Frame_Error,
 	allocation: mem.Allocator_Error,
 }
@@ -888,7 +888,7 @@ Frame_Transport_Error :: struct {
 // above this layer. Optional routing-info/ED introduction headers are not used.
 // This state must stay at a stable address and be used serially.
 Frame_Transport :: struct {
-	connection:                      ^network_client.WebSocket_Conn,
+	connection:                      ^surf.WebSocket_Conn,
 	max_payload:                     int,
 	allocator:                       mem.Allocator,
 	initialized, intro_sent, failed: bool,
@@ -906,7 +906,7 @@ Frame_Transport :: struct {
 
 frame_transport_init :: proc(
 	state: ^Frame_Transport,
-	conn: ^network_client.WebSocket_Conn,
+	conn: ^surf.WebSocket_Conn,
 	max_payload: int = DEFAULT_TRANSPORT_MAX_PAYLOAD,
 ) -> Frame_Transport_Error {
 	if state == nil {
@@ -979,7 +979,7 @@ frame_transport_send :: proc(state: ^Frame_Transport, payload: []u8) -> Frame_Tr
 		return frame_transport_fail(state, {kind = .Frame_Codec_Failed, frame = frame_err})
 	}
 
-	if err := network_client.websocket_write_message(state.connection, .Binary, wire); err.kind != .None {
+	if err := surf.websocket_write_message(state.connection, .Binary, wire); err.kind != .None {
 		return frame_transport_fail(state, {kind = .WebSocket_Write_Failed, websocket = err, frame = .None})
 	}
 
@@ -1096,7 +1096,7 @@ frame_transport_validate :: proc(state: ^Frame_Transport) -> Frame_Transport_Err
 
 frame_transport_next_message :: proc(state: ^Frame_Transport) -> Frame_Transport_Error {
 	for {
-		opcode, size, err := network_client.websocket_read_message(state.connection, state.ws_message[:])
+		opcode, size, err := surf.websocket_read_message(state.connection, state.ws_message[:])
 
 		if err.kind == .Destination_Undersized {
 			if opcode != .Binary {
@@ -1135,7 +1135,7 @@ frame_transport_next_message :: proc(state: ^Frame_Transport) -> Frame_Transport
 
 frame_transport_read_fail :: proc(
 	state: ^Frame_Transport,
-	err: network_client.WebSocket_Error,
+	err: surf.WebSocket_Error,
 ) -> Frame_Transport_Error {
 	kind: Frame_Transport_Error_Kind = .WebSocket_Read_Failed
 	frame_err: Frame_Error = .None

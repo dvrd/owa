@@ -4,7 +4,7 @@ import test_fixtures "../../fixtures/client"
 import "core:bytes"
 import "core:testing"
 import "shared:async/http"
-import network_client "shared:surf"
+import surf "shared:surf"
 import wa "shared:whatsapp"
 
 // Independently generated protobuf, AES-CBC, HKDF and HMAC vectors for two
@@ -265,7 +265,7 @@ Contact_Download_Test :: struct {
 	store: ^wa.State_Store,
 }
 
-contact_download_during_update :: proc(request: http.Request, config: network_client.Config) -> (network_client.Response, network_client.HTTP_Error) {
+contact_download_during_update :: proc(request: http.Request, config: surf.Config) -> (surf.Response, surf.HTTP_Error) {
 	state := cast(^Contact_Download_Test)context.user_ptr
 	assert(wa.state_store_set(state.store, .Contact_Profile, "888@lid", transmute([]u8)string("Live name" if state.download.calls > 0 else "Initial")).kind == .None)
 	context.user_ptr = &state.download

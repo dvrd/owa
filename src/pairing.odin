@@ -1,6 +1,5 @@
 package whatsapp
 
-import http "shared:async/http"
 import "core:crypto"
 import "core:crypto/hmac"
 import "core:encoding/base64"
@@ -10,7 +9,8 @@ import "core:strconv"
 import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
-import network_client "shared:surf"
+import "shared:async/http"
+import "shared:surf"
 
 // Registration, pairing and session establishment.
 
@@ -89,14 +89,14 @@ Pairing_QR_Format :: enum {
 }
 
 Session_Config :: struct {
-	payload:            Payload_Config,
-	qr_write_format_bits:          Pairing_QR_Format,
+	payload:              Payload_Config,
+	qr_write_format_bits: Pairing_QR_Format,
 	// Empty leaves persistence to the caller; otherwise checkpoint before
 	// starting registration and before acknowledging successful pairing.
-	auth_path:          string,
-	keepalive_interval: time.Duration, // Zero defaults to 30 seconds.
-	observe_node:       Protocol_Node_Observer,
-	observer_data:      rawptr,
+	auth_path:            string,
+	keepalive_interval:   time.Duration, // Zero defaults to 30 seconds.
+	observe_node:         Protocol_Node_Observer,
+	observer_data:        rawptr,
 }
 
 Session_Error_Kind :: enum {
@@ -160,7 +160,12 @@ default_client_payload_config :: proc() -> Payload_Config {
 	}
 }
 
-session_init :: proc(session: ^Session, client: ^Client, auth: ^Auth_State, config: Session_Config) -> Session_Error {
+session_init :: proc(
+	session: ^Session,
+	client: ^Client,
+	auth: ^Auth_State,
+	config: Session_Config,
+) -> Session_Error {
 	if session == nil ||
 	   session.phase != .Uninitialized ||
 	   client == nil ||
@@ -238,12 +243,21 @@ session_start :: proc(session: ^Session, now: time.Time) -> Session_Error {
 
 // Read one decrypted binary node. The return borrows the session's decoded
 // document; consume the event before the next read/process or session_close.
-session_read :: proc(session: ^Session, now: time.Time) -> (event: Session_Event, error: Session_Error) {
+session_read :: proc(
+	session: ^Session,
+	now: time.Time,
+) -> (
+	event: Session_Event,
+	error: Session_Error,
+) {
 	if !session_can_receive(session) {
 		return {}, session_state_error(session)
 	}
 
-	buffer, allocation_err := make([]u8, min(session.client.config.max_frame_payload, MAX_BINARY_NODE_PAYLOAD))
+	buffer, allocation_err := make(
+		[]u8,
+		min(session.client.config.max_frame_payload, MAX_BINARY_NODE_PAYLOAD),
+	)
 
 	if allocation_err != nil {
 		return {}, session_fail(session, {kind = .Allocation_Failed, allocation = allocation_err})
@@ -335,7 +349,12 @@ session_node_observe :: proc(session: ^Session, node: Binary_Node) {
 
 		session.config.observe_node(
 			session.config.observer_data,
-			{tag = node.tag, kind = kind, children = tags[:count], ack_class = session_stream_ack_class(node)},
+			{
+				tag = node.tag,
+				kind = kind,
+				children = tags[:count],
+				ack_class = session_stream_ack_class(node),
+			},
 		)
 	}
 }
@@ -421,7 +440,13 @@ session_ack_class :: proc(node: Binary_Node) -> Protocol_Ack_Class {
 	return result
 }
 
-session_stream_error :: proc(session: ^Session, node: Binary_Node) -> (Session_Event, Session_Error) {
+session_stream_error :: proc(
+	session: ^Session,
+	node: Binary_Node,
+) -> (
+	Session_Event,
+	Session_Error,
+) {
 	code_text, _ := node_attr(node, "code")
 	code, valid_code := strconv.parse_uint(code_text, 10)
 
@@ -438,7 +463,13 @@ session_stream_error :: proc(session: ^Session, node: Binary_Node) -> (Session_E
 	return {}, session_fail(session, {kind = .Server_Failure, server_code = cast(u32)code})
 }
 
-session_login_accept :: proc(session: ^Session, node: Binary_Node) -> (Session_Event, Session_Error) {
+session_login_accept :: proc(
+	session: ^Session,
+	node: Binary_Node,
+) -> (
+	Session_Event,
+	Session_Error,
+) {
 	if !session.auth.credentials.registered || !session.auth.account.valid {
 		return {}, session_fail(session, {kind = .Invalid_Account})
 	}
@@ -450,13 +481,26 @@ session_login_accept :: proc(session: ^Session, node: Binary_Node) -> (Session_E
 	return {kind = .Login_Accepted, node = node, account = &session.auth.account}, {}
 }
 
-session_pair_device :: proc(session: ^Session, node: Binary_Node, now: time.Time) -> (Session_Event, Session_Error) {
+session_pair_device :: proc(
+	session: ^Session,
+	node: Binary_Node,
+	now: time.Time,
+) -> (
+	Session_Event,
+	Session_Error,
+) {
 	if session.phase != .Awaiting_Pairing {
 		return {}, session_fail(session, {kind = .Invalid_State})
 	}
 
 	reply: [MAX_PAIRING_IDENTITY_SIZE]u8
-	size, pair_err := pairing_device_handle(&session.qr_state, node, &session.auth.credentials, now, reply[:])
+	size, pair_err := pairing_device_handle(
+		&session.qr_state,
+		node,
+		&session.auth.credentials,
+		now,
+		reply[:],
+	)
 
 	if pair_err.kind != .None {
 		return {}, session_fail(session, {kind = .Pairing_Failed, pairing = pair_err})
@@ -482,13 +526,24 @@ session_pair_device :: proc(session: ^Session, node: Binary_Node, now: time.Time
 	return {kind = .QR, qr = cast(string)session.qr[:written]}, {}
 }
 
-session_pair_success :: proc(session: ^Session, node: Binary_Node) -> (Session_Event, Session_Error) {
+session_pair_success :: proc(
+	session: ^Session,
+	node: Binary_Node,
+) -> (
+	Session_Event,
+	Session_Error,
+) {
 	if session.phase != .Awaiting_Pairing {
 		return {}, session_fail(session, {kind = .Invalid_State})
 	}
 
 	reply: [MAX_PAIRING_IDENTITY_SIZE]u8
-	size, pair_err := pairing_success_handle(&session.auth.account, node, &session.auth.credentials, reply[:])
+	size, pair_err := pairing_success_handle(
+		&session.auth.account,
+		node,
+		&session.auth.credentials,
+		reply[:],
+	)
 
 	if pair_err.kind != .None {
 		return {}, session_fail(session, {kind = .Pairing_Failed, pairing = pair_err})
@@ -512,7 +567,13 @@ session_pair_success :: proc(session: ^Session, node: Binary_Node) -> (Session_E
 	return {kind = .Pairing_Complete, account = &session.auth.account}, {}
 }
 
-session_tick :: proc(session: ^Session, now: time.Time) -> (event: Session_Event, error: Session_Error) {
+session_tick :: proc(
+	session: ^Session,
+	now: time.Time,
+) -> (
+	event: Session_Event,
+	error: Session_Error,
+) {
 	if !session_can_receive(session) {
 		return {}, session_state_error(session)
 	}
@@ -521,7 +582,8 @@ session_tick :: proc(session: ^Session, now: time.Time) -> (event: Session_Event
 	// QR reference deadlines bound this wait; the online idle timeout would
 	// otherwise discard a 60-second code after only 35 seconds.
 	if !session.qr_state.initialized &&
-	   time.diff(session.last_received, now) > session.config.keepalive_interval + 5 * time.Second {
+	   time.diff(session.last_received, now) >
+		   session.config.keepalive_interval + 5 * time.Second {
 		return {}, session_fail(session, {kind = .Connection_Lost})
 	}
 
@@ -578,7 +640,14 @@ session_close :: proc(session: ^Session) -> Session_Error {
 	return {}
 }
 
-session_payload_encode :: proc(dst: []u8, auth: ^Auth_State, config: Payload_Config) -> (int, Session_Error) {
+session_payload_encode :: proc(
+	dst: []u8,
+	auth: ^Auth_State,
+	config: Payload_Config,
+) -> (
+	int,
+	Session_Error,
+) {
 	if auth.credentials.registered {
 		jid := cast(string)auth.account.jid[:auth.account.jid_size]
 		user, device, jid_err := pairing_jid_decode(jid)
@@ -587,7 +656,13 @@ session_payload_encode :: proc(dst: []u8, auth: ^Auth_State, config: Payload_Con
 			return 0, {kind = .Invalid_Account, pairing = jid_err}
 		}
 
-		size, err := login_payload_encode(dst, config, user, device, include_device = strings.contains(jid, ":"))
+		size, err := login_payload_encode(
+			dst,
+			config,
+			user,
+			device,
+			include_device = strings.contains(jid, ":"),
+		)
 
 		if err != .None {
 			return 0, {kind = .Payload_Failed, payload = err}
@@ -667,10 +742,18 @@ session_send_keepalive_ping :: proc(session: ^Session) -> Session_Error {
 	session.ping_sequence += 1
 	id_buffer: [32]u8
 	id := fmt.bprintf(id_buffer[:], "odin-ping-%d", session.ping_sequence)
-	attrs := [?]Binary_Node_Attribute{{"id", id}, {"to", PAIRING_SERVER}, {"type", "get"}, {"xmlns", "w:p"}}
+	attrs := [?]Binary_Node_Attribute {
+		{"id", id},
+		{"to", PAIRING_SERVER},
+		{"type", "get"},
+		{"xmlns", "w:p"},
+	}
 	children := [?]Binary_Node{{tag = "ping"}}
 	buffer: [256]u8
-	size, err := binary_node_encode(buffer[:], {tag = "iq", attrs = attrs[:], content = children[:]})
+	size, err := binary_node_encode(
+		buffer[:],
+		{tag = "iq", attrs = attrs[:], content = children[:]},
+	)
 
 	if err.kind != .None {
 		return {kind = .Binary_Node_Failed, binary = err}
@@ -1113,10 +1196,16 @@ pairing_success_handle :: proc(
 		key_index        = details.key_index,
 		signature_policy = .Current,
 	}
-	if metadata_error := pairing_success_metadata_decode(&next, pair, device_node); metadata_error.kind != .None {
+	if metadata_error := pairing_success_metadata_decode(&next, pair, device_node);
+	   metadata_error.kind != .None {
 		return 0, metadata_error
 	}
-	if signature_error := pairing_success_signatures_prepare(&next, credentials, identity, details); signature_error.kind != .None {
+	if signature_error := pairing_success_signatures_prepare(
+		&next,
+		credentials,
+		identity,
+		details,
+	); signature_error.kind != .None {
 		return 0, signature_error
 	}
 	written, reply_error := pairing_success_reply_encode(reply, &next, id)
@@ -1228,7 +1317,10 @@ pairing_success_signed_identity_decode :: proc(
 	return identity, details, {}
 }
 
-pairing_success_metadata_decode :: proc(next: ^Paired_Account, pair, device_node: ^Binary_Node) -> Pairing_Error {
+pairing_success_metadata_decode :: proc(
+	next: ^Paired_Account,
+	pair, device_node: ^Binary_Node,
+) -> Pairing_Error {
 	jid, has_jid := node_attr(device_node^, "jid")
 	if !has_jid {
 		return {kind = .Invalid_JID}
@@ -1281,8 +1373,11 @@ pairing_success_signatures_prepare :: proc(
 	signed[0], signed[1] = 6, account_domain
 	copy(signed[2:], identity.details)
 	copy(signed[2 + len(identity.details):], identity_public[:])
-	if err := signal_curve_verify(account_key, signed[:2 + len(identity.details) + 32], identity.account_signature);
-	   err != .None {
+	if err := signal_curve_verify(
+		account_key,
+		signed[:2 + len(identity.details) + 32],
+		identity.account_signature,
+	); err != .None {
 		return {kind = .Invalid_Account_Signature, signal = err}
 	}
 
@@ -1305,7 +1400,14 @@ pairing_success_signatures_prepare :: proc(
 	return {}
 }
 
-pairing_success_reply_encode :: proc(reply: []u8, next: ^Paired_Account, id: string) -> (int, Pairing_Error) {
+pairing_success_reply_encode :: proc(
+	reply: []u8,
+	next: ^Paired_Account,
+	id: string,
+) -> (
+	int,
+	Pairing_Error,
+) {
 	encoded_account: [MAX_PAIRING_DETAILS_SIZE + 200]u8
 	encoded_size, encoded_err := pairing_signed_identity_encode(
 		encoded_account[:],
@@ -1325,12 +1427,19 @@ pairing_success_reply_encode :: proc(reply: []u8, next: ^Paired_Account, id: str
 	key_index := fmt.bprintf(key_index_buffer[:], "%d", next.key_index)
 	identity_attrs := [?]Binary_Node_Attribute{{"key-index", key_index}}
 	identity_children := [?]Binary_Node {
-		{tag = "device-identity", attrs = identity_attrs[:], content = encoded_account[:encoded_size]},
+		{
+			tag = "device-identity",
+			attrs = identity_attrs[:],
+			content = encoded_account[:encoded_size],
+		},
 	}
 
 	reply_children := [?]Binary_Node{{tag = "pair-device-sign", content = identity_children[:]}}
 	attrs := [?]Binary_Node_Attribute{{"to", PAIRING_SERVER}, {"type", "result"}, {"id", id}}
-	written, binary_err := binary_node_encode(reply, {tag = "iq", attrs = attrs[:], content = reply_children[:]})
+	written, binary_err := binary_node_encode(
+		reply,
+		{tag = "iq", attrs = attrs[:], content = reply_children[:]},
+	)
 
 	if binary_err.kind != .None {
 		return 0, {kind = .Binary_Node_Failed, binary = binary_err}
@@ -1355,7 +1464,10 @@ pairing_ref_valid :: proc(ref: string) -> bool {
 
 // Recheck persisted public account signatures against this device identity.
 // A checksum alone is not sufficient to accept loaded pairing metadata.
-paired_account_validate :: proc(account: ^Paired_Account, credentials: ^Device_Credentials) -> Pairing_Error {
+paired_account_validate :: proc(
+	account: ^Paired_Account,
+	credentials: ^Device_Credentials,
+) -> Pairing_Error {
 	if account == nil || credentials == nil || !account.valid {
 		return {kind = .Invalid_State}
 	}
@@ -1371,7 +1483,8 @@ paired_account_validate :: proc(account: ^Paired_Account, credentials: ^Device_C
 		return {kind = .Data_Oversized}
 	}
 
-	if _, _, err := pairing_jid_decode(cast(string)account.jid[:account.jid_size]); err.kind != .None {
+	if _, _, err := pairing_jid_decode(cast(string)account.jid[:account.jid_size]);
+	   err.kind != .None {
 		return err
 	}
 
@@ -1420,7 +1533,10 @@ paired_account_signatures_validate :: proc(
 ) -> Pairing_Error {
 	identity_public := signal_curve_public(credentials.identity_private)
 	message: [2 + MAX_PAIRING_DETAILS_SIZE + 64]u8
-	account_domain, domain_error := paired_account_signature_domain(account.signature_policy, details)
+	account_domain, domain_error := paired_account_signature_domain(
+		account.signature_policy,
+		details,
+	)
 	if domain_error.kind != .None {
 		return domain_error
 	}
@@ -1595,7 +1711,8 @@ qr_encode :: proc(text: string) -> (code: QR_Code, err: QR_Error) {
 	for ; version <= 40; version += 1 {
 		count_bits := version < 10 ? 8 : 16
 
-		if len(text) < 1 << cast(uint)count_bits && 4 + count_bits + len(text) * 8 <= qr_data_codeword_count(version) * 8 {
+		if len(text) < 1 << cast(uint)count_bits &&
+		   4 + count_bits + len(text) * 8 <= qr_data_codeword_count(version) * 8 {
 			break
 		}
 	}
@@ -1624,7 +1741,8 @@ qr_encode :: proc(text: string) -> (code: QR_Code, err: QR_Error) {
 				index := y * code.size + x
 
 				if !functions[index] && bit < qr_count_raw_data_modules(version) / 8 * 8 {
-					code.modules[index] = (interleaved[bit / 8] >> cast(uint)(7 - bit % 8)) & 1 != 0
+					code.modules[index] =
+						(interleaved[bit / 8] >> cast(uint)(7 - bit % 8)) & 1 != 0
 					bit += 1
 				}
 			}
@@ -1671,7 +1789,13 @@ qr_data_encode :: proc(data: []u8, text: string, version: int) {
 }
 
 qr_module_is_dark :: proc(code: ^QR_Code, x, y: int) -> bool {
-	if code == nil || code.size < 21 || code.size > QR_MAX_SIZE || x < 0 || y < 0 || x >= code.size || y >= code.size {
+	if code == nil ||
+	   code.size < 21 ||
+	   code.size > QR_MAX_SIZE ||
+	   x < 0 ||
+	   y < 0 ||
+	   x >= code.size ||
+	   y >= code.size {
 		return false
 	}
 
@@ -1829,7 +1953,12 @@ qr_interleave :: proc(data: []u8, version: int, result: []u8) {
 	}
 }
 
-qr_set_function :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]bool, x, y: int, dark: bool) {
+qr_set_function :: proc(
+	code: ^QR_Code,
+	functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]bool,
+	x, y: int,
+	dark: bool,
+) {
 	if x < 0 || y < 0 || x >= code.size || y >= code.size {
 		return
 	}
@@ -1847,7 +1976,13 @@ qr_draw_function_patterns :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_
 		for dy in -4 ..= 4 {
 			for dx in -4 ..= 4 {
 				dist := max(abs(dx), abs(dy))
-				qr_set_function(code, functions, center[0] + dx, center[1] + dy, dist != 2 && dist != 4)
+				qr_set_function(
+					code,
+					functions,
+					center[0] + dx,
+					center[1] + dy,
+					dist != 2 && dist != 4,
+				)
 			}
 		}
 	}
@@ -1900,7 +2035,11 @@ qr_draw_function_patterns :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_
 		}
 	}
 }
-qr_write_format_bits :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]bool, mask: int) {
+qr_write_format_bits :: proc(
+	code: ^QR_Code,
+	functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]bool,
+	mask: int,
+) {
 	data := 1 << 3 | mask // ECC-L format selector = 1.
 	remainder := data
 	for _ in 0 ..< 10 {
@@ -1927,7 +2066,11 @@ qr_write_format_bits :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_MAX_S
 
 	qr_set_function(code, functions, 8, code.size - 8, true)
 }
-qr_apply_data_mask :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]bool, mask: int) {
+qr_apply_data_mask :: proc(
+	code: ^QR_Code,
+	functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]bool,
+	mask: int,
+) {
 	for y in 0 ..< code.size {
 		for x in 0 ..< code.size {
 			index := y * code.size + x
@@ -2045,7 +2188,10 @@ qr_history_patterns :: proc(h: ^[7]int) -> int {
 	n := h[1]
 	core := n > 0 && h[2] == n && h[3] == n * 3 && h[4] == n && h[5] == n
 
-	return (core && h[0] >= n * 4 && h[6] >= n ? 1 : 0) + (core && h[6] >= n * 4 && h[0] >= n ? 1 : 0)
+	return(
+		(core && h[0] >= n * 4 && h[6] >= n ? 1 : 0) +
+		(core && h[6] >= n * 4 && h[0] >= n ? 1 : 0) \
+	)
 }
 
 // The service worker at web.whatsapp.com publishes client_revision. The
@@ -2057,7 +2203,8 @@ WA_WEB_VERSION_MAJOR :: 2
 WA_WEB_VERSION_MINOR :: 3000
 CLIENT_REVISION_KEY :: "client_revision"
 WA_WEB_USER_AGENT ::
-	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " + "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
+	"(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 Web_Version_Source :: enum {
 	WhatsApp,
 	Pinned, // the compiled WA_WEB_VERSION_PINNED
@@ -2073,7 +2220,7 @@ Version_Error_Kind :: enum {
 }
 Version_Error :: struct {
 	kind:   Version_Error_Kind,
-	http:   network_client.HTTP_Error,
+	http:   surf.HTTP_Error,
 	status: int,
 }
 Web_Version_Result :: struct {
@@ -2085,20 +2232,13 @@ Web_Version_Result :: struct {
 // destroys it. This seam permits deterministic/offline fixture tests.
 Version_Fetcher :: struct {
 	data: rawptr,
-	get:  proc(
-		data: rawptr,
-		url: string,
-		config: network_client.Config,
-	) -> (
-		network_client.Response,
-		network_client.HTTP_Error,
-	),
+	get:  proc(data: rawptr, url: string, config: surf.Config) -> (surf.Response, surf.HTTP_Error),
 }
 
 // A failed fetch keeps the fallback (a zero fallback = the compiled pin).
 // Callers report fetch_error. An explicit caller version bypasses this function.
 web_version_discover :: proc(
-	config: network_client.Config,
+	config: surf.Config,
 	fetcher: Version_Fetcher = {},
 	fallback: [3]u32 = {},
 ) -> (
@@ -2122,7 +2262,7 @@ web_version_discover :: proc(
 	}
 
 	response, he := get(fetcher.data, WA_WEB_VERSION_URL, settings)
-	defer network_client.response_destroy(&response)
+	defer surf.response_destroy(&response)
 	if he.kind != .None {
 		result.fetch_error = {
 			kind = .HTTP_Failed,
@@ -2227,7 +2367,14 @@ match_client_revision_key_at :: proc(src: []u8, i: int) -> (matches, escaped: bo
 	return true, escaped
 }
 
-parse_client_revision_digits :: proc(src: []u8, at: int, escaped: bool) -> (value: u32, ok, invalid: bool) {
+parse_client_revision_digits :: proc(
+	src: []u8,
+	at: int,
+	escaped: bool,
+) -> (
+	value: u32,
+	ok, invalid: bool,
+) {
 	i := at
 
 	if escaped {
@@ -2333,14 +2480,14 @@ web_version_parse :: proc(text: string) -> (version: [3]u32, err: Version_Error_
 version_fetch_http :: proc(
 	data: rawptr,
 	url: string,
-	config: network_client.Config,
+	config: surf.Config,
 ) -> (
-	network_client.Response,
-	network_client.HTTP_Error,
+	surf.Response,
+	surf.HTTP_Error,
 ) {
 	headers := [2]http.Header {
 		{name = "User-Agent", value = WA_WEB_USER_AGENT},
 		{name = "Sec-Fetch-Site", value = "none"},
 	}
-	return network_client.execute({url = url, headers = headers[:]}, config)
+	return surf.execute({url = url, headers = headers[:]}, config)
 }

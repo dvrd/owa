@@ -7,7 +7,7 @@ import "core:testing"
 import "core:time"
 import test_fixtures "fixtures/client"
 import "shared:async/http"
-import network_client "shared:surf"
+import surf "shared:surf"
 import wa "shared:whatsapp"
 
 Media_Deadline_Test :: struct {
@@ -20,10 +20,10 @@ Media_Deadline_Test :: struct {
 
 media_deadline_test_execute :: proc(
 	request: http.Request,
-	config: network_client.Config,
+	config: surf.Config,
 ) -> (
-	network_client.Response,
-	network_client.HTTP_Error,
+	surf.Response,
+	surf.HTTP_Error,
 ) {
 	state := cast(^Media_Deadline_Test)context.user_ptr
 	state.calls += 1
@@ -145,10 +145,10 @@ Media_Retry_Test_State :: struct {
 
 media_retry_test_http :: proc(
 	request: http.Request,
-	config: network_client.Config,
+	config: surf.Config,
 ) -> (
-	network_client.Response,
-	network_client.HTTP_Error,
+	surf.Response,
+	surf.HTTP_Error,
 ) {
 	state := cast(^Media_Retry_Test_State)context.user_ptr
 	state.calls += 1
@@ -157,18 +157,18 @@ media_retry_test_http :: proc(
 	return {status = 410}, {}
 }
 
-media_retry_test_write :: proc(data: rawptr, src: []u8) -> (int, network_client.WebSocket_Stream_Error) {
+media_retry_test_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Stream_Error) {
 	state := cast(^Media_Retry_Test_State)context.user_ptr
 	state.writes += 1
 
 	return len(src), {}
 }
 
-media_retry_test_read :: proc(data: rawptr, dst: []u8) -> (int, network_client.WebSocket_Stream_Error) {
+media_retry_test_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Stream_Error) {
 	return 0, {kind = .EOF}
 }
 
-media_retry_test_close :: proc(data: rawptr) -> network_client.WebSocket_Stream_Error {
+media_retry_test_close :: proc(data: rawptr) -> surf.WebSocket_Stream_Error {
 	return {}
 }
 
