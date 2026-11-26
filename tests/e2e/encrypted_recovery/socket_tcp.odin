@@ -22,6 +22,7 @@ socket_tcp_close :: proc(data: rawptr) -> surf.WebSocket_Stream_Error {
 
 socket_tcp_connect :: proc(peer: ^Socket_Recovery) {
 	socket, error := net.dial_tcp_from_endpoint({net.IP4_Loopback, socket_tcp_port})
+
 	assert(error == nil)
 	peer.tcp = {
 		socket = socket,
@@ -44,6 +45,7 @@ socket_tcp_connect :: proc(peer: ^Socket_Recovery) {
 socket_tcp_wait_replay :: proc(peer: ^Socket_Recovery) {
 	path := fmt.aprintf("%s/tcp-replay-received.bin", peer.directory)
 	defer delete(path)
+
 	expected: [32]u8
 	hash.hash_bytes_to_buffer(.SHA256, peer.output[:peer.output_size], expected[:])
 	started := time.tick_now()
@@ -102,15 +104,19 @@ socket_tcp_packet :: proc(connection: net.Connection, buffer: []u8) -> []u8 {
 socket_tcp_receive :: proc(directory: string, packet: []u8, replay: bool) {
 	f := fixture_open(directory, false)
 	defer fixture_close(f)
+
 	peer := socket_recovery_attach(f, directory, "native-peer", true)
 	defer socket_recovery_close(peer)
+
 	snapshot, found := wa.state_store_get(&f.store, .Captured_Message, "socket-peer-session")
 	assert(found && wa.signal_session_decode(&f.pair.a, snapshot).kind == .None)
 	copy_packet := make([]u8, len(packet))
 	defer delete(copy_packet)
+
 	copy(copy_packet, packet)
 	inner := socket_transport_inner(copy_packet)
 	defer delete(inner)
+
 	socket_peer_decrypt(f, inner)
 	name := "replay.bin" if replay else "transport.bin"
 	socket_owned_write(directory, name, packet)
@@ -127,6 +133,7 @@ socket_tcp_receive :: proc(directory: string, packet: []u8, replay: bool) {
 	encoded, encoding := hex.encode(digest[:])
 	assert(encoding == nil)
 	defer delete(encoded)
+
 	fmt.printf(
 		"ENCRYPTED_TCP_HANDOFF hash=%s bytes=%d authenticated=true replay=%t\n",
 		string(encoded),
@@ -163,6 +170,7 @@ socket_tcp_peer :: proc(directory, mode: string) {
 
 	connection := net.tcp_connection(&tcp)
 	defer connection.close(connection.data)
+
 	assert(net.set_deadline(connection, time.time_add(time.now(), 10 * time.Second)) == nil)
 	buffer: [8192]u8
 	packet := socket_tcp_packet(connection, buffer[:])

@@ -20,12 +20,14 @@ Intent_Status :: enum u8 {
 	Queued,
 	Acknowledged,
 }
+
 Intent :: struct {
 	magic:  [8]u8,
 	id:     [64]u8,
 	digest: [32]u8,
 	status: Intent_Status,
 }
+
 Fixture :: struct {
 	socket:            wa.Socket,
 	auth:              wa.Auth_State,
@@ -34,6 +36,7 @@ Fixture :: struct {
 	path, intent_path: string,
 	identity:          [32]u8,
 }
+
 Wire :: struct {
 	data: [4096]u8,
 	used: int,
@@ -93,6 +96,7 @@ intent_write :: proc(f: ^Fixture, directory: string, status: Intent_Status) {
 	intent.digest = payload_digest()
 	temporary := fmt.aprintf("%s.next", f.intent_path)
 	defer delete(temporary)
+
 	file, error := os.open(temporary, {.Write, .Create, .Excl}, os.perm_number(0o600))
 	assert(error == nil)
 	data := (cast([^]u8)&intent)[:size_of(intent)]
@@ -103,9 +107,12 @@ intent_write :: proc(f: ^Fixture, directory: string, status: Intent_Status) {
 	assert(os.rename(temporary, f.intent_path) == nil)
 	cpath := strings.clone_to_cstring(directory)
 	defer delete(cpath)
+
 	descriptor := posix.open(cpath, {}, {})
+
 	assert(descriptor >= 0)
 	defer posix.close(descriptor)
+
 	assert(posix.fsync(descriptor) == .OK)
 }
 
@@ -125,6 +132,7 @@ boundary :: proc(stage, requested: string) {
 child_write_stage :: proc(directory, stage: string) {
 	f := fixture_open(directory, true)
 	defer fixture_close(f)
+
 	assert(
 		wa.state_store_set(&f.store, .Session, "synthetic-ratchet", transmute([]u8)string("ratchet-after")).kind ==
 		.None,
@@ -139,6 +147,7 @@ child_write_stage :: proc(directory, stage: string) {
 	)
 	boundary("after-pending-wire", stage)
 	_, ack := wa.socket_process_node(&f.socket, {tag = "ack", attrs = {{"class", "message"}, {"id", FIXED_ID}}})
+
 	assert(ack.kind == .None)
 	boundary("after-positive-ack", stage)
 	intent_write(f, directory, .Acknowledged)
@@ -150,6 +159,7 @@ child_write_stage :: proc(directory, stage: string) {
 wire_read :: proc(_: rawptr, _: []u8) -> (int, surf.WebSocket_Stream_Error) {
 	return 0, {kind = .EOF}
 }
+
 wire_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Stream_Error) {
 	wire := cast(^Wire)data
 	assert(len(source) <= len(wire.data) - wire.used)
@@ -157,6 +167,7 @@ wire_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Stream_Er
 
 	return len(source), {}
 }
+
 wire_close :: proc(_: rawptr) -> surf.WebSocket_Stream_Error {
 	return {}
 }
@@ -165,7 +176,9 @@ verify_replay :: proc(f: ^Fixture) {
 	wire: Wire
 	socket := &f.socket
 	defer socket.websocket = {}
+
 	defer wa.socket_close(socket)
+
 	socket.websocket = {
 		phase = .Open,
 		allocator = context.allocator,
@@ -185,6 +198,7 @@ verify_replay :: proc(f: ^Fixture) {
 	revision := f.store.revision
 	id, error := wa.socket_send_group(socket, FIXED_GROUP, transmute([]u8)PAYLOAD, message_id = FIXED_ID)
 	defer delete(id)
+
 	assert(error.kind == .None && id == FIXED_ID && socket.sequence == 0)
 	assert(f.store.revision == revision && socket.client.noise.write_counter == 1)
 	header, offset, decoded := ws.frame_header_decode(wire.data[:wire.used], true)
@@ -198,6 +212,7 @@ verify_replay :: proc(f: ^Fixture) {
 	}
 
 	defer wa.noise_clear(&peer)
+
 	plain: [1024]u8
 	count, decrypted := wa.noise_decrypt(&peer, plain[:], encrypted)
 	assert(decrypted == .None && string(plain[:count]) == PACKET)
@@ -212,6 +227,7 @@ verify_intent :: proc(f: ^Fixture, stage: string) -> Intent_Status {
 	data, error := os.read_entire_file(f.intent_path, context.allocator)
 	assert(error == nil)
 	defer delete(data)
+
 	intent: Intent
 	assert(len(data) == size_of(intent))
 	copy((cast([^]u8)&intent)[:size_of(intent)], data)
@@ -236,10 +252,12 @@ verify_intent :: proc(f: ^Fixture, stage: string) -> Intent_Status {
 verify :: proc(directory, stage: string) {
 	f := fixture_open(directory, false)
 	defer fixture_close(f)
+
 	wrong := f.identity
 	wrong[0] ~= 1
 	rejected: wa.State_Store
 	defer wa.state_store_clear(&rejected)
+
 	assert(wa.state_store_load(&rejected, f.path, wrong).kind == .Identity_Mismatch)
 	status := verify_intent(f, stage)
 	before := stage == "before-commit" || stage == "after-intent"
@@ -259,6 +277,7 @@ verify :: proc(directory, stage: string) {
 		document, decoded := wa.binary_node_decode(content)
 		assert(decoded.kind == .None)
 		defer wa.binary_document_destroy(&document)
+
 		payload, valid := document.root.content.([]u8)
 		assert(valid && bytes.equal(payload, transmute([]u8)PAYLOAD))
 	}

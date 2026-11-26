@@ -13,6 +13,7 @@ import "core:testing"
 schedule_command_explicit_read_only :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	argv := w.build_review_agent_argv("/fake/codex", "/public/library", "/private/schema")
 	testing.expect(
@@ -30,10 +31,12 @@ schedule_command_explicit_read_only :: proc(t: ^testing.T) {
 schedule_plist_daily_no_install :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	root, error := os.make_directory_temp("", "owa-schedule-*", context.allocator)
 	assert(error == nil)
 	defer os.remove_all(root)
+
 	args := test_fixtures.schedule_options_for_test(root)
 	data, failure := w.plist(args)
 	testing.expect(
@@ -55,6 +58,7 @@ schedule_plist_daily_no_install :: proc(t: ^testing.T) {
 schedule_result_schema_bounded :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	testing.expect(t, w.validate_result(test_fixtures.valid_agent_result()) == nil)
 
@@ -76,7 +80,9 @@ schedule_result_schema_bounded :: proc(t: ^testing.T) {
 			w.put(&value, "findings", entries)
 		case 3:
 			w.put(&value, "status", w.text("COMPATIBLE"))
-		}; testing.expect(t, w.validate_result(value) == w.Failure("AGENT_RESULT_INVALID"))
+		}
+
+		testing.expect(t, w.validate_result(value) == w.Failure("AGENT_RESULT_INVALID"))
 	}
 }
 
@@ -120,10 +126,12 @@ agent_forbidden :: proc(argv: []string, prompt: []u8, seconds: int) -> (w.Value,
 schedule_watch_then_agent_never_approves_drift :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	root, error := os.make_directory_temp("", "owa-schedule-*", context.allocator)
 	assert(error == nil)
 	defer os.remove_all(root)
+
 	args := test_fixtures.schedule_options_for_test(root)
 	result, failure := w.schedule_run(args, watch_ok, agent_ok)
 	testing.expect(t, failure == nil)
@@ -137,10 +145,12 @@ schedule_watch_then_agent_never_approves_drift :: proc(t: ^testing.T) {
 schedule_watcher_failure_skips_agent :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	root, error := os.make_directory_temp("", "owa-schedule-*", context.allocator)
 	assert(error == nil)
 	defer os.remove_all(root)
+
 	result, failure := w.schedule_run(test_fixtures.schedule_options_for_test(root), watch_fail, agent_forbidden)
 	testing.expect(t, failure == nil && w.str(w.get(result, "status")) == "FAILED")
 }
@@ -149,10 +159,12 @@ schedule_watcher_failure_skips_agent :: proc(t: ^testing.T) {
 schedule_singleton_excludes_parallel_jobs :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	root, error := os.make_directory_temp("", "owa-schedule-*", context.allocator)
 	assert(error == nil)
 	defer os.remove_all(root)
+
 	args := test_fixtures.schedule_options_for_test(root)
 	fd, failure := w.locked_state(args.state_dir)
 	assert(failure == nil)
@@ -160,6 +172,7 @@ schedule_singleton_excludes_parallel_jobs :: proc(t: ^testing.T) {
 	lock, lock_failure := w.locked_state(w.join(args.state_dir, "review-agent"))
 	assert(lock_failure == nil)
 	defer p.close(lock)
+
 	_, failure = w.schedule_run(args, watch_ok, agent_forbidden)
 	testing.expect(t, failure == w.Failure("ALREADY_RUNNING"))
 }

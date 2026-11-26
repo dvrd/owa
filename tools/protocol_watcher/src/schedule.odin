@@ -15,6 +15,7 @@ Schedule :: struct {
 	state_dir, manifest, library, codex, executable, approved_contract: string,
 	budget_seconds:                                                     int,
 }
+
 validate_result :: proc(value: Value) -> Failure {
 	if !has_exact_object_fields(value, []string{"status", "summary", "findings"}) ||
 	   !slice.contains([]string{"NO_ACTION", "REVIEW_REQUIRED", "FAILED"}, str(get(value, "status"))) ||
@@ -40,6 +41,7 @@ validate_result :: proc(value: Value) -> Failure {
 
 	return nil
 }
+
 build_review_agent_argv :: proc(codex, library, schema: string) -> []string {
 	values := []string {
 		codex,
@@ -54,8 +56,11 @@ build_review_agent_argv :: proc(codex, library, schema: string) -> []string {
 		"--color",
 		"never",
 		"-",
-	}; result := make([]string, len(values)); copy(result, values); return result
+	}
+
+	result := make([]string, len(values)); copy(result, values); return result
 }
+
 agent_environment :: proc() -> []string {
 	entries := make([dynamic]string)
 
@@ -67,6 +72,7 @@ agent_environment :: proc() -> []string {
 
 	return entries[:]
 }
+
 capture :: proc(
 	argv: []string,
 	prompt: []u8,
@@ -81,40 +87,56 @@ capture :: proc(
 	if len(argv) == 0 || !strings.has_prefix(argv[0], "/") {
 		return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
 	}
+
 	cargv := make([]cstring, len(argv) + 1)
 	for item, i in argv {
 		cargv[i] = strings.clone_to_cstring(item)
 	}
+
 	env := agent_environment()
 	cenv := make([]cstring, len(env) + 1)
 	for item, i in env {
 		cenv[i] = strings.clone_to_cstring(item)
 	}
+
 	input, stdout, stderr: [2]p.FD
 	if p.pipe(&input) != {} {
 		return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
-	}; defer {
+	}
+
+	defer {
 		p.close(input[0])
 		if input[1] >= 0 {
 			p.close(input[1])
 		}
 	}
+
 	if p.pipe(&stdout) != {} {
 		return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
-	}; defer {p.close(stdout[0]); p.close(stdout[1])}
+	}
+
+	defer {p.close(stdout[0]); p.close(stdout[1])}
+
 	if p.pipe(&stderr) != {} {
 		return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
-	}; defer {p.close(stderr[0]); p.close(stderr[1])}
+	}
+
+	defer {p.close(stderr[0]); p.close(stderr[1])}
+
 	old_signal: p.sigaction_t
 	ignore: p.sigaction_t
 	ignore.sa_handler = transmute(proc "c" (_: p.Signal))uintptr(1)
 	if p.sigaction(p.Signal(p.SIGPIPE), &ignore, &old_signal) != {} {
 		return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
-	}; defer p.sigaction(p.Signal(p.SIGPIPE), &old_signal, nil)
+	}
+
+	defer p.sigaction(p.Signal(p.SIGPIPE), &old_signal, nil)
+
 	pid := p.fork()
 	if pid < 0 {
 		return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
 	}
+
 	if pid == 0 {
 		if p.setsid() < 0 {
 			p._exit(127)
@@ -133,6 +155,7 @@ capture :: proc(
 		_ = p.execve(cargv[0], raw_data(cargv), raw_data(cenv))
 		p._exit(127)
 	}
+
 	p.close(input[0])
 	input[0] = -1
 	p.close(stdout[1])
@@ -140,6 +163,7 @@ capture :: proc(
 	p.close(stderr[1])
 	stderr[1] = -1
 	for fd in ([3]p.FD{input[1], stdout[0], stderr[0]}) {_ = p.fcntl(fd, .SETFL, c.int(p.O_NONBLOCK))}
+
 	reaped := false
 	status: c.int
 	defer {
@@ -149,6 +173,7 @@ capture :: proc(
 			_ = p.waitpid(pid, &status, {})
 		}
 	}
+
 	deadline := time.tick_add(clock(), budget)
 	offset, total := 0, 0
 	collected := make([dynamic]u8)
@@ -157,11 +182,13 @@ capture :: proc(
 		{fd = stdout[0], events = {.IN}},
 		{fd = stderr[0], events = {.IN}},
 	}
+
 	if len(prompt) == 0 {
 		p.close(input[1])
 		input[1] = -1
 		polls[0].fd = -1
 	}
+
 	for {
 		if time.tick_diff(clock(), deadline) <= 0 {
 			return nil, 0, concatenate_strings(kind, "_DEADLINE")
@@ -173,7 +200,9 @@ capture :: proc(
 			if fd.fd >= 0 {
 				alive += 1
 			}
-		}; if alive == 0 {
+		}
+
+		if alive == 0 {
 			break
 		}
 
@@ -182,7 +211,9 @@ capture :: proc(
 		if ready < 0 {
 			if p.errno() == .EINTR {
 				continue
-			}; return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
+			}
+
+			return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
 		}
 
 		for &item, index in polls {
@@ -196,8 +227,12 @@ capture :: proc(
 				if n < 0 {
 					if p.errno() == .EAGAIN || p.errno() == .EINTR {
 						continue
-					}; return nil, 0, concatenate_strings(kind, "_INPUT_FAILED")
-				}; offset += int(n)
+					}
+
+					return nil, 0, concatenate_strings(kind, "_INPUT_FAILED")
+				}
+
+				offset += int(n)
 				if offset == len(prompt) {
 					p.close(input[1])
 					input[1] = -1
@@ -210,13 +245,17 @@ capture :: proc(
 				if n < 0 {
 					if p.errno() == .EAGAIN || p.errno() == .EINTR {
 						continue
-					}; return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
+					}
+
+					return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
 				}
 
 				if n == 0 {
 					item.fd = -1
 					continue
-				}; total += int(n); if total > MAX_STREAM {
+				}
+
+				total += int(n); if total > MAX_STREAM {
 					return nil, 0, concatenate_strings(kind, "_STREAM_LIMIT")
 				}
 
@@ -230,6 +269,7 @@ capture :: proc(
 			}
 		}
 	}
+
 	for {
 		if time.tick_diff(clock(), deadline) <= 0 {
 			return nil, 0, concatenate_strings(kind, "_DEADLINE")
@@ -240,7 +280,9 @@ capture :: proc(
 		if p.waitid(.P_PID, p.id_t(pid), &information, {.NOHANG, .NOWAIT, .EXITED}) < 0 {
 			if p.errno() == .EINTR {
 				continue
-			}; return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
+			}
+
+			return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
 		}
 
 		if information.si_pid == pid {
@@ -251,15 +293,21 @@ capture :: proc(
 
 			if p.waitpid(pid, &status, {}) != pid {
 				return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
-			}; reaped = true; break
+			}
+
+			reaped = true; break
 		}
 
 		time.sleep(time.Millisecond)
 	}
+
 	if !p.WIFEXITED(status) {
 		return nil, 0, concatenate_strings(kind, "_EXEC_FAILED")
-	}; return collected[:], int(p.WEXITSTATUS(status)), nil
+	}
+
+	return collected[:], int(p.WEXITSTATUS(status)), nil
 }
+
 agent_run :: proc(argv: []string, prompt: []u8, seconds: int) -> (value: Value, failure: Failure) {
 	if seconds < 1 || seconds > 600 {
 		return null(), "BUDGET_INVALID"
@@ -269,38 +317,54 @@ agent_run :: proc(argv: []string, prompt: []u8, seconds: int) -> (value: Value, 
 
 	if code != 0 {
 		return null(), "AGENT_EXEC_FAILED"
-	}; decoded, error := decode(output, MAX_OUTPUT); if error != "" {
+	}
+
+	decoded, error := decode(output, MAX_OUTPUT); if error != "" {
 		return null(), "AGENT_RESULT_INVALID"
-	}; validate_result(decoded) or_return; return decoded, nil
+	}
+
+	validate_result(decoded) or_return; return decoded, nil
 }
+
 watch_capture :: proc(argv: []string, budget := 240 * time.Second) -> (value: Value, failure: Failure) {
 	output, code := capture(argv, nil, budget, "WATCH") or_return
 
 	if code != 0 && code != 3 {
 		return null(), "WATCH_EXEC_FAILED"
-	}; decoded, error := decode(output, MAX_OUTPUT)
+	}
+
+	decoded, error := decode(output, MAX_OUTPUT)
 	expected := "NO_MONITORED_DRIFT" if code == 0 else "REVIEW_REQUIRED"
 
 	if error != "" || str(get(decoded, "status")) != expected {
 		return null(), "WATCH_RESULT_INVALID"
-	}; return decoded, nil
+	}
+
+	return decoded, nil
 }
+
 Report_File :: struct {
 	fd:     p.FD,
 	device: p.dev_t,
 	inode:  p.ino_t,
 }
+
 open_private_watch_report :: proc(path: string) -> (file: Report_File, failure: Failure) {
 	fd := p.open(strings.clone_to_cstring(path), {.NOFOLLOW, .NONBLOCK, .CLOEXEC})
 
 	if fd < 0 {
 		return {}, "WATCH_REPORT_UNSAFE"
-	}; info: p.stat_t
+	}
+
+	info: p.stat_t
 	if p.fstat(fd, &info) != {} || !is_private_state_file(info) {
 		p.close(fd)
 		return {}, "WATCH_REPORT_UNSAFE"
-	}; return {fd, info.st_dev, info.st_ino}, nil
+	}
+
+	return {fd, info.st_dev, info.st_ino}, nil
 }
+
 watch_run :: proc(args: Schedule, argv: []string = nil) -> (value: Value, failure: Failure) {
 	path := join(args.state_dir, "report.json")
 	previous: Report_File
@@ -383,6 +447,7 @@ watch_run :: proc(args: Schedule, argv: []string = nil) -> (value: Value, failur
 
 	return report, nil
 }
+
 WatchRun :: proc(args: Schedule) -> (Value, Failure)
 AgentRun :: proc(argv: []string, prompt: []u8, seconds: int) -> (Value, Failure)
 schedule_run :: proc(
@@ -396,14 +461,17 @@ schedule_run :: proc(
 	if args.budget_seconds < 1 || args.budget_seconds > 600 {
 		return null(), "BUDGET_INVALID"
 	}
+
 	if canonical_path(args.library) == "" || canonical_path(args.library) != canonical_path(library_root()) {
 		return null(), "LIBRARY_SCOPE_INVALID"
 	}
+
 	fd := locked_state(args.state_dir) or_return
 	p.close(fd)
 	state := join(args.state_dir, "review-agent")
 	lock := locked_state(state) or_return
 	defer p.close(lock)
+
 	result = object(
 		{"status", text("FAILED")},
 		{"compatibility_approved", boolean(false)},
@@ -415,6 +483,7 @@ schedule_run :: proc(
 	} else {
 		result = review
 	}
+
 	atomic_json(join(state, "agent-review.json"), result) or_return
 	status := str(get(result, "status"))
 	if status == "FAILED" || status == "REVIEW_REQUIRED" {
@@ -435,11 +504,15 @@ schedule_run :: proc(
 		) or_return
 	} else {
 		_ = os.remove(join(state, "alert.json"))
-	}; return
+	}
+
+	return
 }
+
 default_watch_run :: proc(args: Schedule) -> (Value, Failure) {
 	return watch_run(args)
 }
+
 schedule_review :: proc(
 	args: Schedule,
 	state: string,
@@ -454,12 +527,17 @@ schedule_review :: proc(
 	if status != "REVIEW_REQUIRED" && status != "NO_MONITORED_DRIFT" {
 		return null(), "WATCH_FAILED"
 	}
+
 	data := encode(report)
 	if len(data) > MAX_REPORT {
 		return null(), "PUBLIC_REPORT_LIMIT"
-	}; schema, error := decode(transmute([]u8)SCHEDULE_SCHEMA); if error != "" {
+	}
+
+	schema, error := decode(transmute([]u8)SCHEDULE_SCHEMA); if error != "" {
 		return null(), "SCHEDULE_FAILED"
-	}; path := join(state, "result-schema.json"); atomic_json(path, schema) or_return
+	}
+
+	path := join(state, "result-schema.json"); atomic_json(path, schema) or_return
 	prompt := concatenate_strings(#load("../review-agent-prompt.md"), "\nPUBLIC REPORT JSON:\n", data)
 	review := agent(build_review_agent_argv(args.codex, args.library, path), transmute([]u8)prompt, args.budget_seconds) or_return
 	validate_result(review) or_return
@@ -473,14 +551,17 @@ schedule_review :: proc(
 
 		put(&allowed, str(get(source, "name")), paths)
 	}
+
 	for finding in items(get(review, "findings")) {
 		if !json_boolean_equals(get(get(allowed, str(get(finding, "source"))), str(get(finding, "path")))) {
 			return null(), "AGENT_SOURCE_INVALID"
 		}
 	}
+
 	if str(get(review, "status")) == "FAILED" || str(get(review, "status")) == "REVIEW_REQUIRED" {
 		status = str(get(review, "status"))
 	}
+
 	return object(
 			{"status", text(status)},
 			{"compatibility_approved", boolean(false)},
@@ -490,12 +571,15 @@ schedule_review :: proc(
 		),
 		nil
 }
+
 library_root :: proc() -> string {
 	if root, ok := os.lookup_env("OWA_LIBRARY_ROOT", context.allocator); ok && root != "" {
 		return root
 	}
+
 	return canonical_path(".")
 }
+
 xml_quote :: proc(value: string) -> string {
 	return replace(
 		replace(replace(replace(replace(value, "&", "&amp;"), "<", "&lt;"), ">", "&gt;"), "\"", "&quot;"),
@@ -503,6 +587,7 @@ xml_quote :: proc(value: string) -> string {
 		"&apos;",
 	)
 }
+
 plist :: proc(args: Schedule) -> (data: string, failure: Failure) {
 	if args.budget_seconds < 1 || args.budget_seconds > 600 {
 		return "", "BUDGET_INVALID"
@@ -511,7 +596,9 @@ plist :: proc(args: Schedule) -> (data: string, failure: Failure) {
 	for path in ([]string{args.state_dir, args.manifest, args.library, args.codex, args.executable}) {
 		if !strings.has_prefix(path, "/") {
 			return "", "PATH_INVALID"
-		}; for r in path {
+		}
+
+		for r in path {
 			if r < 32 || r == 127 {
 				return "", "PATH_INVALID"
 			}
@@ -555,12 +642,14 @@ plist :: proc(args: Schedule) -> (data: string, failure: Failure) {
 		),
 	); return strings.to_string(builder), nil
 }
+
 write_plist :: proc(args: Schedule) -> (value: Value, failure: Failure) {
 	fd := locked_state(args.state_dir) or_return
 	p.close(fd)
 	state := join(args.state_dir, "review-agent")
 	lock := locked_state(state) or_return
 	defer p.close(lock)
+
 	data := plist(args) or_return
 	path := join(state, "daily-review.plist")
 	atomic_bytes(path, transmute([]u8)data) or_return
@@ -584,5 +673,7 @@ canonical_path :: proc(path: string) -> string {
 
 	if resolved == nil {
 		return ""
-	}; return strings.clone(string(resolved))
+	}
+
+	return strings.clone(string(resolved))
 }

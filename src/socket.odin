@@ -22,6 +22,7 @@ Socket_Phase :: enum {
 	Failed,
 	Closed,
 }
+
 Socket_Error_Kind :: enum {
 	None,
 	Invalid_State,
@@ -52,6 +53,7 @@ Socket_Error_Kind :: enum {
 	Contact_Already_Exists,
 	Contact_Unconfirmed,
 }
+
 Socket_Error :: struct {
 	kind:       Socket_Error_Kind,
 	websocket:  surf.WebSocket_Dial_Error,
@@ -67,6 +69,7 @@ Socket_Error :: struct {
 	media:      Media_Error,
 	device:     Device_Error,
 }
+
 Socket_Config :: struct {
 	track_chat_history_cursors:         bool, // Keep the newest private message ID, direction and original time per chat.
 	sync_contacts:                      bool, // Refresh the address book after login and server updates in socket_tick.
@@ -85,6 +88,7 @@ Socket_Config :: struct {
 	observe_node:                       Protocol_Node_Observer,
 	observer_data:                      rawptr,
 }
+
 Socket_Event_Kind :: enum {
 	None,
 	QR,
@@ -94,6 +98,7 @@ Socket_Event_Kind :: enum {
 	Node,
 	Message,
 }
+
 Socket_Event :: struct {
 	kind:    Socket_Event_Kind,
 	qr:      string,
@@ -112,6 +117,7 @@ Socket_Message :: struct {
 	timestamp:              u64,
 	allocator:              mem.Allocator,
 }
+
 socket_message_destroy :: proc(message: ^Socket_Message) {
 	if message == nil {
 		return
@@ -180,6 +186,7 @@ socket_connect :: proc(
 	   validation_error.kind != .None {
 		return validation_error
 	}
+
 	settings, settings_error := socket_connect_settings(config)
 	if settings_error.kind != .None {
 		return settings_error
@@ -356,20 +363,24 @@ socket_close :: proc(socket: ^Socket) {
 	for message in socket.queue {
 		socket_message_destroy(message)
 	}
+
 	delete(socket.queue)
 	for &doc in socket.deferred_retries {
 		binary_document_destroy(&doc)
 	}
+
 	delete(socket.deferred_retries)
 	socket.deferred_retries = nil
 	for &doc in socket.pending_media_retry {
 		binary_document_destroy(&doc)
 	}
+
 	delete(socket.pending_media_retry)
 	socket.pending_media_retry = nil
 	socket.queue = nil
 	socket.provision_stage = .None
 	socket.provision_deadline = {}
+
 	socket.phase = .Closed
 }
 
@@ -414,6 +425,7 @@ socket_tick :: proc(socket: ^Socket, now: time.Time) -> (Socket_Event, Socket_Er
 		if sync_err.kind != .None {
 			return {}, sync_err
 		}
+
 		socket.contact_refresh_due = status == .Syncing
 	}
 
@@ -469,6 +481,7 @@ socket_receive_wire :: proc(socket: ^Socket) -> (Socket_Event, Socket_Error) {
 
 	return output, failure
 }
+
 socket_receive_inner :: proc(socket: ^Socket) -> (Socket_Event, Socket_Error) {
 	event, err := session_read(&socket.session, time.now())
 
@@ -479,11 +492,17 @@ socket_receive_inner :: proc(socket: ^Socket) -> (Socket_Event, Socket_Error) {
 	#partial switch event.kind {
 	case .QR:
 		return {kind = .QR, qr = event.qr}, {}
+
+
 	case .Pairing_Complete:
 		return {kind = .Paired}, {}
+
+
 	case .Restart_Required:
 		socket.phase = .Restart_Required
 		return {kind = .Restart_Required}, {}
+
+
 	case .Login_Accepted:
 		return socket_login_provision_start(socket, event)
 	case .Node:
@@ -505,6 +524,7 @@ socket_receive_inner :: proc(socket: ^Socket) -> (Socket_Event, Socket_Error) {
 				process = true
 			}
 		}
+
 		if process {
 			output, e := socket_process_node(socket, event.node)
 			if e.kind != .None {
@@ -519,6 +539,8 @@ socket_receive_inner :: proc(socket: ^Socket) -> (Socket_Event, Socket_Error) {
 		}
 
 		return {kind = .Node, node = event.node}, {}
+
+
 	case:
 		return {}, {}
 	}
@@ -564,6 +586,7 @@ socket_login_provision_start :: proc(
 
 socket_provision :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_Event, Socket_Error) {
 	socket.provision_deadline = {}
+
 	#partial switch socket.provision_stage {
 	case .Count:
 		return socket_provision_count(socket, node)
@@ -748,11 +771,13 @@ socket_provision_write :: proc(socket: ^Socket, encoded: []u8) -> Socket_Error {
 
 	return socket_write(socket, encoded)
 }
+
 socket_next_iq_id :: proc(socket: ^Socket, dst: []u8) -> string {
 	socket.sequence += 1
 
 	return fmt.bprintf(dst, "odin-%d-%d", time.to_unix_nanoseconds(time.now()), socket.sequence)
 }
+
 socket_write :: proc(socket: ^Socket, encoded: []u8) -> Socket_Error {
 	deadline_set := false
 
@@ -785,6 +810,7 @@ socket_write :: proc(socket: ^Socket, encoded: []u8) -> Socket_Error {
 
 	return {}
 }
+
 socket_fail :: proc(socket: ^Socket, err: Socket_Error) -> Socket_Error {
 	socket.last_error = err
 
@@ -985,6 +1011,7 @@ socket_query :: proc(socket: ^Socket, query: Binary_Node) -> (Binary_Document, S
 	} else {
 		id = socket_next_iq_id(socket, buffer_id[:])
 		attrs[count] = {"id", id}
+
 		count += 1
 	}
 
@@ -1015,8 +1042,8 @@ socket_query_send :: proc(socket: ^Socket, request: Binary_Node) -> Socket_Error
 	if alloc_err != nil {
 		return {kind = .Allocation_Failed, allocation = alloc_err}
 	}
-
 	defer delete(encoded)
+
 	_, encode_err := binary_node_encode(encoded, request)
 
 	if encode_err.kind != .None {
@@ -1056,8 +1083,8 @@ socket_query_response_copy :: proc(node: Binary_Node) -> (Binary_Document, Socke
 	if allocation_err != nil {
 		return {}, {kind = .Allocation_Failed, allocation = allocation_err}
 	}
-
 	defer delete(storage)
+
 	_, e := binary_node_encode(storage, node)
 
 	if e.kind != .None {
@@ -1087,9 +1114,11 @@ socket_query_response_receive :: proc(
 		if e.kind == .Query_Timeout && socket.phase != .Failed {
 			return {}, socket_fail(socket, e)
 		}
+
 		if e.kind != .None {
 			return {}, e
 		}
+
 		if event.kind != .Node || event.node.tag != "iq" {
 			continue
 		}
@@ -1150,6 +1179,7 @@ socket_receive_while_waiting :: proc(
 		   enqueue_error.kind != .None {
 			return {}, enqueue_error
 		}
+
 		return {}, {}
 	}
 
@@ -1177,6 +1207,7 @@ socket_read_deadline :: proc(socket: ^Socket, deadline: time.Time) -> Socket_Err
 
 	return {}
 }
+
 socket_write_deadline :: proc(socket: ^Socket, deadline: time.Time) -> Socket_Error {
 	if socket.websocket.stream.set_write_deadline == nil {
 		return {}

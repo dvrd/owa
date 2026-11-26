@@ -19,10 +19,12 @@ writer_golden_keys :: proc() -> wa.Registration_Keys {
 		registration_id = 0x1234,
 		signed_prekey_id = 0x00ab_cdef,
 	}
+
 	for i in 0 ..< 32 {
 		keys.identity_public[i] = u8(i)
 		keys.signed_prekey_public[i] = u8(0x40 + i)
 	}
+
 	for i in 0 ..< 64 {
 		keys.signed_prekey_signature[i] = u8(0x80 + i)
 	}
@@ -79,9 +81,11 @@ writer_payload_encoders_match_retired_writer :: proc(t: ^testing.T) {
 @(test)
 writer_measure_mode_stores_nothing_and_counts_exactly :: proc(t: ^testing.T) {
 	data := [?]u8{1, 2, 3, 4, 5}
+
 	measure := wa.Protobuf_Writer {
 		measure = true,
 	}
+
 	wa.protobuf_write_uint(&measure, 1, 300)
 	wa.protobuf_write_bytes(&measure, 2, data[:])
 	wa.protobuf_write_string(&measure, 3, "hi")
@@ -90,6 +94,7 @@ writer_measure_mode_stores_nothing_and_counts_exactly :: proc(t: ^testing.T) {
 	fixed := wa.Protobuf_Writer {
 		dst = fixed_buffer[:],
 	}
+
 	wa.protobuf_write_uint(&fixed, 1, 300)
 	wa.protobuf_write_bytes(&fixed, 2, data[:])
 	wa.protobuf_write_string(&fixed, 3, "hi")
@@ -106,10 +111,13 @@ writer_fixed_buffer_overflow_is_sticky_and_leaves_tail_untouched :: proc(t: ^tes
 	for &b in buffer {
 		b = 0xee
 	}
+
 	writer := wa.Protobuf_Writer {
 		dst = buffer[:],
 	}
+
 	data := [?]u8{9, 9, 9}
+
 	wa.protobuf_write_bytes(&writer, 1, data[:])
 
 	testing.expect_value(t, writer.err, wa.Protobuf_Write_Error.Oversized)
@@ -122,9 +130,11 @@ writer_fixed_buffer_overflow_is_sticky_and_leaves_tail_untouched :: proc(t: ^tes
 @(test)
 writer_rejects_invalid_utf8_and_aliasing_target :: proc(t: ^testing.T) {
 	bad := [?]u8{0xff, 0xfe}
+
 	writer := wa.Protobuf_Writer {
 		measure = true,
 	}
+
 	wa.protobuf_write_string(&writer, 1, string(bad[:]))
 	testing.expect_value(t, writer.err, wa.Protobuf_Write_Error.Invalid_UTF8)
 
@@ -133,6 +143,7 @@ writer_rejects_invalid_utf8_and_aliasing_target :: proc(t: ^testing.T) {
 		measure = true,
 		target = target[:],
 	}
+
 	wa.protobuf_write_bytes(&aliased, 1, target[2:4])
 	testing.expect_value(t, aliased.err, wa.Protobuf_Write_Error.Overlapping_Buffers)
 
@@ -141,6 +152,7 @@ writer_rejects_invalid_utf8_and_aliasing_target :: proc(t: ^testing.T) {
 		url = "u",
 		has_url = true,
 	}
+
 	media.caption = string(bad[:])
 	media.has_caption = true
 	out: [64]u8
@@ -161,12 +173,14 @@ writer_payload_error_precedence_is_preserved :: proc(t: ^testing.T) {
 
 	media_out: [4]u8
 	_, media_err := wa.media_message_encode(media_out[:], writer_golden_media(.Image, &[4][32]u8{}))
+
 	testing.expect_value(t, media_err.kind, wa.Media_Error_Kind.Destination_Undersized)
 }
 
 @(test)
 protobuf_varint_preserves_u64_limits_and_cursor :: proc(t: ^testing.T) {
 	values := [?]u64{0, 127, 128, max(u64)}
+
 	for value in values {
 		buffer: [12]u8
 		written := 1
@@ -180,13 +194,16 @@ protobuf_varint_preserves_u64_limits_and_cursor :: proc(t: ^testing.T) {
 	}
 
 	buffer := [?]u8{0, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0, 1}
+
 	for end in 1 ..< 11 {
 		read := 1
 		_, err := wa.protobuf_varint_read(buffer[:end], &read)
 		testing.expect_value(t, err, wa.Protobuf_Error.Truncated_Varint)
 		testing.expect_value(t, read, end)
 	}
+
 	overflow_bytes := [?]u8{2, 0x80, 0xff}
+
 	for last in overflow_bytes {
 		buffer[10] = last
 		read := 1

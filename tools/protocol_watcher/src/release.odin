@@ -4,28 +4,40 @@ import "core:strings"
 import p "core:sys/posix"
 
 REQUIRED := []string{"consumer", "noise_loopback", "protocol_review", "unit_asan"}
+
 hash_candidate_source_files :: proc(root: string) -> (digest: string, files: Value, failure: Failure) {
 	entries, error := os.read_directory_by_path(root, -1, context.allocator)
 
 	if error != nil {
 		return "", null(), "SOURCE_SET_INVALID"
-	}; files = object(); count := 0
+	}
+
+	files = object(); count := 0
 	for file in entries {
 		name := file.name
 
 		if !strings.has_suffix(name, ".odin") || strings.has_suffix(name, "_test.odin") {
 			continue
-		}; count += 1; if count > 100 {
+		}
+
+		count += 1; if count > 100 {
 			return "", null(), "SOURCE_SET_INVALID"
-		}; bytes, read_error := read_file(join(root, name)); if read_error != "" {
+		}
+
+		bytes, read_error := read_file(join(root, name)); if read_error != "" {
 			return "", null(), "SOURCE_SET_INVALID"
-		}; put(&files, name, text(sha256(bytes)))
+		}
+
+		put(&files, name, text(sha256(bytes)))
 	}
 
 	if count == 0 {
 		return "", null(), "SOURCE_SET_INVALID"
-	}; return sha256(transmute([]u8)encode(files, true)), files, nil
+	}
+
+	return sha256(transmute([]u8)encode(files, true)), files, nil
 }
+
 check_evidence_file_digest :: proc(check: Value, directory: string) -> bool {
 	name := str(get(check, "evidence_file"))
 
@@ -45,7 +57,9 @@ check_evidence_file_digest :: proc(check: Value, directory: string) -> bool {
 	for part in strings.split(name, "/") {
 		if part == "." || part == "" {
 			continue
-		}; current = join(current, part); info: p.stat_t
+		}
+
+		current = join(current, part); info: p.stat_t
 		if p.lstat(strings.clone_to_cstring(current), &info) != {} || p.S_ISLNK(info.st_mode) {
 			return false
 		}
@@ -55,6 +69,7 @@ check_evidence_file_digest :: proc(check: Value, directory: string) -> bool {
 
 	return error == "" && sha256(bytes) == str(get(check, "evidence_sha256"))
 }
+
 evaluate :: proc(root: string, offline, live: Value, evidence_dir: string) -> (result: Value, failure: Failure) {
 	digest, files := hash_candidate_source_files(root) or_return
 	failures := make([dynamic]string)
@@ -97,6 +112,7 @@ evaluate :: proc(root: string, offline, live: Value, evidence_dir: string) -> (r
 			"pdf_opened",
 			"same_ids_after_restart",
 		}) {complete = complete && json_boolean_equals(get(live, name))}
+
 	if !complete {
 		append(&failures, "LIVE_QUALIFICATION_INCOMPLETE")
 	}
@@ -111,6 +127,7 @@ evaluate :: proc(root: string, offline, live: Value, evidence_dir: string) -> (r
 		),
 		nil
 }
+
 Scan :: proc(data: rawptr, state, approved_contract: string) -> (Value, Failure)
 ci_prepare :: proc(
 	state, output, approved_contract: string,
@@ -122,6 +139,7 @@ ci_prepare :: proc(
 ) {
 	fd := locked_state(output) or_return
 	defer p.close(fd)
+
 	report, scan_error := scan(data, state, approved_contract)
 	status := str(get(report, "status"))
 	encoded := encode(report)
@@ -143,6 +161,7 @@ ci_prepare :: proc(
 			{"compatibility_approved", boolean(false)},
 		)
 	}
+
 	atomic_json(join(output, "result.json"), result) or_return
 	return
 }

@@ -71,6 +71,7 @@ socket_cert_test_init :: proc(
 	for &byte, index in auth.credentials.noise_private {
 		byte = u8(index + 65)
 	}
+
 	socket.auth = auth
 	socket.websocket = {
 		phase = .Open,
@@ -83,9 +84,11 @@ socket_cert_test_init :: proc(
 			close = socket_cert_test_close,
 		},
 	}
+
 	settings := wa.Socket_Config {
 		verify_certificate = verify,
 	}
+
 	// This initialized-transport boundary also runs after socket_connect dials.
 	testing.expect_value(state.t, wa.socket_client_init(socket, settings).kind, .None)
 	// Only test entropy is replaced, before I/O, to match the independent responder.
@@ -93,6 +96,7 @@ socket_cert_test_init :: proc(
 	for &byte, index in socket.client.ephemeral_private {
 		byte = u8(index + 1)
 	}
+
 	x25519.scalarmult_basepoint(socket.client.ephemeral_public[:], socket.client.ephemeral_private[:])
 	testing.expect_value(state.t, wa.noise_init(&socket.client.noise, socket.client.ephemeral_public), .None)
 }
@@ -119,6 +123,7 @@ socket_cert_test_case :: proc(t: ^testing.T, verify: wa.Certificate_Verifier, ex
 	hello, decode_error := hex.decode(transmute([]u8)string(SOCKET_CERT_TEST_HELLO))
 	assert(decode_error == nil)
 	defer delete(hello)
+
 	input, output: [1024]u8
 	// One unmasked binary WebSocket message containing one WhatsApp envelope.
 	assert(len(hello) + 3 < 126)
@@ -134,6 +139,7 @@ socket_cert_test_case :: proc(t: ^testing.T, verify: wa.Certificate_Verifier, ex
 	previous := context.user_ptr
 	context.user_ptr = &state
 	defer context.user_ptr = previous
+
 	socket: wa.Socket
 	auth: wa.Auth_State
 

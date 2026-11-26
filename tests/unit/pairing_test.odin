@@ -17,8 +17,11 @@ pairing_observer_receives_application_events :: proc(t: ^testing.T) {
 	observer: wa.Pairing_Observer = proc(data: rawptr, event: wa.Pairing_Event) {
 		(cast(^int)data)^ += 1 if event.kind == .QR && event.qr == "qr" else 0
 	}
+
 	observer(&count, {kind = .QR, qr = "qr"})
+
 	observer(&count, {kind = .Online})
+
 	testing.expect_value(t, count, 1)
 }
 
@@ -45,9 +48,11 @@ official_version_peer_get :: proc(
 official_version_discovery_does_not_use_third_party_feeds :: proc(t: ^testing.T) {
 	peer: Official_Version_Peer
 	result := wa.web_version_discover({}, {data = &peer, get = official_version_peer_get})
+
 	testing.expect_value(t, peer.calls, 1)
 	testing.expect_value(t, peer.url, "https://web.whatsapp.com/sw.js")
 	testing.expect_value(t, result.version, [3]u32{2, 3000, 1234567890})
+
 	testing.expect(t, result.source != .Pinned)
 }
 
@@ -85,19 +90,23 @@ pairing_domain_fixture :: proc(
 	for &b, i in f.account_private {
 		b = u8(i + 129)
 	}
+
 	f.account_private[0] &= 248
 	f.account_private[31] = f.account_private[31] & 127 | 64
 	// rawId=42, timestamp=1, keyIndex=7; deviceType absent is ordinary default.
 	copy(f.details[:], []u8{8, 42, 16, 1, 24, 7})
+
 	f.details_size = 6
 	if device_type >= 0 {
 		f.details[6], f.details[7] = 40, u8(device_type)
 		f.details_size = 8
 	}
+
 	prefix := account_domain
 	if prefix == 255 {
 		prefix = device_type == 1 ? 5 : 0
 	}
+
 	account_key := wa.signal_curve_public(f.account_private)
 	identity_key := wa.signal_curve_public(f.credentials.identity_private)
 	signed: [128]u8
@@ -117,6 +126,7 @@ pairing_domain_fixture :: proc(
 	if wrapper_type == 1 {
 		hmac.update(&mac_context, []u8{6, 5})
 	}
+
 	hmac.update(&mac_context, f.identity[:f.identity_size])
 	hmac.final(&mac_context, mac[:])
 	crypto.zero_explicit(&mac_context, size_of(mac_context))
@@ -127,12 +137,16 @@ pairing_domain_fixture :: proc(
 	wa.protobuf_varint_write(f.wrapper[:], &at, u64(wrapper_type))
 	f.wrapper_size = at
 	f.device_attrs = {{"jid", "123:4@s.whatsapp.net"}}
+
 	f.iq_attrs = {{"id", "synthetic-pair"}}
+
 	f.pair_children = {
 		{tag = "device-identity", content = f.wrapper[:f.wrapper_size]},
 		{tag = "device", attrs = f.device_attrs[:]},
 	}
+
 	f.iq_children = {{tag = "pair-success", content = f.pair_children[:]}}
+
 	return f
 }
 
@@ -165,6 +179,7 @@ pairing_current_domains_follow_signed_device_type_independent_of_wrapper :: proc
 		for device in ([]int{-1, 0, 1}) {
 			f := pairing_domain_fixture(u32(wrapper), device)
 			defer pairing_domain_free(f)
+
 			account: wa.Paired_Account
 			reply: [2048]u8
 			_, error := wa.pairing_success_handle(&account, pairing_domain_iq(f), &f.credentials, reply[:])
@@ -227,6 +242,7 @@ pairing_current_rejects_wrong_domains_unknown_types_and_tampered_identity :: pro
 		if scenario == 2 {
 			bad := pairing_domain_fixture(0, 2)
 			defer pairing_domain_free(bad)
+
 			account: wa.Paired_Account
 			reply: [2048]u8
 			_, error := wa.pairing_success_handle(&account, pairing_domain_iq(bad), &bad.credentials, reply[:])
@@ -238,9 +254,11 @@ pairing_current_rejects_wrong_domains_unknown_types_and_tampered_identity :: pro
 		if scenario == 3 {
 			f.wrapper[f.wrapper_size - 4] ~= 1
 		} // HMAC bytes.
+
 		if scenario == 4 {
 			f.wrapper[5] ~= 1
 		} // Signed details without matching HMAC.
+
 		if scenario == 5 {
 			f.credentials.adv_secret[0] ~= 1
 		}
@@ -267,6 +285,7 @@ pairing_current_rejects_wrong_domains_unknown_types_and_tampered_identity :: pro
 pairing_current_persisted_identity_rejects_tampering_and_legacy_companion_domain :: proc(t: ^testing.T) {
 	f := pairing_domain_fixture(1, 1)
 	defer pairing_domain_free(f)
+
 	account: wa.Paired_Account
 	reply: [2048]u8
 	_, error := wa.pairing_success_handle(&account, pairing_domain_iq(f), &f.credentials, reply[:])
@@ -476,6 +495,7 @@ linked_device_qr_failed_encoding_does_not_consume_reference :: proc(t: ^testing.
 	copy(state.refs[1][:], "second")
 	state.ref_sizes[1] = 6
 	now := time.Time{}
+
 	_, short := wa.pairing_qr_next(&state, now, nil, .Linked_Device)
 	testing.expect_value(t, short.kind, .Destination_Undersized)
 	testing.expect_value(t, state.next, 0)
@@ -539,6 +559,7 @@ linked_device_qr_session_initial_and_timer_events_honor_selected_format :: proc(
 	for format in ([]wa.Pairing_QR_Format{.Legacy, .Linked_Device}) {
 		f := qr_profile_fixture()
 		defer qr_profile_destroy(f)
+
 		config := wa.Session_Config {
 			payload   = wa.default_client_payload_config(),
 			qr_write_format_bits = format,
@@ -550,6 +571,7 @@ linked_device_qr_session_initial_and_timer_events_honor_selected_format :: proc(
 		f.socket.client.phase = .Noise_Ready
 		f.socket.session.phase = .Awaiting_Pairing
 		now := time.Time{}
+
 		f.socket.session.last_received = now
 		f.socket.session.next_ping = time.time_add(now, time.Hour)
 		refs := [2]wa.Binary_Node {
@@ -558,7 +580,9 @@ linked_device_qr_session_initial_and_timer_events_honor_selected_format :: proc(
 		}
 
 		pair := [1]wa.Binary_Node{{tag = "pair-device", content = refs[:]}}
+
 		attrs := [2]wa.Binary_Node_Attribute{{"type", "set"}, {"id", "synthetic-pair"}}
+
 		event, error := wa.session_pair_device(&f.socket.session, {tag = "iq", attrs = attrs[:], content = pair[:]}, now)
 		testing.expect_value(t, error.kind, .None)
 		testing.expect_value(t, event.kind, .QR)
@@ -595,6 +619,7 @@ linked_device_qr_session_initial_and_timer_events_honor_selected_format :: proc(
 linked_device_qr_invalid_configuration_is_rejected_before_initialization :: proc(t: ^testing.T) {
 	f := qr_profile_fixture()
 	defer qr_profile_destroy(f)
+
 	f.socket.session.last_error.server_code = 123
 	before := f.auth.credentials
 	error := wa.session_init(
@@ -610,6 +635,7 @@ linked_device_qr_invalid_configuration_is_rejected_before_initialization :: proc
 	testing.expect(t, f.auth.credentials == before)
 	fresh := new(wa.Socket)
 	defer free(fresh)
+
 	socket_error := wa.socket_connect(
 		fresh,
 		&f.auth,
@@ -683,6 +709,7 @@ protocol_ack_observer_retains_only_fixed_class_after_document_release :: proc(t:
 			auth = &auth,
 			config = {observe_node = protocol_ack_capture, observer_data = &capture},
 		}
+
 		wire: [2048]u8
 		count, encoded := wa.binary_node_encode(
 			wire[:],
@@ -703,6 +730,7 @@ protocol_ack_observer_retains_only_fixed_class_after_document_release :: proc(t:
 		for &byte in wire {
 			byte = 0xa5
 		}
+
 		testing.expect_value(t, capture.class, fixture.class)
 		testing.expect_value(t, capture.calls, 1)
 		testing.expect(t, capture.metadata_unchanged)
@@ -742,6 +770,7 @@ protocol_ack_observer_limits_context_and_rejects_conflicting_classes :: proc(t: 
 	testing.expect_value(t, wa.session_ack_class({attrs = {{"class", "status"}, {"class", "status"}}}), .Unknown)
 	attrs: [33]wa.Binary_Node_Attribute
 	attrs[0] = {"class", "status"}
+
 	testing.expect_value(t, wa.session_ack_class({attrs = attrs[:]}), .Unknown)
 }
 
@@ -761,6 +790,7 @@ qr_terminal_render_blank_code_is_a_white_quiet_field :: proc(t: ^testing.T) {
 
 	text, error := wa.qr_terminal_render(code)
 	defer wa.qr_terminal_destroy(text)
+
 	testing.expect_value(t, error, wa.QR_Error.None)
 
 	width := code.size + wa.QR_QUIET_ZONE * 2
@@ -774,6 +804,7 @@ qr_terminal_render_blank_code_is_a_white_quiet_field :: proc(t: ^testing.T) {
 qr_terminal_render_pairs_vertical_modules_into_half_blocks :: proc(t: ^testing.T) {
 	code := codec_api_qr_blank()
 	defer free(code)
+
 	// Row 2 of the output covers module rows 0 and 1 (four quiet rows above).
 	code.modules[0 * code.size + 0] = true
 	code.modules[1 * code.size + 1] = true
@@ -784,6 +815,7 @@ qr_terminal_render_pairs_vertical_modules_into_half_blocks :: proc(t: ^testing.T
 
 	text, error := wa.qr_terminal_render(code)
 	defer wa.qr_terminal_destroy(text)
+
 	testing.expect_value(t, error, wa.QR_Error.None)
 
 	lines := strings.split(text, "\n", context.temp_allocator)
@@ -811,6 +843,7 @@ qr_terminal_render_matches_every_module_of_a_real_code :: proc(t: ^testing.T) {
 	testing.expect_value(t, encode_error, wa.QR_Error.None)
 	text, error := wa.qr_terminal_render(&code)
 	defer wa.qr_terminal_destroy(text)
+
 	testing.expect_value(t, error, wa.QR_Error.None)
 
 	width := code.size + wa.QR_QUIET_ZONE * 2
@@ -840,6 +873,7 @@ qr_terminal_render_rejects_inconsistent_codes_and_destroy_honours_allocator :: p
 
 	bad := codec_api_qr_blank()
 	defer free(bad)
+
 	bad.size = 25
 	_, size_error := wa.qr_terminal_render(bad)
 	testing.expect_value(t, size_error, wa.QR_Error.Invalid_Code)
@@ -856,9 +890,11 @@ qr_terminal_render_rejects_inconsistent_codes_and_destroy_honours_allocator :: p
 	track: mem.Tracking_Allocator
 	mem.tracking_allocator_init(&track, context.allocator)
 	defer mem.tracking_allocator_destroy(&track)
+
 	allocator := mem.tracking_allocator(&track)
 	blank := codec_api_qr_blank()
 	defer free(blank)
+
 	text, error := wa.qr_terminal_render(blank, allocator)
 	testing.expect_value(t, error, wa.QR_Error.None)
 	wa.qr_terminal_destroy(text, allocator)
@@ -921,9 +957,11 @@ version_test_fetch :: proc(
 	if peer.calls > 1 {
 		return {}, {kind = .Invalid_Config}
 	}
+
 	if peer.failure != .None {
 		return {}, {kind = peer.failure}
 	}
+
 	// Static fixture bytes have no owned allocator; discovery still destroys the response.
 	return {status = peer.status, body = transmute([]u8)peer.body}, {}
 }
@@ -936,8 +974,10 @@ whatsapp_version_discovery_uses_official_worker_or_pinned_default :: proc(t: ^te
 	}
 
 	result := wa.web_version_discover({}, {data = &peer, get = version_test_fetch})
+
 	testing.expect_value(t, result.source, .WhatsApp)
 	testing.expect_value(t, result.version, [3]u32{2, 3000, 1234567890})
+
 	testing.expect_value(t, peer.calls, 1)
 	testing.expect_value(t, peer.url, wa.WA_WEB_VERSION_URL)
 	testing.expect_value(t, peer.max_body_size, wa.WA_WEB_VERSION_BODY_MAX)
@@ -958,7 +998,9 @@ whatsapp_version_discovery_uses_official_worker_or_pinned_default :: proc(t: ^te
 			status  = sample.status,
 			failure = sample.failure,
 		}
+
 		result = wa.web_version_discover({}, {data = &peer, get = version_test_fetch})
+
 		testing.expect_value(t, result.source, .Pinned)
 		testing.expect_value(t, result.version, wa.default_client_payload_config().version)
 		testing.expect_value(t, result.fetch_error.kind, sample.expected)
@@ -973,19 +1015,24 @@ whatsapp_version_discovery_uses_official_worker_or_pinned_default :: proc(t: ^te
 whatsapp_version_discovery_prefers_a_caller_fallback_to_the_pin :: proc(t: ^testing.T) {
 	testing.expect_value(t, wa.default_client_payload_config().version, wa.WA_WEB_VERSION_PINNED)
 	fallback := [3]u32{2, 3000, 1000000001}
+
 	peer := Version_Test_Fetch{failure = .TLS_Failed}
+
 	result := wa.web_version_discover({}, {data = &peer, get = version_test_fetch}, fallback)
 	testing.expect_value(t, result.source, wa.Web_Version_Source.Configured)
 	testing.expect_value(t, result.version, fallback)
 	testing.expect_value(t, result.fetch_error.kind, wa.Version_Error_Kind.HTTP_Failed)
 
 	peer = {body = `{"client_revision":1234567890}`, status = 200}
+
 	result = wa.web_version_discover({}, {data = &peer, get = version_test_fetch}, fallback)
 	testing.expect_value(t, result.source, wa.Web_Version_Source.WhatsApp)
 	testing.expect_value(t, result.version, [3]u32{2, 3000, 1234567890})
 
 	peer = {status = 503}
+
 	result = wa.web_version_discover({}, {data = &peer, get = version_test_fetch})
+
 	testing.expect_value(t, result.source, wa.Web_Version_Source.Pinned)
 	testing.expect_value(t, result.version, wa.WA_WEB_VERSION_PINNED)
 }
@@ -994,6 +1041,7 @@ whatsapp_version_discovery_prefers_a_caller_fallback_to_the_pin :: proc(t: ^test
 whatsapp_version_preserves_body_and_explicit_triplet_bounds :: proc(t: ^testing.T) {
 	body := make([]u8, wa.WA_WEB_VERSION_BODY_MAX + 1)
 	defer delete(body)
+
 	_, oversized := wa.web_version_revision(body)
 	testing.expect_value(t, oversized.kind, .Body_Oversized)
 
@@ -1033,6 +1081,7 @@ version_test_failed_allocator :: proc(
 	if mode == .Alloc || mode == .Alloc_Non_Zeroed || mode == .Resize || mode == .Resize_Non_Zeroed {
 		return nil, .Out_Of_Memory
 	}
+
 	return nil, nil
 }
 
@@ -1085,6 +1134,7 @@ official_version_discovery_preserves_tighter_body_budget :: proc(t: ^testing.T) 
 	}
 
 	result := wa.web_version_discover({max_body_size = 8}, {data = &peer, get = version_test_fetch})
+
 	testing.expect_value(t, peer.max_body_size, 8)
 	testing.expect_value(t, result.source, .Pinned)
 	testing.expect_value(t, result.fetch_error.kind, .Body_Oversized)
@@ -1114,9 +1164,11 @@ owned_version_fetch :: proc(
 		body_storage = storage,
 		allocator    = context.allocator,
 	}
+
 	if peer.fail {
 		return response, {kind = .IO_Failed}
 	}
+
 	return response, {}
 }
 
@@ -1132,10 +1184,12 @@ official_version_discovery_releases_owned_response_on_every_outcome :: proc(t: ^
 		}) {
 		actual := peer
 		result := wa.web_version_discover({}, {data = &actual, get = owned_version_fetch})
+
 		expected := wa.Web_Version_Source.Pinned
 		if peer.status == 200 && !peer.fail && peer.body == `{"client_revision":1234}` {
 			expected = .WhatsApp
 		}
+
 		testing.expect_value(t, result.source, expected)
 	}
 }

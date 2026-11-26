@@ -9,6 +9,7 @@ import wa "shared:whatsapp"
 send_id_conflicting_commit_preserves_pending_wire_and_durable_state :: proc(t: ^testing.T) {
 	fixture := test_fixtures.send_id_fixture()
 	defer test_fixtures.send_id_fixture_destroy(fixture)
+
 	revision := fixture.store.revision
 	error := wa.socket_group_outbound_commit(
 		&fixture.socket,
@@ -24,6 +25,7 @@ send_id_conflicting_commit_preserves_pending_wire_and_durable_state :: proc(t: ^
 	testing.expect_value(t, fixture.store.revision, revision)
 	restored: wa.State_Store
 	defer wa.state_store_clear(&restored)
+
 	loaded := wa.state_store_load(&restored, fixture.path, fixture.store.identity)
 	testing.expect_value(t, loaded.kind, .None)
 	durable, found := wa.state_store_get(&restored, .Outbound_Message, "stable-id")
@@ -34,6 +36,7 @@ send_id_conflicting_commit_preserves_pending_wire_and_durable_state :: proc(t: ^
 send_id_conflict_is_rejected_before_metadata_or_cryptographic_work :: proc(t: ^testing.T) {
 	fixture := test_fixtures.send_id_fixture()
 	defer test_fixtures.send_id_fixture_destroy(fixture)
+
 	revision := fixture.store.revision
 	id, error := wa.socket_send_group(
 		&fixture.socket,
@@ -42,6 +45,7 @@ send_id_conflict_is_rejected_before_metadata_or_cryptographic_work :: proc(t: ^t
 		message_id = "stable-id",
 	)
 	defer delete(id)
+
 	testing.expect_value(t, error.kind, .Invalid_Config)
 	testing.expect_value(t, id, "")
 	testing.expect_value(t, fixture.store.revision, revision)
@@ -53,6 +57,7 @@ send_id_conflict_is_rejected_before_metadata_or_cryptographic_work :: proc(t: ^t
 send_id_pending_same_intent_reuses_id_without_queries_or_new_state :: proc(t: ^testing.T) {
 	fixture := test_fixtures.send_id_fixture()
 	defer test_fixtures.send_id_fixture_destroy(fixture)
+
 	revision := fixture.store.revision
 	id, error := wa.socket_send_group(
 		&fixture.socket,
@@ -61,6 +66,7 @@ send_id_pending_same_intent_reuses_id_without_queries_or_new_state :: proc(t: ^t
 		message_id = "stable-id",
 	)
 	defer delete(id)
+
 	// No initialized wire client: replay fails closed, retaining the original ID and packet.
 	testing.expect_value(t, error.kind, .Session_Failed)
 	testing.expect_value(t, id, "stable-id")
@@ -74,6 +80,7 @@ send_id_pending_same_intent_reuses_id_without_queries_or_new_state :: proc(t: ^t
 send_id_retained_content_does_not_fabricate_acknowledgment :: proc(t: ^testing.T) {
 	fixture := test_fixtures.send_id_fixture()
 	defer test_fixtures.send_id_fixture_destroy(fixture)
+
 	assert(wa.state_store_delete(&fixture.store, .Outbound_Message, "stable-id").kind == .None)
 	id, handled, error := wa.socket_group_existing_send(
 		&fixture.socket,
@@ -84,6 +91,7 @@ send_id_retained_content_does_not_fabricate_acknowledgment :: proc(t: ^testing.T
 		transmute([]u8)string("original content"),
 	)
 	defer delete(id)
+
 	testing.expect(t, !handled)
 	testing.expect_value(t, error.kind, .None)
 }
@@ -121,10 +129,12 @@ send_id_media_fixture :: proc(fixture: ^test_fixtures.Send_Id_Fixture) {
 send_id_high_level_document_replay_does_not_upload_again :: proc(t: ^testing.T) {
 	fixture := test_fixtures.send_id_fixture()
 	defer test_fixtures.send_id_fixture_destroy(fixture)
+
 	send_id_media_fixture(fixture)
 	wire_capture: test_fixtures.Send_Id_Wire
 	test_fixtures.send_id_wire_connect(&fixture.socket, &wire_capture)
 	defer wa.frame_transport_clear(&fixture.socket.client.frames)
+
 	revision := fixture.store.revision
 	id, error := wa.socket_send_document(
 		&fixture.socket,
@@ -136,6 +146,7 @@ send_id_high_level_document_replay_does_not_upload_again :: proc(t: ^testing.T) 
 		"stable-id",
 	)
 	defer delete(id)
+
 	testing.expect_value(t, id, "stable-id")
 	testing.expect_value(t, error.kind, .None)
 	testing.expect_value(t, test_fixtures.send_id_http_calls, 0)
@@ -152,6 +163,7 @@ send_id_high_level_document_replay_does_not_upload_again :: proc(t: ^testing.T) 
 send_id_high_level_document_conflicts_fail_before_upload :: proc(t: ^testing.T) {
 	fixture := test_fixtures.send_id_fixture()
 	defer test_fixtures.send_id_fixture_destroy(fixture)
+
 	send_id_media_fixture(fixture)
 	fixture.socket.config.http_execute = test_fixtures.send_id_http
 	test_fixtures.send_id_http_calls = 0

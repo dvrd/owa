@@ -39,6 +39,7 @@ read_headers :: proc(socket: net.Connection, buffer: []u8) -> string {
 			return string(buffer[:i + 1])
 		}
 	}
+
 	panic("HTTP headers exceed the test peer's buffer")
 }
 
@@ -52,5 +53,6 @@ header_value :: proc(headers, name: string) -> string {
 			result = strings.trim_space(value)
 		}
 	}
+
 	return result
 }

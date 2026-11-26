@@ -20,6 +20,7 @@ ack_routing_input :: proc(f: ^test_fixtures.Negative_Ack_Fixture, stream: ^Statu
 	}
 
 	defer wa.noise_clear(&peer)
+
 	encrypted, noise_error := wa.noise_encrypt(&peer, ciphertext[:], encoded[:count])
 	assert(noise_error == .None)
 	framed, frame_error := wa.frame_encode(envelope[:], ciphertext[:encrypted])
@@ -78,6 +79,7 @@ ack_routing_expect_exact :: proc(t: ^testing.T, f: ^test_fixtures.Negative_Ack_F
 	document, error := wa.binary_node_decode(transmute([]u8)encoded)
 	assert(error.kind == .None)
 	defer wa.binary_document_destroy(&document)
+
 	testing.expect_value(t, document.root.tag, "ack")
 
 	for expected in ([]wa.Binary_Node_Attribute {
@@ -104,6 +106,7 @@ ack_routing_expect_exact :: proc(t: ^testing.T, f: ^test_fixtures.Negative_Ack_F
 ack_routing_encrypted_case :: proc(t: ^testing.T, tag, kind: string, stage: int) {
 	f := test_fixtures.negative_ack_fixture()
 	defer test_fixtures.negative_ack_destroy(f)
+
 	attrs := [7]wa.Binary_Node_Attribute {
 		{"id", "synthetic-routing-id"},
 		{"from", "222@s.whatsapp.net"},
@@ -118,10 +121,12 @@ ack_routing_encrypted_case :: proc(t: ^testing.T, tag, kind: string, stage: int)
 	stream: Status_Ack_Stream
 	ack_routing_input(f, &stream, test_fixtures.ack_routing_node(tag, kind, attrs[:count]))
 	defer wa.socket_close(&f.socket)
+
 	ack_routing_stage(&f.socket, stage)
 	phase, provision := f.socket.phase, f.socket.provision_stage
 	before := test_fixtures.negative_ack_disk(f)
 	defer delete(before)
+
 	revision, durable := f.store.revision, f.store.durable_revision
 	event, error := wa.socket_read(&f.socket)
 	testing.expect_value(t, error.kind, .None)
@@ -184,6 +189,7 @@ ack_routing_expect_retry_ack :: proc(t: ^testing.T, stream: ^Status_Ack_Stream) 
 	document, error := wa.binary_node_decode(transmute([]u8)encoded)
 	assert(error.kind == .None)
 	defer wa.binary_document_destroy(&document)
+
 	testing.expect_value(t, document.root.tag, "ack")
 	testing.expect_value(t, len(document.root.attrs), 6)
 
@@ -223,12 +229,15 @@ mandatory_provisioning_retry_is_owned_until_online_and_outside_query :: proc(t: 
 	for initial_stage in 0 ..< 3 {
 		f := test_fixtures.negative_ack_fixture()
 		defer test_fixtures.negative_ack_destroy(f)
+
 		stream: Status_Ack_Stream
 		ack_routing_input(f, &stream, ack_routing_retry_node())
 		defer wa.socket_close(&f.socket)
+
 		ack_routing_stage(&f.socket, initial_stage)
 		before := test_fixtures.negative_ack_disk(f)
 		defer delete(before)
+
 		revision, durable := f.store.revision, f.store.durable_revision
 		event, error := wa.socket_read(&f.socket)
 		testing.expect_value(t, error.kind, .None)
@@ -301,9 +310,11 @@ mandatory_provisioning_retry_keeps_existing_64_bound_and_ack_order :: proc(t: ^t
 	stream: Status_Ack_Stream
 	ack_routing_input(f, &stream, ack_routing_retry_node())
 	defer wa.socket_close(&f.socket)
+
 	ack_routing_stage(&f.socket, 0)
 	before := test_fixtures.negative_ack_disk(f)
 	defer delete(before)
+
 	revision, durable := f.store.revision, f.store.durable_revision
 	event, error := wa.socket_read(&f.socket)
 	testing.expect_value(t, error.kind, .Queue_Full)
@@ -324,6 +335,7 @@ mandatory_provisioning_retry_keeps_existing_64_bound_and_ack_order :: proc(t: ^t
 	testing.expect_value(t, f.store.durable_revision, durable)
 	after := test_fixtures.negative_ack_disk(f)
 	defer delete(after)
+
 	testing.expect(t, bytes.equal(before, after))
 }
 
@@ -339,6 +351,7 @@ message_ack_durable_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebS
 	capture := cast(^Message_Ack_Durable_Writer)data
 	restored: wa.State_Store
 	defer wa.state_store_clear(&restored)
+
 	f := capture.fixture
 	assert(wa.state_store_load(&restored, f.path, f.store.identity).kind == .None)
 	_, inbox := wa.state_store_get(&restored, .Inbox_Message, capture.name)
@@ -356,6 +369,7 @@ message_ack_durable_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebS
 message_ack_event_stage :: proc(f: ^test_fixtures.Negative_Ack_Fixture, node: wa.Binary_Node) -> (wa.Socket_Event, wa.Socket_Error) {
 	candidate: wa.State_Store
 	defer wa.state_store_clear(&candidate)
+
 	assert(wa.socket_store_clone(&candidate, &f.store).kind == .None)
 	name, error := wa.socket_inbox_key(&f.socket, "", "222@s.whatsapp.net", "synthetic-ack-id")
 	assert(error.kind == .None)
@@ -380,6 +394,7 @@ message_ack_expect_frames :: proc(t: ^testing.T, wire: ^test_fixtures.Send_Id_Wi
 	}
 
 	defer wa.noise_clear(&peer)
+
 	offset, frames := 0, 0
 
 	for _ in 0 ..< 3 {
@@ -400,6 +415,7 @@ message_ack_expect_frames :: proc(t: ^testing.T, wire: ^test_fixtures.Send_Id_Wi
 		doc, decoded := wa.binary_node_decode(plain[:count])
 		assert(decoded.kind == .None)
 		defer wa.binary_document_destroy(&doc)
+
 		testing.expect_value(t, doc.root.tag, frames == 0 ? "receipt" : "ack")
 		kind, _ := wa.node_attr(doc.root, "type")
 		testing.expect(t, kind != "read" && kind != "viewed")
@@ -428,6 +444,7 @@ message_ack_expect_frames :: proc(t: ^testing.T, wire: ^test_fixtures.Send_Id_Wi
 message_ack_reopen_and_complete :: proc(t: ^testing.T, f: ^test_fixtures.Negative_Ack_Fixture, name: string) {
 	restored: wa.State_Store
 	defer wa.state_store_clear(&restored)
+
 	assert(wa.state_store_load(&restored, f.path, f.store.identity).kind == .None)
 	reopened := wa.Socket {
 		phase = .Online,
@@ -438,6 +455,7 @@ message_ack_reopen_and_complete :: proc(t: ^testing.T, f: ^test_fixtures.Negativ
 	}
 
 	defer wa.socket_close(&reopened)
+
 	assert(wa.socket_inbox_restore(&reopened).kind == .None)
 	testing.expect_value(t, len(reopened.queue), 1)
 
@@ -448,15 +466,19 @@ message_ack_reopen_and_complete :: proc(t: ^testing.T, f: ^test_fixtures.Negativ
 	event, error := wa.socket_read(&reopened)
 	assert(error.kind == .None && event.message != nil)
 	defer wa.socket_message_destroy(event.message)
+
 	testing.expect_value(t, event.message.id, "synthetic-ack-id")
 	before := test_fixtures.negative_ack_disk(f)
 	defer delete(before)
+
 	bad := fmt.aprintf("%s/missing/state", f.directory)
 	defer delete(bad)
+
 	reopened.config.state_path = bad
 	testing.expect_value(t, wa.socket_message_complete(&reopened, event.message).kind, .State_Failed)
 	after := test_fixtures.negative_ack_disk(f)
 	defer delete(after)
+
 	testing.expect(t, bytes.equal(before, after))
 	_, inbox := wa.state_store_get(&restored, .Inbox_Message, name)
 	_, processed := wa.state_store_get(&restored, .Processed_Message, name)
@@ -478,6 +500,7 @@ message_ack_durable_inbox_precedes_wire_and_failed_ack_remains_recoverable :: pr
 	for fail_ack in ([]bool{false, true}) {
 		f := test_fixtures.negative_ack_fixture()
 		defer test_fixtures.negative_ack_destroy(f)
+
 		capture := Message_Ack_Durable_Writer {
 			fixture  = f,
 			fail_ack = fail_ack,
@@ -485,11 +508,13 @@ message_ack_durable_inbox_precedes_wire_and_failed_ack_remains_recoverable :: pr
 
 		test_fixtures.send_id_wire_connect(&f.socket, &capture.wire)
 		defer wa.socket_close(&f.socket)
+
 		f.socket.websocket.stream.data = &capture
 		f.socket.websocket.stream.write = message_ack_durable_write
 		name, key_error := wa.socket_inbox_key(&f.socket, "", "222@s.whatsapp.net", "synthetic-ack-id")
 		assert(key_error.kind == .None)
 		defer delete(name)
+
 		capture.name = name
 		node := wa.Binary_Node {
 			tag   = "message",
@@ -516,16 +541,21 @@ message_ack_durable_inbox_precedes_wire_and_failed_ack_remains_recoverable :: pr
 message_ack_failed_inbox_commit_exposes_no_event_or_wire :: proc(t: ^testing.T) {
 	f := test_fixtures.negative_ack_fixture()
 	defer test_fixtures.negative_ack_destroy(f)
+
 	wire: test_fixtures.Send_Id_Wire
 	test_fixtures.send_id_wire_connect(&f.socket, &wire)
 	defer wa.socket_close(&f.socket)
+
 	before := test_fixtures.negative_ack_disk(f)
 	defer delete(before)
+
 	revision, durable := f.store.revision, f.store.durable_revision
 	bad := fmt.aprintf("%s/missing/state", f.directory)
 	defer delete(bad)
+
 	f.socket.config.state_path = bad
 	event, error := message_ack_event_stage(f, {})
+
 	testing.expect_value(t, error.kind, .State_Failed)
 	testing.expect(t, event.message == nil && event.kind == .None)
 	testing.expect_value(t, wire.used, 0)
@@ -584,6 +614,7 @@ negative_ack_encrypted_stream :: proc(f: ^test_fixtures.Negative_Ack_Fixture, st
 	}
 
 	defer wa.noise_clear(&peer)
+
 	encrypted_size, encrypted := wa.noise_encrypt(&peer, ciphertext[:], encoded[:plain_size])
 	assert(encrypted == .None)
 	envelope_size, framed := wa.frame_encode(envelope[:], ciphertext[:encrypted_size])
@@ -631,11 +662,14 @@ negative_ack_encrypted_stream :: proc(f: ^test_fixtures.Negative_Ack_Fixture, st
 negative_ack_encrypted_socket_read_surfaces_rejection_before_pending_absence :: proc(t: ^testing.T) {
 	f := test_fixtures.negative_ack_fixture()
 	defer test_fixtures.negative_ack_destroy(f)
+
 	stream: Negative_Ack_Stream
 	negative_ack_encrypted_stream(f, &stream)
 	defer wa.socket_close(&f.socket)
+
 	before := test_fixtures.negative_ack_disk(f)
 	defer delete(before)
+
 	revision, durable := f.store.revision, f.store.durable_revision
 	event, error := wa.socket_read(&f.socket)
 	testing.expect_value(t, error.kind, .Message_Rejected)
@@ -684,7 +718,10 @@ status_ack_encrypted_input :: proc(f: ^test_fixtures.Negative_Ack_Fixture, strea
 	assert(error.kind == .None)
 	peer := wa.Noise_State {
 		phase = .Transport,
-	}; defer wa.noise_clear(&peer)
+	}
+
+	defer wa.noise_clear(&peer)
+
 	encrypted_size, encrypted := wa.noise_encrypt(&peer, ciphertext[:], encoded[:size])
 	assert(encrypted == .None)
 	envelope_size, framed := wa.frame_encode(envelope[:], ciphertext[:encrypted_size])
@@ -719,12 +756,15 @@ status_ack_encrypted_socket_read_handles_provisioning_offline_batch :: proc(t: ^
 	for phase in ([]wa.Socket_Phase{.Online, .Provisioning}) {
 		f := test_fixtures.negative_ack_fixture()
 		defer test_fixtures.negative_ack_destroy(f)
+
 		stream: Status_Ack_Stream
 		status_ack_encrypted_input(f, &stream)
 		defer wa.socket_close(&f.socket)
+
 		f.socket.phase = phase
 		before := test_fixtures.negative_ack_disk(f)
 		defer delete(before)
+
 		event, error := wa.socket_read(&f.socket)
 		testing.expect_value(t, error.kind, .None)
 		testing.expect_value(t, event.kind, .None)
@@ -741,11 +781,13 @@ status_ack_encrypted_socket_read_handles_provisioning_offline_batch :: proc(t: ^
 		document, decode := wa.binary_node_decode(transmute([]u8)encoded)
 		assert(decode.kind == .None)
 		defer wa.binary_document_destroy(&document)
+
 		class, class_found := wa.node_attr(document.root, "class")
 		testing.expect(t, document.root.tag == "ack" && class_found && class == "status")
 		testing.expect_value(t, f.socket.client.noise.write_counter, u64(1))
 		after := test_fixtures.negative_ack_disk(f)
 		defer delete(after)
+
 		testing.expect(t, bytes.equal(before, after))
 	}
 }

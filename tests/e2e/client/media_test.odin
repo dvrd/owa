@@ -12,6 +12,7 @@ import wa "shared:whatsapp"
 send_image_encrypts_uploads_and_delivers_to_every_device :: proc(t: ^testing.T) {
 	peer := send_peer_new()
 	defer send_peer_destroy(peer)
+
 	context.user_ptr = peer
 	plaintext := test_fixtures.SEND_IMAGE_PLAINTEXT
 
@@ -40,6 +41,7 @@ send_image_encrypts_uploads_and_delivers_to_every_device :: proc(t: ^testing.T) 
 	testing.expect(t, !bytes.contains(peer.uploaded[:], transmute([]u8)plaintext))
 	metadata, metadata_error := wa.media_metadata_from_message(message)
 	defer wa.media_metadata_clear(&metadata)
+
 	testing.expect_value(t, metadata_error.kind, wa.Media_Error_Kind.None)
 	plain: [128]u8
 	n, decrypt_error := wa.media_decrypt(plain[:], peer.uploaded[:], .Image, metadata)
@@ -49,8 +51,10 @@ send_image_encrypts_uploads_and_delivers_to_every_device :: proc(t: ^testing.T) 
 	// Each send uses a fresh media key and message id.
 	first_key := bytes.clone(message.media_key)
 	defer delete(first_key)
+
 	second_id, second_error := wa.socket_send_image(&peer.socket, "123@g.us", transmute([]u8)plaintext)
 	defer delete(second_id)
+
 	testing.expect_value(t, second_error.kind, wa.Socket_Error_Kind.None)
 	testing.expect(t, second_id != id)
 	second, _ := wa.media_message_decode(peer.last_plain[:peer.last_size])
@@ -64,6 +68,7 @@ send_image_encrypts_uploads_and_delivers_to_every_device :: proc(t: ^testing.T) 
 send_image_upload_rejection_sends_no_message :: proc(t: ^testing.T) {
 	peer := send_peer_new()
 	defer send_peer_destroy(peer)
+
 	context.user_ptr = peer
 	peer.upload_status = 500
 	plaintext := test_fixtures.SEND_IMAGE_PLAINTEXT
@@ -81,6 +86,7 @@ send_image_upload_rejection_sends_no_message :: proc(t: ^testing.T) {
 send_image_failed_write_keeps_the_durable_outbound_message :: proc(t: ^testing.T) {
 	peer := send_peer_new()
 	defer send_peer_destroy(peer)
+
 	context.user_ptr = peer
 	peer.fail_message = true
 	plaintext := test_fixtures.SEND_IMAGE_PLAINTEXT
@@ -101,12 +107,14 @@ send_image_failed_write_keeps_the_durable_outbound_message :: proc(t: ^testing.T
 send_reaction_delivers_checkmark_by_default_and_custom_text :: proc(t: ^testing.T) {
 	peer := send_peer_new()
 	defer send_peer_destroy(peer)
+
 	context.user_ptr = peer
 	key := wa.Message_Key {
 		remote_jid = "123@g.us",
 		id = "quoted-original",
 		participant = "222@s.whatsapp.net",
 	}
+
 	before := time.now()._nsec / i64(time.Millisecond)
 
 	id, error := wa.socket_send_reaction(&peer.socket, key)
@@ -126,6 +134,7 @@ send_reaction_delivers_checkmark_by_default_and_custom_text :: proc(t: ^testing.
 
 	other_id, other_error := wa.socket_send_reaction(&peer.socket, key, "👍")
 	defer delete(other_id)
+
 	testing.expect_value(t, other_error.kind, wa.Socket_Error_Kind.None)
 	other, _ := wa.reaction_message_decode(peer.last_plain[:peer.last_size])
 	testing.expect_value(t, other.text, "👍")
@@ -137,6 +146,7 @@ send_reaction_delivers_checkmark_by_default_and_custom_text :: proc(t: ^testing.
 http_execute_runs_off_thread_while_the_socket_keeps_serving_the_connection :: proc(t: ^testing.T) {
 	peer := send_peer_new()
 	defer send_peer_destroy(peer)
+
 	send_peer_use_pipe(peer)
 	marker: test_fixtures.Http_Marker
 	peer.socket.session.config.keepalive_interval = time.Minute
@@ -171,6 +181,7 @@ http_execute_runs_off_thread_while_the_socket_keeps_serving_the_connection :: pr
 http_execute_reports_executor_failure_as_media_http_failure :: proc(t: ^testing.T) {
 	peer := send_peer_new()
 	defer send_peer_destroy(peer)
+
 	send_peer_use_pipe(peer)
 	marker := test_fixtures.Http_Marker {
 		fail = true,

@@ -24,6 +24,7 @@ schedule_options_for_test :: proc(root: string) -> w.Schedule {
 
 shell_argv :: proc(script: string) -> []string {
 	values := []string{"/bin/sh", "-c", script}
+
 	out := make([]string, len(values))
 	copy(out, values)
 

@@ -277,6 +277,7 @@ certificate_policy_checks_exact_time_boundaries_without_epoch_overflow :: proc(t
 			{time.unix(200, 1), .Certificate_Expired},
 			{time.unix(-1, 0), .Invalid_Validity},
 		}) {testing.expect_value(t, policy_test_verify(&fixture, row.now), row.expected)}
+
 	for index in 0 ..< 5 {
 		options := policy_test_options()
 
@@ -302,6 +303,7 @@ certificate_policy_checks_exact_time_boundaries_without_epoch_overflow :: proc(t
 certificate_policy_malformed_or_incomplete_chain_fails_closed :: proc(t: ^testing.T) {
 	fixture := policy_test_fixture(policy_test_options())
 	malformed := [?]u8{0xff}
+
 	testing.expect_value(t, wa.verify_whatsapp_server_certificate(malformed[:], fixture.server_static), .Invalid_Certificate_Chain)
 	chain, decoded := wa.cert_chain_decode(fixture.payload[:fixture.size])
 	assert(decoded == .None)
@@ -367,11 +369,13 @@ certificate_policy_genuine_public_chain_matches_pinned_signal_root :: proc(t: ^t
 frame_reader_reassembles_split_frames_and_bounds_its_storage :: proc(t: ^testing.T) {
 	wire: [12]u8
 	_, encoded := wa.frame_encode(wire[:], {1, 2, 3, 4, 5})
+
 	testing.expect_value(t, encoded, wa.Frame_Error.None)
 	storage: [16]u8
 	reader := wa.Frame_Reader {
 		storage = storage[:],
 	}
+
 	testing.expect_value(t, wa.frame_reader_feed(&reader, wire[:2]), wa.Frame_Error.None)
 	_, _, error := wa.frame_reader_peek(&reader)
 	testing.expect_value(t, error, wa.Frame_Error.Header_Incomplete)
@@ -409,8 +413,10 @@ noise_credentials_are_random_nonzero_and_accepted_by_client_init :: proc(t: ^tes
 		config = {host = "synthetic.invalid", max_message_size = 4096},
 		stream = {read = media_retry_test_read, write = media_retry_test_write, close = media_retry_test_close},
 	}
+
 	client: wa.Client
 	defer wa.noise_clear(&client.noise)
+
 	testing.expect_value(t, wa.client_init(&client, &websocket, first).kind, wa.Client_Error_Kind.None)
 	testing.expect_value(t, client.static_private, first.static_private_key)
 	testing.expect_value(t, client.static_public, wa.signal_curve_public(first.static_private_key))

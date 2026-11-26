@@ -278,6 +278,7 @@ certificate_details_field_decode :: proc(
 			details.issuer_serial, details.has_issuer_serial = cast(u32)field.value, true
 		}
 
+
 	case 3:
 		if field.wire_type != 2 {
 			return .Wrong_Wire_Type
@@ -337,6 +338,7 @@ protobuf_handshake_inner_decode :: proc(
 			return {}, field_error
 		}
 	}
+
 	return message, .None
 }
 
@@ -466,6 +468,7 @@ protobuf_field_read :: proc(
 		if error != .None {
 			return {}, error
 		}
+
 
 	case 1:
 		if len(src) - at^ < 8 {
@@ -600,10 +603,12 @@ registration_payload_encode :: proc(
 	endian.unchecked_put_u32be(registration_id[:], keys.registration_id)
 	prekey_id := encode_prekey_id_u24(keys.signed_prekey_id)
 	key_type := [?]u8{5}
+
 	pairing_buffer: [2048]u8
 	pairing := Protobuf_Writer {
 		dst = pairing_buffer[:],
 	}
+
 	protobuf_write_bytes(&pairing, 1, registration_id[:])
 	protobuf_write_bytes(&pairing, 2, key_type[:])
 	protobuf_write_bytes(&pairing, 3, key_copy.identity_public[:])
@@ -620,6 +625,7 @@ registration_payload_encode :: proc(
 	writer := Protobuf_Writer {
 		dst = staging[:],
 	}
+
 	write_common_client_payload_fields(&writer, config, false, 0, 0, pairing_buffer[:pairing.at])
 	return payload_copy_result(dst, config, "", &writer)
 }
@@ -671,14 +677,17 @@ login_payload_encode :: proc(
 			return 0, .Invalid_Username
 		}
 	}
+
 	username, valid := strconv.parse_u64(user, 10)
 	if !valid {
 		return 0, .Invalid_Username
 	}
+
 	staging: [MAX_CLIENT_PAYLOAD_SIZE]u8
 	writer := Protobuf_Writer {
 		dst = staging[:],
 	}
+
 	write_common_client_payload_fields(
 		&writer,
 		config,
@@ -863,13 +872,16 @@ write_common_client_payload_fields :: proc(
 	version := Protobuf_Writer {
 		dst = version_buffer[:],
 	}
+
 	for value, i in config.version {
 		protobuf_write_uint(&version, cast(u32)(i + 1), cast(u64)value)
 	}
+
 	agent_buffer: [512]u8
 	agent := Protobuf_Writer {
 		dst = agent_buffer[:],
 	}
+
 	protobuf_write_uint(&agent, 1, 14) // UserAgent.Platform.WEB
 	protobuf_write_bytes(&agent, 2, version_buffer[:version.at])
 	protobuf_write_string(&agent, 3, "000") // mcc
@@ -895,6 +907,7 @@ write_common_client_payload_fields :: proc(
 	web := Protobuf_Writer {
 		dst = web_buffer[:],
 	}
+
 	protobuf_write_uint(&web, 4, web_subplatform)
 	if version.err != .None || agent.err != .None || web.err != .None {
 		writer.err = .Oversized
@@ -1027,11 +1040,13 @@ payload_copy_result :: proc(
 	}
 
 	sources := [?]string{config.browser_os, config.browser_name, config.country_code, username}
+
 	for source in sources {
 		if bytes.alias(dst[:writer.at], transmute([]u8)source) {
 			return 0, .Overlapping_Buffers
 		}
 	}
+
 	copy(dst[:writer.at], writer.dst[:writer.at])
 	return writer.at, .None
 }
@@ -1095,6 +1110,7 @@ pairing_identity_hmac_decode :: proc(
 
 				identity.hmac, identity.has_hmac = field.data, true
 			}
+
 
 		case 3:
 			if field.wire_type != 0 {
@@ -1235,12 +1251,14 @@ pairing_signed_identity_encode :: proc(
 		identity.account_signature,
 		identity.device_signature,
 	}
+
 	present := [4]bool {
 		identity.has_details,
 		identity.has_account_signature_key,
 		identity.has_account_signature,
 		identity.has_device_signature,
 	}
+
 	required := 0
 	for value, i in fields {
 		present[i] = present[i] || len(value) > 0
@@ -1265,6 +1283,7 @@ pairing_signed_identity_encode :: proc(
 
 		required += size
 	}
+
 	if len(dst) < required {
 		return 0, .Destination_Undersized
 	}
@@ -1274,6 +1293,7 @@ pairing_signed_identity_encode :: proc(
 			return 0, .Overlapping_Buffers
 		}
 	}
+
 	for value, i in fields {
 		if !present[i] {
 			continue
@@ -1284,6 +1304,7 @@ pairing_signed_identity_encode :: proc(
 		protobuf_varint_write(dst, &written, cast(u64)len(value))
 		written += copy(dst[written:], value)
 	}
+
 	return written, .None
 }
 
@@ -1296,6 +1317,7 @@ Text_Message_Kind :: enum {
 	Conversation,
 	Extended_Text,
 }
+
 Message_Error :: enum {
 	None,
 	Invalid_Protobuf,
@@ -1307,16 +1329,19 @@ Message_Error :: enum {
 	Destination_Undersized,
 	Overlapping_Buffers,
 }
+
 Message_Context :: struct {
 	stanza_id, participant, remote_jid:                                 string,
 	quoted_message:                                                     []u8,
 	has_stanza_id, has_participant, has_remote_jid, has_quoted_message: bool,
 }
+
 Sender_Key_Distribution :: struct {
 	group_id:                       string,
 	distribution:                   []u8,
 	has_group_id, has_distribution: bool,
 }
+
 // All strings and slices borrow the source buffer, including quoted_message.
 // They remain valid only while the caller retains that buffer unchanged.
 // Recognized wrappers are normalized; quote bytes retain their original wire.
@@ -1393,6 +1418,7 @@ message_decode_inner :: proc(
 					return {}, wrapper_error
 				}
 			}
+
 
 		case 2:
 			if distribution_error := message_sender_key_distribution_decode(&message, field);
@@ -1644,6 +1670,7 @@ text_message_encode :: proc(
 	if validation_error := text_message_encode_validate(m); validation_error != .None {
 		return 0, validation_error
 	}
+
 	c, s := m.context_info, m.sender_key_distribution
 	context_size, sender_size, required, size_error := text_message_encoded_sizes(m)
 	if size_error != .None {
@@ -1703,6 +1730,7 @@ text_message_context_size :: proc(m: Text_Message) -> (int, Message_Error) {
 
 	if m.has_context {
 		values := [?]string{c.stanza_id, c.participant, c.remote_jid}
+
 		present := [?]bool{c.has_stanza_id, c.has_participant, c.has_remote_jid}
 
 		for v, i in values {
@@ -1740,6 +1768,7 @@ text_message_encoded_sizes :: proc(m: Text_Message) -> (int, int, int, Message_E
 	if context_error != .None {
 		return 0, 0, 0, context_error
 	}
+
 	sender_size, content_size := 0, 0
 
 	if m.has_sender_key_distribution {
@@ -1856,10 +1885,12 @@ message_field_size :: proc(field: u32, size: int) -> int {
 		size \
 	)
 }
+
 message_field_header :: proc(dst: []u8, at: ^int, field: u32, size: int) {
 	protobuf_varint_write(dst, at, cast(u64)field << 3 | 2)
 	protobuf_varint_write(dst, at, cast(u64)size)
 }
+
 message_field_write :: proc(dst: []u8, at: ^int, field: u32, value: []u8) {
 	message_field_header(dst, at, field, len(value))
 	at^ += copy(dst[at^:], value)

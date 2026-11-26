@@ -34,6 +34,7 @@ media_deadline_test_execute :: proc(
 
 		return {}, {kind = .Dial_Failed, write_effect = .Not_Sent}
 	}
+
 	if state.fail_first_only {
 		testing.expect(state.t, config.timeout > 0)
 
@@ -47,6 +48,7 @@ media_deadline_test_execute :: proc(
 		body: string = `{"url":"https://mmg.whatsapp.net/media","direct_path":"/media"}`
 		return {status = 200, body = transmute([]u8)body}, {}
 	}
+
 	testing.expect(state.t, config.timeout > 0 && config.timeout <= 20 * time.Millisecond)
 	// An executor may return after its budget. Never start another host then.
 	time.sleep(40 * time.Millisecond)
@@ -63,11 +65,15 @@ media_upload_later_dial_failure_preserves_earlier_unknown_effect :: proc(t: ^tes
 	previous := context.user_ptr
 	context.user_ptr = &state
 	defer context.user_ptr = previous
+
 	storage: [64]u8
 	n, metadata, encryption := wa.media_encrypt(storage[:], []u8{1, 2, 3}, .Image, {})
+
 	testing.expect_value(t, encryption.kind, .None)
 	defer wa.media_metadata_clear(&metadata)
+
 	hosts := []wa.Media_Host{{hostname = "first.invalid"}, {hostname = "second.invalid"}}
+
 	_, error := wa.media_upload(
 		storage[:n],
 		.Image,
@@ -91,11 +97,15 @@ media_upload_does_not_restart_budget_on_host_fallback :: proc(t: ^testing.T) {
 	previous := context.user_ptr
 	context.user_ptr = &state
 	defer context.user_ptr = previous
+
 	storage: [64]u8
 	n, metadata, encryption := wa.media_encrypt(storage[:], []u8{1, 2, 3}, .Image, {})
+
 	testing.expect_value(t, encryption.kind, .None)
 	defer wa.media_metadata_clear(&metadata)
+
 	hosts := []wa.Media_Host{{hostname = "first.invalid"}, {hostname = "second.invalid"}}
+
 	_, error := wa.media_upload(
 		storage[:n],
 		.Image,
@@ -120,11 +130,15 @@ media_upload_fallback_receives_only_remaining_budget :: proc(t: ^testing.T) {
 	previous := context.user_ptr
 	context.user_ptr = &state
 	defer context.user_ptr = previous
+
 	storage: [64]u8
 	n, metadata, encryption := wa.media_encrypt(storage[:], []u8{1, 2, 3}, .Image, {})
+
 	testing.expect_value(t, encryption.kind, .None)
 	defer wa.media_metadata_clear(&metadata)
+
 	hosts := []wa.Media_Host{{hostname = "first.invalid"}, {hostname = "second.invalid"}}
+
 	result, error := wa.media_upload(
 		storage[:n],
 		.Image,
@@ -220,6 +234,7 @@ media_retry_test_notification :: proc(t: ^testing.T, ciphertext, nonce: []u8, di
 		rmr := &node.content.([]wa.Binary_Node)[0]
 		rmr.attrs = []wa.Binary_Node_Attribute{{"jid", "321@s.whatsapp.net"}, {"from_me", "true" if own else "false"}}
 	}
+
 	wire: [1024]u8
 	n, encode_error := wa.binary_node_encode(wire[:], node)
 	testing.expect_value(t, encode_error.kind, .None)
@@ -243,23 +258,28 @@ media_retry_preserves_caller_routing_metadata :: proc(t: ^testing.T) {
 	socket: wa.Socket
 	media_retry_test_socket(t, &socket, &auth)
 	defer wa.frame_transport_clear(&socket.client.frames)
+
 	defer delete(socket.pending_media_retry)
+
 	cipher_hex :=
 		"a480b04f11ee5fa82b42320a244eff457db59d7239cf27a03dcf5b25925fc805fe" +
 		"6962c6769ece6da65780c8c9c3327a81670ea589ec153fdcacab8f06bf93b46e76a0"
 	ciphertext, valid := hex.decode(transmute([]u8)cipher_hex)
 	testing.expect_value(t, valid, nil)
 	defer delete(ciphertext)
+
 	nonce: [12]u8
 	for &value, index in nonce {
 		value = u8(index + 32)
 	}
+
 	document := media_retry_test_notification(t, ciphertext, nonce[:])
 	append(&socket.pending_media_retry, document)
 	key, hash: [32]u8
 	for &value, index in key {
 		value = u8(index)
 	}
+
 	media := wa.Media_Message {
 		kind            = .Image,
 		url             = "https://mmg.whatsapp.net/original.enc",
@@ -278,6 +298,7 @@ media_retry_preserves_caller_routing_metadata :: proc(t: ^testing.T) {
 	}
 
 	_, error := wa.socket_media_download_recover(&socket, &message, &media, nil, {})
+
 	testing.expect_value(t, error.kind, .Media_Failed)
 	testing.expect_value(t, error.media.kind, .HTTP_Status)
 	testing.expect_value(t, error.media.status, 410)
@@ -293,6 +314,7 @@ media_retry_preserves_caller_routing_metadata :: proc(t: ^testing.T) {
 	message.participant = "321:4@s.whatsapp.net"
 	append(&socket.pending_media_retry, media_retry_test_notification(t, ciphertext, nonce[:], direct = true))
 	_, dm_error := wa.socket_media_download_recover(&socket, &message, &media, nil, {})
+
 	testing.expect(t, dm_error.kind == .Media_Failed && dm_error.media.status == 410)
 	testing.expect_value(t, state.calls, 2)
 	testing.expect_value(t, len(socket.pending_media_retry), 0)
@@ -300,6 +322,7 @@ media_retry_preserves_caller_routing_metadata :: proc(t: ^testing.T) {
 	message.recipient, message.participant = message.participant, "123:2@s.whatsapp.net"
 	append(&socket.pending_media_retry, media_retry_test_notification(t, ciphertext, nonce[:], direct = true, own = true))
 	_, echo_error := wa.socket_media_download_recover(&socket, &message, &media, nil, {})
+
 	testing.expect(t, echo_error.kind == .Media_Failed && echo_error.media.status == 410)
 	testing.expect_value(t, state.calls, 3)
 
@@ -311,6 +334,7 @@ writer_golden_media :: proc(kind: wa.Media_Kind, buffers: ^[4][32]u8) -> wa.Medi
 			buffers[i][j] = u8(i * 32 + j)
 		}
 	}
+
 	message := wa.Media_Message {
 		kind = kind,
 		url = "https://mmg.whatsapp.net/o1/v/t62/a.enc",
@@ -407,6 +431,7 @@ writer_media_encoders_match_retired_writer :: proc(t: ^testing.T) {
 		from_me = true,
 		has_from_me = true,
 	}
+
 	n, err = wa.reaction_checkmark_encode(out[:], key, 1700000000123)
 	testing.expect_value(t, err.kind, wa.Media_Error_Kind.None)
 	writer_expect_hex(t, out[:n], writer_golden_reaction, "reaction")
@@ -477,6 +502,7 @@ reaction_checkmark_encode_validates_key_and_destination :: proc(t: ^testing.T) {
 reaction_message_decode_rejects_malformed_and_ignores_other_messages :: proc(t: ^testing.T) {
 	// A text message is not a reaction: empty result, no error.
 	text := [?]u8{0x0a, 0x02, 'h', 'i'}
+
 	message, error := wa.reaction_message_decode(text[:])
 	testing.expect_value(t, error.kind, wa.Media_Error_Kind.None)
 	testing.expect(t, !message.has_key && !message.has_text)
@@ -503,6 +529,7 @@ reaction_message_decode_rejects_malformed_and_ignores_other_messages :: proc(t: 
 
 	oversized := make([]u8, wa.MAX_PROTOBUF_MESSAGE_SIZE + 1)
 	defer delete(oversized)
+
 	_, size_error := wa.reaction_message_decode(oversized)
 	testing.expect_value(t, size_error.kind, wa.Media_Error_Kind.Message_Oversized)
 }
@@ -517,6 +544,7 @@ send_image_rejects_bad_state_and_inputs_before_any_network_work :: proc(t: ^test
 		phase = .Online,
 		auth = &auth,
 	}
+
 	_, not_group := wa.socket_send_image(&socket, "user@s.whatsapp.net", nil)
 	testing.expect_value(t, not_group.kind, wa.Socket_Error_Kind.Invalid_Config)
 	_, wrong_mime := wa.socket_send_image(&socket, "123@g.us", nil, mime_type = "application/pdf")
@@ -531,6 +559,7 @@ send_image_rejects_bad_state_and_inputs_before_any_network_work :: proc(t: ^test
 @(test)
 send_reaction_validates_state_key_and_text :: proc(t: ^testing.T) {
 	_, nil_socket := wa.socket_send_reaction(nil, {})
+
 	testing.expect_value(t, nil_socket.kind, wa.Socket_Error_Kind.Invalid_State)
 
 	auth: wa.Auth_State
@@ -538,13 +567,17 @@ send_reaction_validates_state_key_and_text :: proc(t: ^testing.T) {
 		phase = .Online,
 		auth = &auth,
 	}
+
 	good := wa.Message_Key {
 		remote_jid = "123@g.us",
 		id = "ID1",
 	}
+
 	_, no_id := wa.socket_send_reaction(&socket, {remote_jid = "123@g.us"})
+
 	testing.expect_value(t, no_id.kind, wa.Socket_Error_Kind.Invalid_Config)
 	_, not_group := wa.socket_send_reaction(&socket, {remote_jid = "1@s.whatsapp.net", id = "ID1"})
+
 	testing.expect_value(t, not_group.kind, wa.Socket_Error_Kind.Invalid_Config)
 	_, bad_utf8 := wa.socket_send_reaction(&socket, good, "\xff")
 	testing.expect_value(t, bad_utf8.kind, wa.Socket_Error_Kind.Invalid_Config)
@@ -587,6 +620,7 @@ download_fixture_init :: proc(f: ^Download_Fixture, plaintext: string) {
 		file_length = metadata.file_length,
 		has_file_length = true,
 	}
+
 	size, encode_error := wa.media_message_encode(f.protobuf[:], message)
 	assert(encode_error.kind == .None)
 	f.message = {
@@ -595,6 +629,7 @@ download_fixture_init :: proc(f: ^Download_Fixture, plaintext: string) {
 		id          = "ABC",
 		protobuf    = f.protobuf[:size],
 	}
+
 	f.socket = {
 		phase = .Online,
 		auth = &f.auth,
@@ -606,6 +641,7 @@ download_fixture_init :: proc(f: ^Download_Fixture, plaintext: string) {
 download_media_fetches_decrypts_and_verifies_over_the_cdn_path :: proc(t: ^testing.T) {
 	fixture := new(Download_Fixture)
 	defer free(fixture)
+
 	download_fixture_init(fixture, test_fixtures.SEND_IMAGE_PLAINTEXT)
 	context.user_ptr = &fixture.state
 	destination: [128]u8
@@ -626,6 +662,7 @@ download_media_fetches_decrypts_and_verifies_over_the_cdn_path :: proc(t: ^testi
 download_media_corrupt_ciphertext_fails_authentication_and_leaves_destination_untouched :: proc(t: ^testing.T) {
 	fixture := new(Download_Fixture)
 	defer free(fixture)
+
 	download_fixture_init(fixture, test_fixtures.SEND_IMAGE_PLAINTEXT)
 	context.user_ptr = &fixture.state
 	fixture.encrypted[3] ~= 1
@@ -651,6 +688,7 @@ download_media_corrupt_ciphertext_fails_authentication_and_leaves_destination_un
 download_media_surfaces_http_status_without_retrying_other_codes :: proc(t: ^testing.T) {
 	fixture := new(Download_Fixture)
 	defer free(fixture)
+
 	download_fixture_init(fixture, test_fixtures.SEND_IMAGE_PLAINTEXT)
 	context.user_ptr = &fixture.state
 	fixture.state.status = 503
@@ -672,6 +710,7 @@ download_media_surfaces_http_status_without_retrying_other_codes :: proc(t: ^tes
 download_media_runs_offline_backlog_while_provisioning :: proc(t: ^testing.T) {
 	fixture := new(Download_Fixture)
 	defer free(fixture)
+
 	download_fixture_init(fixture, test_fixtures.SEND_IMAGE_PLAINTEXT)
 	context.user_ptr = &fixture.state
 	fixture.socket.phase = .Provisioning
@@ -711,6 +750,7 @@ download_media_runs_offline_backlog_while_provisioning :: proc(t: ^testing.T) {
 download_media_preflights_state_message_and_destination_before_network :: proc(t: ^testing.T) {
 	fixture := new(Download_Fixture)
 	defer free(fixture)
+
 	download_fixture_init(fixture, test_fixtures.SEND_IMAGE_PLAINTEXT)
 	context.user_ptr = &fixture.state
 	destination: [128]u8
@@ -732,12 +772,14 @@ download_media_preflights_state_message_and_destination_before_network :: proc(t
 	testing.expect_value(t, size, len(test_fixtures.SEND_IMAGE_PLAINTEXT))
 
 	truncated := [3]u8{26, 5, 10}
+
 	malformed := fixture.message
 	malformed.protobuf = truncated[:]
 	_, malformed_error := wa.socket_download_media(&fixture.socket, &malformed, destination[:])
 	testing.expect_value(t, malformed_error.media.kind, wa.Media_Error_Kind.Invalid_Protobuf)
 
 	text := [3]u8{10, 1, 'x'}
+
 	not_media := fixture.message
 	not_media.protobuf = text[:]
 	_, text_error := wa.socket_download_media(&fixture.socket, &not_media, destination[:])
@@ -758,6 +800,7 @@ http_execute_requires_an_online_socket_and_never_runs_the_request_otherwise :: p
 	socket := wa.Socket {
 		phase = .Failed,
 	}
+
 	_, offline := wa.socket_http_execute(&socket, test_fixtures.http_marker_request(&marker), {}, execute = test_fixtures.http_marker_execute)
 	testing.expect_value(t, offline.kind, wa.Socket_Error_Kind.Invalid_State)
 	testing.expect(t, !sync.atomic_load(&marker.started))
@@ -769,29 +812,37 @@ download_private_voice_note_and_audio_attachment :: proc(t: ^testing.T) {
 	ciphertext, ok := hex.decode(transmute([]u8)string("d874b3233c0dcef4e9a268bc3b415bd2a7ec798e1433f153fc5499bd4392ef89f01b545fe9a517a297aa"))
 	assert(ok == nil)
 	defer delete(ciphertext)
+
 	plain_hash, a := hex.decode(transmute([]u8)string("a69b9f40bedbabf3e12dfc7196016db2025b82ab86a6685d3e61fadeb3cbe658"))
 	enc_hash, b := hex.decode(transmute([]u8)string("57b9cee7e10ae671167ef34896b1de2854a55defa4df5268c43d6400ca81447d"))
 	assert(a == nil && b == nil)
 	defer delete(plain_hash)
+
 	defer delete(enc_hash)
+
 	f := new(Download_Fixture)
 	defer free(f)
+
 	download_fixture_init(f, "setup")
 	f.state.encrypted = ciphertext
 	context.user_ptr = &f.state
 	for voice_note in ([]bool{true, false}) {
 		body: [300]u8
 		w := wa.Protobuf_Writer{dst = body[:]}
+
 		wa.protobuf_write_string(&w, 2, "audio/ogg; codecs=opus")
 		wa.protobuf_write_bytes(&w, 3, plain_hash)
 		wa.protobuf_write_uint(&w, 4, len("OggS audio fixture"))
 		wa.protobuf_write_uint(&w, 5, 2)
 		if voice_note {wa.protobuf_write_uint(&w, 6, 1)}
+
 		wa.protobuf_write_bytes(&w, 7, f.media_key[:])
 		wa.protobuf_write_bytes(&w, 8, enc_hash)
 		wa.protobuf_write_string(&w, 9, "/audio/test.enc")
 		wa.protobuf_write_bytes(&w, 19, []u8{1, 2, 3}) // Optional waveform.
+
 		outer := wa.Protobuf_Writer{dst = f.protobuf[:]}
+
 		wa.protobuf_write_bytes(&outer, 8, body[:w.at])
 		f.message.group = ""
 		f.message.protobuf = f.protobuf[:outer.at]
@@ -803,8 +854,10 @@ download_private_voice_note_and_audio_attachment :: proc(t: ^testing.T) {
 		testing.expect(t, err.kind == .None && string(dst[:n]) == "OggS audio fixture")
 		testing.expect_value(t, f.state.url, "https://mmg.whatsapp.net/audio/test.enc")
 	}
+
 	ciphertext[0] ~= 1
 	dst := [3]u8{1, 2, 3}
+
 	output: [64]u8
 	copy(output[:], dst[:])
 	_, corrupt := wa.socket_download_media(&f.socket, &f.message, output[:])

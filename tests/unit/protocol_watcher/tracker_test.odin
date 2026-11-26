@@ -200,6 +200,7 @@ tracker_cases :: proc(t: ^testing.T, suffix: string) {
 	arena: mem.Dynamic_Arena
 	mem.dynamic_arena_init(&arena)
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 
 	corpus, parse_error := j.parse(#load("../../fixtures/protocol_watch/tracker.json"), .JSON, true)

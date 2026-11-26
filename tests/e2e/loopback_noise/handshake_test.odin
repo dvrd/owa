@@ -43,6 +43,7 @@ fixture_client :: proc(client: ^wa.Client, connection: ^surf.WebSocket_Conn) {
 
 fixture_run :: proc(port: int, mode: string) {
 	socket, dial_error := net.dial_tcp_from_endpoint({net.IP4_Loopback, port})
+
 	assert(dial_error == nil)
 	tcp := net.TCP_Connection {
 		socket = socket,
@@ -63,6 +64,7 @@ fixture_run :: proc(port: int, mode: string) {
 		.None,
 	)
 	defer surf.websocket_close(&connection)
+
 	assert(surf.websocket_upgrade(&connection).kind == .None)
 	client: wa.Client
 	fixture_client(&client, &connection)
@@ -70,9 +72,10 @@ fixture_run :: proc(port: int, mode: string) {
 	if mode == "normal" {
 		client.config.handshake_timeout = time.Second
 	}
-
 	defer wa.client_close(&client)
+
 	payload := [?]u8{0x08, 0x01, 0x12, 0x03, 'b', 'o', 't'}
+
 	started := time.tick_now()
 	error := wa.client_handshake(&client, payload[:])
 
@@ -121,6 +124,7 @@ check_client_allocations :: proc(port: int, mode: string) {
 	tracker: mem.Tracking_Allocator
 	mem.tracking_allocator_init(&tracker, context.allocator)
 	defer mem.tracking_allocator_destroy(&tracker)
+
 	context.allocator = mem.tracking_allocator(&tracker)
 	context.temp_allocator = context.allocator
 	fixture_run(port, mode)
@@ -149,6 +153,7 @@ expect_client_frame :: proc(socket: net.Connection, opcode: u8, expected: string
 	body: [125]u8
 	peer.read_exact(socket, body[:len(expected)])
 	for &b, i in body[:len(expected)] {b ~= mask[i % 4]}
+
 	assert(string(body[:len(expected)]) == expected)
 }
 
@@ -164,6 +169,7 @@ serve_noise_transcript :: proc(server: ^Noise_Server) {
 	tcp: net.TCP_Connection
 	socket := peer.accept(server.listener, &tcp)
 	defer socket.close(socket.data)
+
 	buffer: [4096]u8
 	headers := peer.read_headers(socket, buffer[:])
 	key := peer.header_value(headers, "Sec-WebSocket-Key")
@@ -179,6 +185,7 @@ serve_noise_transcript :: proc(server: ^Noise_Server) {
 	if server.mode == "eof" {
 		data = data[:5]
 	}
+
 	frame: [130]u8
 	frame[0], frame[1] = 0x82, u8(len(data))
 	copy(frame[2:], transmute([]u8)data)
@@ -187,13 +194,16 @@ serve_noise_transcript :: proc(server: ^Noise_Server) {
 		time.sleep(500 * time.Millisecond)
 		return
 	}
+
 	for offset := 0; offset < len(data) + 2; offset += 5 {
 		peer.send_all(socket, frame[offset:min(offset + 5, len(data) + 2)])
 		time.sleep(time.Millisecond)
 	}
+
 	if server.mode == "eof" {
 		return
 	}
+
 	expect_client_frame(socket, 2, noise_envelope(FINISH))
 	data = noise_envelope(FROM_SERVER)
 	frame[1] = u8(len(data))
@@ -201,6 +211,7 @@ serve_noise_transcript :: proc(server: ^Noise_Server) {
 	peer.send_all(socket, frame[:2 + len(data)])
 	expect_client_frame(socket, 2, noise_envelope(FROM_CLIENT))
 	peer.send_all(socket, []u8{0x88, 2, 3, 0xe8})
+
 	expect_client_frame(socket, 8, "\x03\xe8")
 }
 
@@ -209,9 +220,12 @@ noise_handshake_over_local_websocket :: proc(t: ^testing.T) {
 	for mode in ([]string{"normal", "eof", "timeout", "normal"}) {
 		listener, port := peer.listen()
 		defer net.close(listener)
+
 		server := Noise_Server{listener, mode}
+
 		worker := thread.create_and_start_with_poly_data(&server, serve_noise_transcript)
 		defer thread.destroy(worker)
+
 		check_client_allocations(port, mode)
 		thread.join(worker)
 	}

@@ -33,12 +33,15 @@ whatsapp_query_observer_reports_sent_queries_only :: proc(t: ^testing.T) {
 	previous := context.user_ptr
 	context.user_ptr = &record
 	defer context.user_ptr = previous
+
 	sync.atomic_store(&query_observer_test_record, rawptr(&record))
 	defer sync.atomic_store(&query_observer_test_record, nil)
+
 	wa.query_observer_set(query_observer_test_observe)
 	defer wa.query_observer_set(nil)
 
 	query := wa.Binary_Node{tag = "iq"}
+
 	socket: wa.Socket
 	document, error := wa.socket_query(&socket, query)
 	wa.binary_document_destroy(&document)
@@ -51,16 +54,20 @@ whatsapp_query_observer_reports_sent_queries_only :: proc(t: ^testing.T) {
 	wa.binary_document_destroy(&document)
 	testing.expect(t, error.kind != .None)
 	testing.expect_value(t, record, Query_Observer_Record{calls = 1, failures = 1})
+
 	wa.socket_close(&socket)
 }
 
 @(test)
 official_version_explicit_payload_is_preserved_by_socket_settings :: proc(t: ^testing.T) {
 	explicit := [3]u32{2, 3000, 1234567890}
+
 	root: x509.Certificate
 	roots := [1]^x509.Certificate{&root}
+
 	// Settings-only fixture; no TLS handshake or external request.
 	settings, error := wa.socket_connect_settings({payload = {version = explicit}, tls = {root_cas = roots[:]}})
+
 	testing.expect_value(t, error.kind, .None)
 	testing.expect_value(t, settings.payload.version, explicit)
 }

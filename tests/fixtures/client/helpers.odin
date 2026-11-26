@@ -108,6 +108,7 @@ ack_routing_unchanged :: proc(t: ^testing.T, f: ^Negative_Ack_Fixture, before: [
 	testing.expect_value(t, len(f.socket.deferred_retries), 0)
 	after := negative_ack_disk(f)
 	defer delete(after)
+
 	testing.expect(t, bytes.equal(before, after), "transport ACK cannot commit chat state")
 }
 
@@ -165,9 +166,11 @@ negative_ack_unchanged :: proc(t: ^testing.T, f: ^Negative_Ack_Fixture, before: 
 	testing.expect_value(t, f.socket.phase, .Online)
 	after := negative_ack_disk(f)
 	defer delete(after)
+
 	testing.expect(t, bytes.equal(before, after), "negative/irrelevant ACK must not rewrite disk")
 	restored: wa.State_Store
 	defer wa.state_store_clear(&restored)
+
 	testing.expect_value(t, wa.state_store_load(&restored, f.path, f.store.identity).kind, .None)
 	testing.expect_value(t, restored.revision, revision)
 

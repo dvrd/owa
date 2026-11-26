@@ -83,6 +83,7 @@ send_peer_bundle :: proc(local: wa.Signal_Recipient_Keys) -> wa.Signal_Prekey_Bu
 		prekey_id = local.prekey_id,
 		prekey_public = wa.signal_curve_public(local.prekey_private),
 	}
+
 	signed: [33]u8
 	signed[0] = 5
 	copy(signed[1:], bundle.signed_prekey_public[:])
@@ -188,8 +189,10 @@ send_peer_device_node :: proc(id, key_index: string) -> wa.Binary_Node {
 send_peer_user_node :: proc(jid: string, devices: []wa.Binary_Node) -> wa.Binary_Node {
 	attrs := new([1]wa.Binary_Node_Attribute, context.temp_allocator)
 	attrs^ = {{"jid", jid}}
+
 	list := new([1]wa.Binary_Node, context.temp_allocator)
 	list^ = {{tag = "device-list", content = devices}}
+
 	holder := new([1]wa.Binary_Node, context.temp_allocator)
 	holder^ = {{tag = "devices", content = list[:]}}
 
@@ -211,7 +214,9 @@ send_peer_iq :: proc(peer: ^Send_Peer, node: wa.Binary_Node) {
 	switch xmlns {
 	case "w:sync:app:state":
 		attrs[2] = {"from", "@s.whatsapp.net"}
+
 		if to, _ := wa.node_attr(node, "to"); to != "@s.whatsapp.net" { peer.failed = true; return }
+
 		sync, _ := wa.device_unique_child(node, "sync")
 		collection, _ := wa.device_unique_child(sync, "collection")
 		snapshot, _ := wa.node_attr(collection, "return_snapshot")
@@ -222,33 +227,55 @@ send_peer_iq :: proc(peer: ^Send_Peer, node: wa.Binary_Node) {
 			peer.failed = true
 			return
 		}
+
 		reply := peer.contact_replies[peer.contact_requests]
 		peer.contact_requests += 1
 		send_peer_enqueue(peer, {tag = "iq", attrs = attrs, content = []wa.Binary_Node{{tag = "sync", content = []wa.Binary_Node{reply}}}})
+
+
 	case "w:g2":
 		peer.metadata_queries += 1
 		attrs[2] = {"from", "123@g.us"}
+
 		group_attrs := []wa.Binary_Node_Attribute{{"id", "123"}, {"subject", "Synthetic"}, {"addressing_mode", "pn"}}
+
 		participants := []wa.Binary_Node{send_peer_participant_node("111@s.whatsapp.net"), send_peer_participant_node("222@s.whatsapp.net")}
+
 		group := []wa.Binary_Node{{tag = "group", attrs = group_attrs, content = participants}}
+
 		send_peer_enqueue(peer, {tag = "iq", attrs = attrs, content = group})
+
+
 	case "usync":
 		peer.device_queries += 1
 		own := []wa.Binary_Node{send_peer_device_node("1", "1")}
+
 		other := []wa.Binary_Node{send_peer_device_node("1", "1"), send_peer_device_node("2", "2")}
+
 		users := []wa.Binary_Node{send_peer_user_node("111@s.whatsapp.net", own), send_peer_user_node("222@s.whatsapp.net", other)}
+
 		list := []wa.Binary_Node{{tag = "list", content = users}}
+
 		usync := []wa.Binary_Node{{tag = "usync", content = list}}
+
 		send_peer_enqueue(peer, {tag = "iq", attrs = attrs, content = usync})
+
+
 	case "encrypt":
 		peer.key_queries += 1
 		send_peer_keys(peer, node, attrs)
 	case "w:m":
 		host_attrs := []wa.Binary_Node_Attribute{{"hostname", "mmg.whatsapp.net"}, {"maxContentLengthBytes", "16777216"}}
+
 		hosts := []wa.Binary_Node{{tag = "host", attrs = host_attrs}}
+
 		conn_attrs := []wa.Binary_Node_Attribute{{"auth", "synthetic-token"}, {"ttl", "30"}}
+
 		conn := []wa.Binary_Node{{tag = "media_conn", attrs = conn_attrs, content = hosts}}
+
 		send_peer_enqueue(peer, {tag = "iq", attrs = attrs, content = conn})
+
+
 	case:
 		peer.failed = true
 	}
@@ -280,23 +307,32 @@ send_peer_keys :: proc(peer: ^Send_Peer, node: wa.Binary_Node, attrs: []wa.Binar
 	jid, _ := wa.node_attr(user^, "jid")
 	bundle := send_peer_bundle(peer.local[send_peer_device_index(jid)])
 	registration := [4]u8{u8(bundle.registration_id >> 24), u8(bundle.registration_id >> 16), u8(bundle.registration_id >> 8), u8(bundle.registration_id)}
+
 	signed_id := [3]u8{0, 0, 7}
+
 	prekey_id := [3]u8{0, 0, 9}
+
 	signed := []wa.Binary_Node {
 		{tag = "id", content = signed_id[:]},
 		{tag = "value", content = bundle.signed_prekey_public[:]},
 		{tag = "signature", content = bundle.signed_prekey_signature[:]},
 	}
+
 	one_time := []wa.Binary_Node{{tag = "id", content = prekey_id[:]}, {tag = "value", content = bundle.prekey_public[:]}}
+
 	fields := []wa.Binary_Node {
 		{tag = "registration", content = registration[:]},
 		{tag = "identity", content = bundle.identity_public[:]},
 		{tag = "skey", content = signed},
 		{tag = "key", content = one_time},
 	}
+
 	user_attrs := []wa.Binary_Node_Attribute{{"jid", jid}}
+
 	users := []wa.Binary_Node{{tag = "user", attrs = user_attrs, content = fields}}
+
 	list := []wa.Binary_Node{{tag = "list", content = users}}
+
 	send_peer_enqueue(peer, {tag = "iq", attrs = attrs, content = list})
 }
 
@@ -346,14 +382,19 @@ send_peer_message :: proc(peer: ^Send_Peer, node: wa.Binary_Node, raw: []u8) {
 		cipher, ok := enc.content.([]u8)
 		peer.durable = found && bytes.equal(stored, raw)
 		if !ok || e.kind != .None || !peer.durable || to != "111@s.whatsapp.net" || priority != ("" if peer.lookup_reply != nil else ("high_force" if peer.history_reply != nil else "high")) { peer.failed = true; return }
+
 		plaintext: [512]u8
 		n, _, err := wa.signal_session_decrypt_prekey(&peer.pairwise[0], plaintext[:], cipher, peer.local[0], peer.store.identity)
 		if err.kind != .None { peer.failed = true; return }
+
 		peer.last_size = copy(peer.last_plain[:], send_peer_unpad(plaintext[:n]))
 		if peer.history_reply != nil {peer.history_reply(peer, id)}
+
 		if peer.lookup_reply != nil {peer.lookup_reply(peer, id)}
+
 		return
 	}
+
 	_, group_found := wa.state_store_get(&loaded, .Sender_Key, "123@g.us|111:1@s.whatsapp.net")
 	_, content_found := wa.state_store_get(&loaded, .Outbound_Content, id)
 	peer.durable = found && group_found && content_found && bytes.equal(stored, raw) && loaded.revision == loaded.durable_revision
@@ -464,6 +505,7 @@ send_peer_write :: proc(data: rawptr, wire: []u8) -> (int, surf.WebSocket_Stream
 
 	payload := make([]u8, len(wire) - at)
 	defer delete(payload)
+
 	copy(payload, wire[at:])
 	ws.mask_payload(payload, header.masking_key)
 	envelope := payload
@@ -486,6 +528,7 @@ send_peer_write :: proc(data: rawptr, wire: []u8) -> (int, surf.WebSocket_Stream
 
 	plaintext := make([]u8, size)
 	defer delete(plaintext)
+
 	n, noise_error := wa.noise_decrypt(&peer.noise, plaintext, envelope[3:])
 
 	if noise_error != .None {
@@ -499,7 +542,6 @@ send_peer_write :: proc(data: rawptr, wire: []u8) -> (int, surf.WebSocket_Stream
 		peer.failed = true
 		return 0, {kind = .TCP_Failed}
 	}
-
 	defer wa.binary_document_destroy(&document)
 
 	if document.root.tag == "iq" {
@@ -571,6 +613,7 @@ send_peer_new :: proc() -> ^Send_Peer {
 		prekeys = &peer.prekeys,
 		config = {state_path = peer.path, query_timeout = time.Second, http_execute = send_peer_http},
 	}
+
 	peer.socket.websocket = {
 		phase = .Open,
 		allocator = context.allocator,
@@ -585,6 +628,7 @@ send_peer_new :: proc() -> ^Send_Peer {
 			set_write_deadline = send_peer_deadline,
 		},
 	}
+
 	// Readiness hook only: bytes are delivered by the in-memory stream.
 	peer.socket.websocket.tls_client.application.inbound_size = 1
 	assert(wa.client_init(&peer.socket.client, &peer.socket.websocket, {static_private_key = peer.auth.credentials.noise_private}, {max_frame_payload = 8192}).kind == .None)
@@ -594,6 +638,7 @@ send_peer_new :: proc() -> ^Send_Peer {
 		write_key = send_peer_noise_key(1),
 		read_key  = send_peer_noise_key(33),
 	}
+
 	peer.socket.client.phase = .Noise_Ready
 	peer.socket.client.frames.intro_sent = true
 	peer.socket.session = {
@@ -604,6 +649,7 @@ send_peer_new :: proc() -> ^Send_Peer {
 		last_received = time.now(),
 		next_ping = time.time_add(time.now(), time.Minute),
 	}
+
 	peer.noise = {
 		phase     = .Transport,
 		read_key  = send_peer_noise_key(1),
@@ -656,5 +702,6 @@ send_peer_use_pipe :: proc(peer: ^Send_Peer) {
 send_peer_announce :: proc(peer: ^Send_Peer) {
 	peer.pipe_pending = true
 	byte := [1]u8{1}
+
 	posix.write(peer.pipe[1], raw_data(byte[:]), 1)
 }

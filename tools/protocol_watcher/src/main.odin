@@ -77,6 +77,7 @@ public_scan :: proc(
 append_to_env_named_file :: proc(name, value: string) {
 	if path, ok := os.lookup_env(name, context.allocator); ok && path != "" {
 		file, error := os.open(path, {.Write, .Append})
+
 		if error == nil {
 			_, _ = os.write(file, transmute([]u8)value)
 			os.close(file)
@@ -110,6 +111,7 @@ execute :: proc(
 		"--codex",
 		"--budget-seconds",
 	}
+
 	for name in keys(opts) {
 		if !slice.contains(allowed, name) {
 			return null(), 2, "ARGUMENTS_INVALID"

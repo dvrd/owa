@@ -41,22 +41,31 @@ unit_whisper :: proc(sender: ^wa.Signal_Session, identity: [32]u8, body: []u8) -
 recovery_delayed_packet_survives_dh_ratchet_and_disk_restart :: proc(t: ^testing.T) {
 	f, directory := unit_fixture()
 	defer unit_cleanup(f, directory)
+
 	fixture_established(f)
 	a_identity := wa.signal_curve_public(fixture_private(0))
 	b_identity := wa.signal_curve_public(fixture_private(96))
 	first := unit_whisper(&f.pair.a, b_identity, []u8{11})
+
 	defer delete(first)
+
 	delayed := unit_whisper(&f.pair.a, b_identity, []u8{22})
+
 	defer delete(delayed)
+
 	plaintext: [1024]u8
 	_, error := wa.signal_session_decrypt(&f.pair.b, plaintext[:], first, a_identity)
 	assert(error.kind == .None)
 	reply := unit_whisper(&f.pair.b, a_identity, []u8{33})
+
 	defer delete(reply)
+
 	_, error = wa.signal_session_decrypt(&f.pair.a, plaintext[:], reply, b_identity)
 	assert(error.kind == .None)
 	rotated := unit_whisper(&f.pair.a, b_identity, []u8{44})
+
 	defer delete(rotated)
+
 	_, error = wa.signal_session_decrypt(&f.pair.b, plaintext[:], rotated, a_identity)
 	assert(error.kind == .None && f.pair.b.skipped_count == 1)
 	session_set(&f.store, "device-a", &f.pair.a)
@@ -75,9 +84,11 @@ recovery_delayed_packet_survives_dh_ratchet_and_disk_restart :: proc(t: ^testing
 	assert(found)
 	before := session_bytes(&f.pair.b)
 	defer delete(before)
+
 	_, error = wa.signal_session_decrypt(&f.pair.b, plaintext[:], saved, a_identity)
 	after := session_bytes(&f.pair.b)
 	defer delete(after)
+
 	testing.expect(t, error.kind == .Replay && bytes.equal(before, after))
 }
 
@@ -85,9 +96,11 @@ recovery_delayed_packet_survives_dh_ratchet_and_disk_restart :: proc(t: ^testing
 recovery_untrusted_new_device_requires_explicit_identity :: proc(t: ^testing.T) {
 	f, directory := unit_fixture()
 	defer unit_cleanup(f, directory)
+
 	fixture_established(f)
 	original := session_bytes(&f.pair.a)
 	defer delete(original)
+
 	local := fixture_local(192, 300, false)
 	bundle := fixture_bundle(local)
 	wire, plaintext: [1024]u8
@@ -95,6 +108,7 @@ recovery_untrusted_new_device_requires_explicit_identity :: proc(t: ^testing.T) 
 	assert(error.kind == .Untrusted_Identity)
 	unchanged := session_bytes(&f.pair.a)
 	defer delete(unchanged)
+
 	assert(bytes.equal(original, unchanged))
 	next := new(Pair)
 	defer {
@@ -142,9 +156,12 @@ recovery_untrusted_new_device_requires_explicit_identity :: proc(t: ^testing.T) 
 	assert(found && bytes.equal(identity, bundle.identity_public[:]))
 	old := session_bytes(&f.pair.a)
 	defer delete(old)
+
 	assert(bytes.equal(old, original))
 	reply := unit_whisper(&next.b, wa.signal_curve_public(fixture_private(0)), []u8{88})
+
 	defer delete(reply)
+
 	size, error = wa.signal_session_decrypt(&next.a, plaintext[:], reply, bundle.identity_public)
 	testing.expect(t, error.kind == .None && size == 1 && plaintext[0] == 88)
 	fixture_encrypt(f)
@@ -155,9 +172,11 @@ recovery_untrusted_new_device_requires_explicit_identity :: proc(t: ^testing.T) 
 recovery_rotated_signed_prekey_keeps_existing_session_generation :: proc(t: ^testing.T) {
 	f, directory := unit_fixture()
 	defer unit_cleanup(f, directory)
+
 	fixture_established(f)
 	original := session_bytes(&f.pair.b)
 	defer delete(original)
+
 	local := fixture_local(96, 200)
 	local.signed_prekey_private = fixture_private(192)
 	local.signed_prekey_id = 8
@@ -208,9 +227,12 @@ recovery_rotated_signed_prekey_keeps_existing_session_generation :: proc(t: ^tes
 	session_get(&f.store, "device-b/generation-2", &next.b)
 	old := session_bytes(&f.pair.b)
 	defer delete(old)
+
 	assert(bytes.equal(old, original) && wa.prekey_store_get(&f.prekeys, 10) == nil)
 	reply := unit_whisper(&next.b, wa.signal_curve_public(fixture_private(0)), []u8{66})
+
 	defer delete(reply)
+
 	count, error = wa.signal_session_decrypt(&next.a, plaintext[:], reply, bundle.identity_public)
 	testing.expect(t, error.kind == .None && count == 1 && plaintext[0] == 66)
 	fixture_encrypt(f)
@@ -221,12 +243,14 @@ recovery_rotated_signed_prekey_keeps_existing_session_generation :: proc(t: ^tes
 recovery_bad_prekey_mac_does_not_consume_key_or_initialize_session :: proc(t: ^testing.T) {
 	f, directory := unit_fixture()
 	defer unit_cleanup(f, directory)
+
 	fixture_first(f)
 	wire, found := wa.state_store_get(&f.store, .Outbound_Message, INITIAL_ID)
 	assert(found)
 	corrupt := make([]u8, len(wire))
 	copy(corrupt, wire)
 	defer delete(corrupt)
+
 	prekey, decoded := wa.signal_prekey_message_decode(corrupt)
 	assert(decoded.kind == .None)
 	whisper, message_error := wa.signal_whisper_decode(prekey.message)
@@ -257,17 +281,21 @@ recovery_bad_prekey_mac_does_not_consume_key_or_initialize_session :: proc(t: ^t
 recovery_corrupt_inner_session_preserves_live_ratchet :: proc(t: ^testing.T) {
 	f, directory := unit_fixture()
 	defer unit_cleanup(f, directory)
+
 	fixture_established(f)
 	before := session_bytes(&f.pair.b)
 	defer delete(before)
+
 	corrupt := make([]u8, len(before))
 	copy(corrupt, before)
 	defer delete(corrupt)
+
 	corrupt[len(corrupt) - 1] ~= 1
 	error := wa.signal_session_decode(&f.pair.b, corrupt)
 	assert(error.kind != .None)
 	after := session_bytes(&f.pair.b)
 	defer delete(after)
+
 	testing.expect(t, bytes.equal(before, after))
 	fixture_encrypt(f)
 	fixture_decrypt(f)

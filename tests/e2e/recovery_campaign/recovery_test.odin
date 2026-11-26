@@ -12,6 +12,7 @@ run_recovery_child :: proc "contextless" () {
 	if len(os.args) < 2 || os.args[1] != "--recovery-fixture" {
 		return
 	}
+
 	assert(len(os.args) == 5)
 	switch os.args[2] {
 	case "write":
@@ -21,6 +22,7 @@ run_recovery_child :: proc "contextless" () {
 	case:
 		panic("Unknown recovery operation")
 	}
+
 	os.exit(0)
 }
 
@@ -37,9 +39,12 @@ send_state_survives_process_exit :: proc(t: ^testing.T) {
 		directory, err := os.make_directory_temp("/tmp", "wa-recovery-*", context.allocator)
 		assert(err == nil)
 		defer delete(directory)
+
 		defer os.remove_all(directory)
+
 		writer := child.start("write", directory, stage)
 		defer child.close(&writer)
+
 		if stage == "control" {
 			child.wait(&writer)
 		} else {
@@ -50,8 +55,10 @@ send_state_survives_process_exit :: proc(t: ^testing.T) {
 			)
 			child.kill_at_boundary(&writer)
 		}
+
 		reader := child.start("verify", directory, stage)
 		defer child.close(&reader)
+
 		child.wait(&reader)
 	}
 }

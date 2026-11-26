@@ -44,16 +44,21 @@ socket_process_node :: proc(socket: ^Socket, node: Binary_Node) -> (Socket_Event
 		}
 
 		return {}, {}
+
+
 	case "notification", "call":
 		if e := socket_note_contact_update(socket, node); e.kind != .None {
 			return {}, e
 		}
+
 		// A transport ACK does not answer a call. Preserve its node for waiters.
 		if e := socket_acknowledge(socket, node); e.kind != .None {
 			return {}, e
 		}
 
 		return {kind = .Node, node = node}, {}
+
+
 	case:
 		return {kind = .Node, node = node}, {}
 	}
@@ -209,6 +214,7 @@ socket_process_message :: proc(
 		return {}, e
 	}
 	defer state_store_clear(&candidate)
+
 	// Known own-group echoes are discarded without decrypting. They must not
 	// turn unauthenticated sender hints into independently persisted mappings.
 	if group == "" || !socket_sender_is_self(socket, participant) {
@@ -222,12 +228,13 @@ socket_process_message :: proc(
 	if name_error.kind != .None {
 		return {}, name_error
 	}
-
 	defer delete(name)
+
 	if marker, found := state_store_get(&candidate, .Processed_Message, name); found {
 		if history_receipt != nil {
 			history_receipt^ = processed_history_receipt(marker)
 		}
+
 		return {}, {}
 	}
 
@@ -241,6 +248,7 @@ socket_process_message :: proc(
 	if group != "" && socket_sender_is_self(socket, participant) {
 		return {}, socket_message_processed_commit(socket, &candidate, name)
 	}
+
 	var_payload, payload_error := socket_message_payload_decrypt(
 		socket,
 		&candidate,
@@ -255,9 +263,11 @@ socket_process_message :: proc(
 		crypto.zero_explicit(raw_data(var_payload), len(var_payload))
 		delete(var_payload)
 	}
+
 	if var_payload == nil {
 		return {}, socket_message_processed_commit(socket, &candidate, name)
 	}
+
 	own := socket_sender_is_self_store(&candidate, socket.auth, participant)
 	if !own {
 		if profile, ok := node_attr(node, "notify");
@@ -265,12 +275,14 @@ socket_process_message :: proc(
 			user, _, _ := pairing_jid_decode(participant)
 			jid := fmt.aprintf("%s%s", user, participant[strings.index_byte(participant, '@'):])
 			defer delete(jid)
+
 			if e := state_store_set(&candidate, .Contact_Profile, jid, transmute([]u8)profile);
 			   e.kind != .None {
 				return {}, {kind = .State_Failed, state = e}
 			}
 		}
 	}
+
 	handled, control_error := socket_message_control_commit(
 		socket,
 		&candidate,
@@ -284,6 +296,7 @@ socket_process_message :: proc(
 	if handled {
 		return {}, control_error
 	}
+
 	return socket_message_event_commit(
 		socket,
 		&candidate,
@@ -353,6 +366,7 @@ socket_message_cipher_decrypt :: proc(
 
 		key := fmt.aprintf("%s|%s", group, signal_participant)
 		defer delete(key)
+
 		record := new(Signal_Group_Record)
 		defer {
 			signal_group_record_clear(record)
@@ -416,6 +430,7 @@ socket_message_distribution_install :: proc(
 
 		key := fmt.aprintf("%s|%s", distribution.group_id, signal_participant)
 		defer delete(key)
+
 		record := new(Signal_Group_Record)
 		defer {
 			signal_group_record_clear(record)
@@ -456,6 +471,7 @@ socket_message_child_decrypt :: proc(
 	defer {
 		crypto.zero_explicit(raw_data(plaintext), len(plaintext)); delete(plaintext)
 	}
+
 	count, decrypt_error := socket_message_cipher_decrypt(
 		staged,
 		group,
@@ -468,6 +484,7 @@ socket_message_child_decrypt :: proc(
 	if decrypt_error.kind != .None {
 		return decrypt_error
 	}
+
 	unpadded, e := socket_message_unpad(plaintext[:count])
 	if e.kind != .None {
 		return e
@@ -511,12 +528,14 @@ message_encryption_nack_reason :: proc(node: Binary_Node) -> u32 {
 	if !ok {
 		return 0 // Shape validation remains with the ordinary decoder.
 	}
+
 	reason: u32
 
 	for child in children {
 		if child.tag != "enc" {
 			continue
 		}
+
 		kind, _ := node_attr(child, "type")
 
 		switch kind {
@@ -543,11 +562,13 @@ socket_message_payload_decrypt :: proc(
 	if message_encryption_nack_reason(node) != 0 {
 		return nil, {kind = .Unsupported_Message_Encryption}
 	}
+
 	staged := new(Socket)
 	defer {
 		crypto.zero_explicit(staged, size_of(Socket))
 		free(staged)
 	}
+
 	staged.store = candidate
 	staged.auth = socket.auth
 	staged.prekeys = socket.prekeys
@@ -556,8 +577,8 @@ socket_message_payload_decrypt :: proc(
 	if address_error.kind != .None {
 		return nil, address_error
 	}
-
 	defer delete(signal_participant)
+
 	children, ok := node.content.([]Binary_Node)
 	if !ok {
 		return nil, {kind = .Protocol_Error}
@@ -569,6 +590,7 @@ socket_message_payload_decrypt :: proc(
 		crypto.zero_explicit(raw_data(var_payload), len(var_payload))
 		delete(var_payload)
 	}
+
 	// Pairwise sender-key distributions must be installed before skmsg in the
 	// same stanza regardless of the order supplied by the server.
 	for pass in 0 ..< 2 {
@@ -600,6 +622,7 @@ socket_message_payload_decrypt :: proc(
 			}
 		}
 	}
+
 	success = true
 	return var_payload, {}
 }
@@ -634,6 +657,7 @@ socket_message_control_commit :: proc(
 				return true, e
 			}
 		}
+
 		if group == "" {
 			if e := store_contact_sync_key_share(candidate, protocol); e.kind != .None {
 				return true, e
@@ -651,6 +675,7 @@ socket_message_control_commit :: proc(
 			_, device, pe := pairing_jid_decode(participant)
 			primary_lookup = pe.kind == .None && device == 0
 		}
+
 		if e := socket_store_commit(socket, candidate); e.kind != .None {
 			return true, e
 		}
@@ -660,6 +685,7 @@ socket_message_control_commit :: proc(
 				return true, e
 			}
 		}
+
 		if history && socket.history_request != nil {
 			_, device, pe := pairing_jid_decode(participant)
 			control_type, valid := read_unique_protobuf_field(protocol, 2, 0)
@@ -672,19 +698,24 @@ socket_message_control_commit :: proc(
 				}
 			}
 		}
+
 		if history && socket.config.sync_contacts {
 			socket.profile_history_pending = true
 		}
+
 		if socket.contact_key_size > 0 {
 			key := hex.encode(socket.contact_key_requested[:socket.contact_key_size])
 			defer delete(key)
+
 			if _, available := state_store_get(socket.store, .Contact_Sync_Key, string(key));
 			   available {
 				socket.contact_key_size = 0
 				socket.contact_refresh_after = {}
+
 				socket.contact_refresh_due = true
 			}
 		}
+
 		if history_receipt != nil {
 			history_receipt^ = history
 		}
@@ -723,6 +754,7 @@ socket_message_event_commit :: proc(
 			recipient = to
 		}
 	}
+
 	message, message_error := socket_message_new(
 		group,
 		participant,
@@ -743,11 +775,13 @@ socket_message_event_commit :: proc(
 			socket_message_destroy(message)
 		}
 	}
+
 	if socket.config.track_chat_history_cursors {
 		if e := store_chat_history_cursor(candidate, message); e.kind != .None {
 			return {}, {kind = .State_Failed, state = e}
 		}
 	}
+
 	if e := socket_inbox_stage(candidate, name, message); e.kind != .None {
 		return {}, e
 	}
@@ -773,8 +807,8 @@ socket_pairwise_decrypt :: proc(
 	if address_error.kind != .None {
 		return 0, address_error
 	}
-
 	defer delete(address)
+
 	session := new(Signal_Session)
 	defer {
 		signal_session_clear(session)
@@ -783,6 +817,7 @@ socket_pairwise_decrypt :: proc(
 
 	session_name := strings.clone(address)
 	defer delete(session_name)
+
 	trusted: [32]u8
 	pinned, state_error := socket_pairwise_state_load(socket, address, session, &trusted)
 	if state_error.kind != .None {
@@ -797,6 +832,7 @@ socket_pairwise_decrypt :: proc(
 	}
 
 	defer crypto.zero_explicit(&local, size_of(local))
+
 	count: int
 	consumed := false
 	consumed_id: u32
@@ -830,6 +866,7 @@ socket_pairwise_decrypt :: proc(
 	if var_error.kind != .None {
 		return 0, var_error
 	}
+
 	if stage_error := socket_pairwise_decryption_stage(
 		socket,
 		address,
@@ -885,11 +922,13 @@ socket_pairwise_prekey_archive_select :: proc(
 	archived := false
 	prefix := fmt.aprintf("%s#", address)
 	defer delete(prefix)
+
 	old := new(Signal_Session)
 	defer {
 		signal_session_clear(old)
 		free(old)
 	}
+
 	for record in socket.store.records {
 		if record.kind != .Session || !strings.has_prefix(record.name, prefix) {
 			continue
@@ -911,6 +950,7 @@ socket_pairwise_prekey_archive_select :: proc(
 			break
 		}
 	}
+
 	if !archived {
 		if e := socket_archive_session(socket, address, session); e.kind != .None {
 			return e
@@ -929,6 +969,7 @@ socket_pairwise_one_time_prekey_load :: proc(
 ) -> Socket_Error {
 	marker := fmt.aprintf("%d", peek.prekey_id)
 	defer delete(marker)
+
 	if _, found := state_store_get(socket.store, .Consumed_Prekey, marker); found {
 		return {kind = .Signal_Failed, signal = {kind = .Missing_Prekey}}
 	}
@@ -1022,6 +1063,7 @@ socket_pairwise_whisper_open :: proc(
 		initial_error := e
 		prefix := fmt.aprintf("%s#", address)
 		defer delete(prefix)
+
 		recovered := false
 
 		for record in socket.store.records {
@@ -1146,11 +1188,13 @@ socket_store_commit :: proc(socket: ^Socket, next: ^State_Store) -> Socket_Error
 	if socket.store.requires_reload {
 		return {kind = .State_Failed, state = {kind = .Directory_Flush_Failed}}
 	}
+
 	if e := state_store_save(next, socket.config.state_path); e.kind != .None {
 		if e.kind == .Directory_Flush_Failed {
 			socket.store.requires_reload = true
 			return socket_fail(socket, {kind = .State_Failed, state = e})
 		}
+
 		return {kind = .State_Failed, state = e}
 	}
 
@@ -1174,6 +1218,7 @@ socket_inbox_id_valid :: proc(id: string) -> bool {
 
 	return true
 }
+
 socket_receive_group_valid :: proc(jid: string) -> bool {
 	if len(jid) > 128 || !strings.has_suffix(jid, "@g.us") {
 		return false
@@ -1193,6 +1238,7 @@ socket_receive_group_valid :: proc(jid: string) -> bool {
 
 	return true
 }
+
 socket_inbox_key :: proc(
 	socket: ^Socket,
 	group, participant, id: string,
@@ -1206,6 +1252,7 @@ socket_inbox_key :: proc(
 
 	return socket_inbox_key_store(socket.store, group, participant, id)
 }
+
 socket_inbox_key_store :: proc(
 	store: ^State_Store,
 	group, participant, id: string,
@@ -1221,11 +1268,11 @@ socket_inbox_key_store :: proc(
 	if e.kind != .None {
 		return "", e
 	}
-
 	defer delete(canonical)
 
 	return fmt.aprintf("%s|%s|%s", group, canonical, id), {}
 }
+
 socket_sender_is_self :: proc(socket: ^Socket, jid: string) -> bool {
 	if socket == nil {
 		return false
@@ -1233,6 +1280,7 @@ socket_sender_is_self :: proc(socket: ^Socket, jid: string) -> bool {
 
 	return socket_sender_is_self_store(socket.store, socket.auth, jid)
 }
+
 socket_sender_is_self_store :: proc(store: ^State_Store, auth: ^Auth_State, jid: string) -> bool {
 	if store == nil || !store.initialized || auth == nil {
 		return false
@@ -1277,8 +1325,8 @@ socket_sender_is_self_store :: proc(store: ^State_Store, auth: ^Auth_State, jid:
 		if ce.kind != .None {
 			return false
 		}
-
 		defer delete(canonical)
+
 		canonical_user, _, cpe := pairing_jid_decode(canonical)
 		own_user, _, ope := pairing_jid_decode(own)
 		if cpe.kind == .None &&
@@ -1316,6 +1364,7 @@ socket_message_new :: proc(
 			socket_message_destroy(message)
 		}
 	}
+
 	group_copy, ge := strings.clone(group, a)
 	if ge != nil {
 		return nil, {kind = .Allocation_Failed, allocation = ge}
@@ -1333,8 +1382,10 @@ socket_message_new :: proc(
 		if e != nil {
 			return nil, {kind = .Allocation_Failed, allocation = e}
 		}
+
 		message.recipient = to
 	}
+
 	id_copy, ie := strings.clone(id, a)
 	if ie != nil {
 		return nil, {kind = .Allocation_Failed, allocation = ie}
@@ -1362,6 +1413,7 @@ socket_inbox_stage :: proc(
 ) -> Socket_Error {
 	timestamp := fmt.aprintf("%d", message.timestamp)
 	defer delete(timestamp)
+
 	own := message.from_me ? "1" : "0"
 	offline := message.offline ? "1" : "0"
 	node := Binary_Node {
@@ -1422,6 +1474,7 @@ socket_complete_private_audio :: proc(
 	if !device_user_jid_valid(authorized_chat, false) {
 		return {kind = .Invalid_Config}
 	}
+
 	return socket_complete_inbox(socket, message, authorized_chat)
 }
 
@@ -1442,12 +1495,15 @@ load_private_audio :: proc(
 	   !socket_inbox_id_valid(id) {
 		return nil, {kind = .Invalid_Config}
 	}
+
 	for jid in ([2]string{chat, chat_history_alternate_jid(store, chat)}) {
 		if jid == "" {
 			continue
 		}
+
 		key := fmt.aprintf("%s|%s", jid, id)
 		defer delete(key)
+
 		if data, have := state_store_get(store, .Private_Audio, key); have {
 			return socket_message_new(
 				"",
@@ -1459,6 +1515,7 @@ load_private_audio :: proc(
 			)
 		}
 	}
+
 	return nil, {}
 }
 
@@ -1473,11 +1530,13 @@ private_audio_chat_matches :: proc(
 	   !device_user_jid_valid(message.participant, true) {
 		return false
 	}
+
 	user, _, _ := pairing_jid_decode(message.participant)
 	jid := strings.concatenate(
 		{user, message.participant[strings.index_byte(message.participant, '@'):]},
 	)
 	defer delete(jid)
+
 	return jid == chat || jid == chat_history_alternate_jid(store, chat)
 }
 
@@ -1490,27 +1549,35 @@ stage_private_audio :: proc(
 	if !private_audio_chat_matches(store, chat, message) {
 		return {kind = .Invalid_Config}
 	}
+
 	media, err := media_message_decode(message.protobuf)
 	if err.kind != .None {
 		return {kind = .Media_Failed, media = err}
 	}
+
 	if media.kind != .Audio {
 		return {kind = .Media_Failed, media = {kind = .Invalid_Kind}}
 	}
+
 	metadata, validation := media_metadata_from_message(media)
 	defer media_metadata_clear(&metadata)
+
 	if validation.kind != .None {
 		return {kind = .Media_Failed, media = validation}
 	}
+
 	url: [MAX_MEDIA_URL_SIZE]u8
 	if _, e := media_download_url(url[:], media); e.kind != .None {
 		return {kind = .Media_Failed, media = e}
 	}
+
 	if len(message.protobuf) > MAX_CAPTURED_AUDIO_RECORD - 8 {
 		return {kind = .Queue_Full}
 	}
+
 	key := fmt.aprintf("%s|%s", chat, message.id)
 	defer delete(key)
+
 	oldest: string
 	count := 0
 	for record in store.records {
@@ -1518,25 +1585,30 @@ stage_private_audio :: proc(
 			if count == 0 {
 				oldest = record.name
 			}
+
 			count += 1
 		}
 	}
+
 	if _, exists := state_store_get(store, .Private_Audio, key);
 	   !exists && count >= MAX_CAPTURED_PRIVATE_AUDIO {
 		if e := state_store_delete(store, .Private_Audio, oldest); e.kind != .None {
 			return {kind = .State_Failed, state = e}
 		}
 	}
+
 	data, ae := make([]u8, 8 + len(message.protobuf))
 	if ae != nil {
 		return {kind = .Allocation_Failed, allocation = ae}
 	}
 	defer {crypto.zero_explicit(raw_data(data), len(data)); delete(data)}
+
 	endian.unchecked_put_u64be(data[:8], message.timestamp)
 	copy(data[8:], message.protobuf)
 	if e := state_store_set(store, .Private_Audio, key, data); e.kind != .None {
 		return {kind = .State_Failed, state = e}
 	}
+
 	return {}
 }
 
@@ -1554,8 +1626,8 @@ socket_complete_inbox :: proc(
 	if name_error.kind != .None {
 		return name_error
 	}
-
 	defer delete(name)
+
 	candidate: State_Store
 	defer state_store_clear(&candidate)
 
@@ -1571,16 +1643,20 @@ socket_complete_inbox :: proc(
 			if e.kind != .None {
 				return e
 			}
+
 			if retained != nil {
 				defer socket_message_destroy(retained)
+
 				if _, processed := state_store_get(&candidate, .Processed_Message, name);
 				   processed {
 					return {}
 				}
 			}
 		}
+
 		return {kind = .Invalid_State}
 	}
+
 	if authorized_chat != "" {
 		original, e := socket_inbox_record_restore(
 			socket,
@@ -1590,6 +1666,7 @@ socket_complete_inbox :: proc(
 			return e
 		}
 		defer socket_message_destroy(original)
+
 		if staged := stage_private_audio(&candidate, authorized_chat, original);
 		   staged.kind != .None {
 			return staged
@@ -1617,6 +1694,7 @@ socket_inbox_restore :: proc(socket: ^Socket) -> Socket_Error {
 
 	pending := make([dynamic]^Socket_Message)
 	defer delete(pending)
+
 	success := false
 	defer {
 		if !success {
@@ -1891,6 +1969,7 @@ socket_retry_keys_prepare :: proc(socket: ^Socket, body: ^Socket_Retry_Body) -> 
 		{tag = "id", content = body.prekey_id[:]},
 		{tag = "value", content = key.public[:]},
 	}
+
 	body.signed_children = {
 		{tag = "id", content = body.signed_id[:]},
 		{tag = "value", content = socket.auth.credentials.signed_prekey_public[:]},
@@ -1938,11 +2017,13 @@ socket_retry_body_prepare :: proc(
 	endian.unchecked_put_u32be(body.registration[:], registration)
 	count_text := fmt.bprintf(body.count_text[:], "%d", count)
 	body.retry_attrs = {{"count", count_text}, {"id", id}, {"t", timestamp}, {"v", "1"}}
+
 	body.children = {
 		{tag = "retry", attrs = body.retry_attrs[:]},
 		{tag = "registration", content = body.registration[:]},
 		{},
 	}
+
 	body.child_count = 2
 	if count > 1 {
 		if error := socket_retry_keys_prepare(socket, body); error.kind != .None {
@@ -1956,6 +2037,7 @@ socket_retry_body_prepare :: proc(
 
 		body.child_count = 3
 	}
+
 	return {}
 }
 
@@ -1968,15 +2050,18 @@ socket_retry_receipt_send :: proc(
 	from, _ := node_attr(node, "from")
 	participant, _ := node_attr(node, "participant")
 	attrs := [5]Binary_Node_Attribute{{"id", id}, {"type", "retry"}, {"to", from}, {}, {}}
+
 	count := 3
 
 	if participant != "" {
 		attrs[count] = {"participant", participant}
+
 		count += 1
 	}
 
 	if recipient, found := node_attr(node, "recipient"); found {
 		attrs[count] = {"recipient", recipient}
+
 		count += 1
 	}
 
@@ -2007,6 +2092,7 @@ socket_request_retry :: proc(socket: ^Socket, node: Binary_Node) -> Socket_Error
 
 	name := fmt.aprintf("in:%s|%s", id, participant)
 	defer delete(name)
+
 	previous, found := state_store_get(socket.store, .Retry_Count, name)
 	count, _, decoded := socket_retry_counter_read(previous, found)
 
@@ -2055,6 +2141,7 @@ socket_archive_session :: proc(
 ) -> Socket_Error {
 	prefix := fmt.aprintf("%s#", jid)
 	defer delete(prefix)
+
 	// Retain five prior X3DH generations, matching Signal's bounded historical
 	// session model. Removing the oldest archive never rolls back current keys.
 	count := 0
@@ -2081,6 +2168,7 @@ socket_archive_session :: proc(
 
 	encoded := hex.encode(session.base_public[:])
 	defer delete(encoded)
+
 	name := fmt.aprintf("%s#%s", jid, encoded)
 	defer delete(name)
 
@@ -2106,6 +2194,7 @@ socket_send_delivery_receipt :: proc(socket: ^Socket, node: Binary_Node) -> Sock
 
 	attrs: [5]Binary_Node_Attribute
 	attrs[0] = {"id", id}
+
 	count := 1
 
 	if kind == "sender" && device_user_jid_valid(from, true) {
@@ -2117,21 +2206,26 @@ socket_send_delivery_receipt :: proc(socket: ^Socket, node: Binary_Node) -> Sock
 		}
 
 		attrs[count] = {"recipient", remote}
+
 		count += 1
 		attrs[count] = {"to", author}
+
 		count += 1
 	} else {
 		attrs[count] = {"to", from}
+
 		count += 1
 
 		if participant != "" {
 			attrs[count] = {"participant", participant}
+
 			count += 1
 		}
 	}
 
 	if kind != "" {
 		attrs[count] = {"type", kind}
+
 		count += 1
 	}
 
@@ -2154,6 +2248,7 @@ encode_current_unix_timestamp :: proc() -> [8]u8 {
 
 	return stamp
 }
+
 processed_history_receipt :: proc(marker: []u8) -> bool {
 	return len(marker) == 9 && marker[8] == 1
 }
@@ -2171,6 +2266,7 @@ socket_processed_set :: proc(
 		marker[8] = 1
 		return state_store_set(store, .Processed_Message, name, marker[:])
 	}
+
 	return state_store_set(store, .Processed_Message, name, stamp[:])
 }
 
@@ -2272,6 +2368,7 @@ socket_send_history_receipt :: proc(socket: ^Socket, node: Binary_Node) -> Socke
 
 	destination := fmt.aprintf("%s@%s", user, domain)
 	defer delete(destination)
+
 	buffer: [1024]u8
 	n, be := binary_node_encode(
 		buffer[:],
@@ -2310,8 +2407,8 @@ socket_defer_retry :: proc(socket: ^Socket, node: Binary_Node) -> Socket_Error {
 	if ae != nil {
 		return {kind = .Allocation_Failed, allocation = ae}
 	}
-
 	defer delete(data)
+
 	_, encoded := binary_node_encode(data, node)
 
 	if encoded.kind != .None {
@@ -2348,12 +2445,14 @@ socket_acknowledge :: proc(
 
 	attrs: [9]Binary_Node_Attribute
 	attrs[0], attrs[1], attrs[2] = {"id", id}, {"to", from}, {"class", node.tag}
+
 	count := 3
 	names := [2]string{"participant", "recipient"}
 
 	for name in names {
 		if value, found := node_attr(node, name); found {
 			attrs[count] = {name, value}
+
 			count += 1
 		}
 	}
@@ -2363,6 +2462,7 @@ socket_acknowledge :: proc(
 	if node.tag != "message" || unavailable || error_code != 0 {
 		if value, found := node_attr(node, "type"); found {
 			attrs[count] = {"type", value}
+
 			count += 1
 		}
 	}
@@ -2371,11 +2471,13 @@ socket_acknowledge :: proc(
 
 	if error_code != 0 {
 		attrs[count] = {"error", fmt.bprintf(buffer_code[:], "%d", error_code)}
+
 		count += 1
 	}
 
 	if node.tag == "message" && unavailable {
 		attrs[count] = {"from", cast(string)socket.auth.account.jid[:socket.auth.account.jid_size]}
+
 		count += 1
 	}
 
@@ -2396,6 +2498,7 @@ socket_retry_outgoing :: proc(socket: ^Socket, receipt: Binary_Node) -> Socket_E
 	raw_id, _ := node_attr(receipt, "id")
 	id := strings.clone(raw_id)
 	defer delete(id)
+
 	from, _ := node_attr(receipt, "from")
 	raw_participant, _ := node_attr(receipt, "participant")
 	participant := strings.clone(raw_participant)
@@ -2415,8 +2518,8 @@ socket_retry_outgoing :: proc(socket: ^Socket, receipt: Binary_Node) -> Socket_E
 	if decoded.kind != .None {
 		return {kind = .Binary_Failed, binary = decoded}
 	}
-
 	defer binary_document_destroy(&doc)
+
 	group, _ := node_attr(doc.root, "to")
 	if from != group {
 		return {kind = .Protocol_Error}
@@ -2430,6 +2533,7 @@ socket_retry_outgoing :: proc(socket: ^Socket, receipt: Binary_Node) -> Socket_E
 
 	count_name := fmt.aprintf("out:%s|%s", id, participant)
 	defer delete(count_name)
+
 	previous, counter_found := state_store_get(socket.store, .Retry_Count, count_name)
 	count, _, counter_error := socket_retry_counter_read(previous, counter_found)
 
@@ -2463,7 +2567,6 @@ socket_retry_session_archive :: proc(socket: ^Socket, participant: string) -> So
 	if address_err.kind != .None {
 		return address_err
 	}
-
 	defer delete(address)
 
 	if old, session_found := state_store_get(socket.store, .Session, address); session_found {
@@ -2528,8 +2631,8 @@ socket_trust_identity :: proc(
 	if address_error.kind != .None {
 		return address_error
 	}
-
 	defer delete(address)
+
 	candidate: State_Store
 	defer state_store_clear(&candidate)
 
@@ -2635,6 +2738,7 @@ socket_prune_retry_record :: proc(
 	if decoded.kind != .None {
 		return false, false, decoded
 	}
+
 	if len(record.data) == 1 {
 		// Legacy snapshots have no age evidence. Start their full retention
 		// window locally; never reset their retry count during migration.
@@ -2653,10 +2757,12 @@ socket_prune_retry_record :: proc(
 		record.data = data
 		timestamp, changed = now_seconds, true
 	}
+
 	id := socket_retry_record_id(record.name)
 	if id == "" || pending[sha256(transmute([]u8)id)] {
 		return false, changed, {}
 	}
+
 	return timestamp < cutoff, changed, {}
 }
 
@@ -2672,6 +2778,7 @@ socket_prune_record :: proc(
 	if record.kind == .Retry_Count {
 		return socket_prune_retry_record(record, pending, cutoff, now_seconds, allocator)
 	}
+
 	timestamp: u64
 	if record.kind == .Processed_Message {
 		if len(record.data) != 8 && !processed_history_receipt(record.data) {
@@ -2702,6 +2809,7 @@ socket_prune_record :: proc(
 	} else {
 		return false, false, {}
 	}
+
 	return timestamp < cutoff, false, {}
 }
 
@@ -2731,8 +2839,8 @@ socket_prune_state :: proc(socket: ^Socket, now: time.Time) -> Socket_Error {
 	if pending_error.kind != .None {
 		return pending_error
 	}
-
 	defer delete(pending)
+
 	kept := 0
 	changed := false
 
@@ -2807,6 +2915,7 @@ socket_message_alias_stage :: proc(
 	if !encrypted_children {
 		return {}
 	}
+
 	has_encrypted := false
 	for child in children {
 		if child.tag == "enc" {
@@ -2814,13 +2923,16 @@ socket_message_alias_stage :: proc(
 			break
 		}
 	}
+
 	if !has_encrypted {
 		return {}
 	}
+
 	primary_user, primary_device, primary_error := pairing_jid_decode(participant)
 	if primary_error.kind != .None {
 		return {kind = .Protocol_Error}
 	}
+
 	primary_lid := strings.has_suffix(participant, "@lid")
 	primary_pn :=
 		strings.has_suffix(participant, "@s.whatsapp.net") ||
@@ -2889,20 +3001,25 @@ socket_message_alias_stage :: proc(
 
 		alternate = user
 	}
+
 	if alternate == "" {
 		return {}
 	}
+
 	if seen & 16 != 0 && mode != (primary_lid ? "lid" : "pn") {
 		return {kind = .Protocol_Error}
 	}
+
 	pn := fmt.aprintf("%s@s.whatsapp.net", primary_lid ? alternate : primary_user)
 	lid := fmt.aprintf("%s@lid", primary_lid ? primary_user : alternate)
 	defer {
 		delete(pn)
 		delete(lid)
 	}
+
 	if error := socket_lid_mapping_stage(next, pn, lid); error.kind != .None {
 		return error
 	}
+
 	return socket_lid_migrate(next, original)
 }

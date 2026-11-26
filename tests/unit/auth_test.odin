@@ -45,12 +45,14 @@ pairing_auth_current_roundtrip_retains_policy_and_rejects_legacy_domain :: proc(
 		for device in 0 ..< 2 {
 			f := pairing_domain_fixture(u32(wrapper), device)
 			defer pairing_domain_free(f)
+
 			account: wa.Paired_Account
 			reply: [2048]u8
 			_, error := wa.pairing_success_handle(&account, pairing_domain_iq(f), &f.credentials, reply[:])
 			assert(error.kind == .None)
 			state := pairing_domain_auth(f, account)
 			defer wa.auth_state_clear(&state)
+
 			encoded: [wa.MAX_AUTH_STATE_SIZE]u8
 			count, encode_error := wa.auth_state_encode(encoded[:], &state)
 			testing.expect_value(t, encode_error.kind, .None)
@@ -58,6 +60,7 @@ pairing_auth_current_roundtrip_retains_policy_and_rejects_legacy_domain :: proc(
 			testing.expect_value(t, encoded[293], u8(1))
 			restored: wa.Auth_State
 			defer wa.auth_state_clear(&restored)
+
 			testing.expect_value(t, wa.auth_state_decode(&restored, encoded[:count]).kind, .None)
 			testing.expect_value(t, restored.account.signature_policy, .Current)
 			testing.expect_value(t, wa.paired_account_validate(&restored.account, &restored.credentials).kind, .None)
@@ -77,8 +80,10 @@ pairing_auth_reads_historical_v1_and_rewrites_without_resigning_or_domain_guessi
 		for device in 0 ..< 2 {
 			f := pairing_domain_fixture(hosted ? 1 : 0, device, 0)
 			defer pairing_domain_free(f)
+
 			original := pairing_domain_auth(f, pairing_domain_legacy_account(f, hosted))
 			defer wa.auth_state_clear(&original)
+
 			testing.expect_value(t, wa.auth_state_validate(&original).kind, .None)
 			current, old: [wa.MAX_AUTH_STATE_SIZE]u8
 			count, encoded := wa.auth_state_encode(current[:], &original)
@@ -86,6 +91,7 @@ pairing_auth_reads_historical_v1_and_rewrites_without_resigning_or_domain_guessi
 			old_count := pairing_domain_v1(old[:], current[:count])
 			restored: wa.Auth_State
 			defer wa.auth_state_clear(&restored)
+
 			testing.expect_value(t, wa.auth_state_decode(&restored, old[:old_count]).kind, .None)
 			testing.expect_value(t, restored.account.signature_policy, .Legacy)
 			testing.expect(
@@ -101,6 +107,7 @@ pairing_auth_reads_historical_v1_and_rewrites_without_resigning_or_domain_guessi
 			testing.expect_value(t, rewritten_count, count)
 			again: wa.Auth_State
 			defer wa.auth_state_clear(&again)
+
 			testing.expect_value(t, wa.auth_state_decode(&again, rewritten[:rewritten_count]).kind, .None)
 			testing.expect_value(t, again.account.signature_policy, .Legacy)
 			testing.expect_value(t, wa.auth_state_validate(&again).kind, .None)
@@ -120,8 +127,10 @@ pairing_auth_reads_historical_v1_and_rewrites_without_resigning_or_domain_guessi
 pairing_auth_invalid_policy_version_and_truncation_preserve_destination :: proc(t: ^testing.T) {
 	f := pairing_domain_fixture(1, 1, 0)
 	defer pairing_domain_free(f)
+
 	state := pairing_domain_auth(f, pairing_domain_legacy_account(f, true))
 	defer wa.auth_state_clear(&state)
+
 	encoded: [wa.MAX_AUTH_STATE_SIZE]u8
 	count, error := wa.auth_state_encode(encoded[:], &state)
 	assert(error.kind == .None)
@@ -157,11 +166,13 @@ pairing_auth_invalid_policy_version_and_truncation_preserve_destination :: proc(
 pairing_auth_unpaired_v1_remains_readable :: proc(t: ^testing.T) {
 	f := pairing_domain_fixture(0, 0)
 	defer pairing_domain_free(f)
+
 	state := wa.Auth_State {
 		credentials = f.credentials,
 	}
 
 	defer wa.auth_state_clear(&state)
+
 	data: [wa.MAX_AUTH_STATE_SIZE]u8
 	count, error := wa.auth_state_encode(data[:], &state)
 	assert(error.kind == .None)
@@ -170,6 +181,7 @@ pairing_auth_unpaired_v1_remains_readable :: proc(t: ^testing.T) {
 	pairing_domain_checksum(data[:count])
 	restored: wa.Auth_State
 	defer wa.auth_state_clear(&restored)
+
 	testing.expect_value(t, wa.auth_state_decode(&restored, data[:count]).kind, .None)
 	testing.expect(t, !restored.account.valid && !restored.credentials.registered)
 }
@@ -185,28 +197,35 @@ pairing_auth_disk_save_load_preserves_current_and_historical_policy :: proc(t: ^
 
 	path := fmt.aprintf("%s/auth", directory)
 	defer delete(path)
+
 	f := pairing_domain_fixture(1, 1)
 	defer pairing_domain_free(f)
+
 	account: wa.Paired_Account
 	reply: [2048]u8
 	_, error := wa.pairing_success_handle(&account, pairing_domain_iq(f), &f.credentials, reply[:])
 	assert(error.kind == .None)
 	current := pairing_domain_auth(f, account)
 	defer wa.auth_state_clear(&current)
+
 	testing.expect_value(t, wa.auth_state_save(path, &current).kind, .None)
 	restored: wa.Auth_State
 	defer wa.auth_state_clear(&restored)
+
 	testing.expect_value(t, wa.auth_state_load(path, &restored).kind, .None)
 	testing.expect_value(t, restored.account.signature_policy, .Current)
 	old_fixture := pairing_domain_fixture(1, 1, 0)
 	defer pairing_domain_free(old_fixture)
+
 	legacy := pairing_domain_auth(old_fixture, pairing_domain_legacy_account(old_fixture, true))
 	defer wa.auth_state_clear(&legacy)
+
 	encoded, old: [wa.MAX_AUTH_STATE_SIZE]u8
 	size, encoded_error := wa.auth_state_encode(encoded[:], &legacy)
 	assert(encoded_error.kind == .None)
 	old_size := pairing_domain_v1(old[:], encoded[:size])
 	file, open_error := os.open(path, {.Write, .Trunc})
+
 	assert(open_error == nil)
 	written, write_error := os.write(file, old[:old_size])
 	assert(write_error == nil && written == old_size)
@@ -286,6 +305,7 @@ prekey_lifecycle_capacity_and_id_exhaustion_are_explicit_and_unchanged :: proc(t
 prekey_lifecycle_lost_response_reloads_and_reuses_pending_keys_until_matching_iq :: proc(t: ^testing.T) {
 	f := prekey_lifecycle_fixture()
 	defer prekey_lifecycle_destroy(f)
+
 	assert(wa.prekey_upload_prepare(&f.store, "upload-first", 3).kind == .None)
 	wire: [4096]u8
 	_, unsaved := wa.prekey_upload_encode(wire[:], &f.store, &f.credentials)
@@ -294,7 +314,9 @@ prekey_lifecycle_lost_response_reloads_and_reuses_pending_keys_until_matching_iq
 	_, encoded := wa.prekey_upload_encode(wire[:], &f.store, &f.credentials)
 	assert(encoded.kind == .None)
 	original := [3]wa.One_Time_Prekey{f.store.keys[0], f.store.keys[1], f.store.keys[2]}
+
 	defer crypto.zero_explicit(&original, size_of(original))
+
 	next_id := f.store.next_id
 	// No reply: reconnect must recover the identical pending private material.
 	restored := new(wa.Prekey_Store)
@@ -340,6 +362,7 @@ prekey_lifecycle_lost_response_reloads_and_reuses_pending_keys_until_matching_iq
 prekey_lifecycle_consumed_highest_id_may_be_absent_without_reuse :: proc(t: ^testing.T) {
 	f := prekey_lifecycle_fixture()
 	defer prekey_lifecycle_destroy(f)
+
 	assert(wa.prekey_upload_prepare(&f.store, "initial-batch", 3).kind == .None)
 	assert(wa.prekey_store_save(f.path, &f.store).kind == .None)
 	// Reclamation must not break a still-pending contiguous upload batch.

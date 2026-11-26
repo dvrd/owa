@@ -13,6 +13,7 @@ group_metadata_query_encode_builds_the_interactive_query_and_validates_input :: 
 	testing.expect_value(t, error.kind, wa.Group_Error_Kind.None)
 	document, decode_error := wa.binary_node_decode(buffer[:size])
 	defer wa.binary_document_destroy(&document)
+
 	testing.expect_value(t, decode_error.kind, wa.Binary_Node_Error_Kind.None)
 	xmlns, _ := wa.node_attr(document.root, "xmlns")
 	to, _ := wa.node_attr(document.root, "to")
@@ -111,6 +112,7 @@ lid_mapping_records_both_directions_durably_and_is_idempotent :: proc(t: ^testin
 
 	loaded: wa.State_Store
 	defer wa.state_store_clear(&loaded)
+
 	identity: [32]u8
 	identity[0] = 3
 	testing.expect_value(t, wa.state_store_load(&loaded, fixture.path, identity).kind, wa.State_Error_Kind.None)
@@ -136,6 +138,7 @@ lid_mapping_rejects_conflicts_and_malformed_pairs_without_mutation :: proc(t: ^t
 	revision := fixture.store.revision
 
 	conflicts := [?][2]string{{"555@s.whatsapp.net", "888@lid"}, {"556@s.whatsapp.net", "777@lid"}}
+
 	for pair in conflicts {
 		error := wa.socket_record_lid_mapping(&fixture.socket, pair[0], pair[1])
 		testing.expect_value(t, error.kind, wa.Socket_Error_Kind.Identity_Changed)
@@ -149,6 +152,7 @@ lid_mapping_rejects_conflicts_and_malformed_pairs_without_mutation :: proc(t: ^t
 		{"", "777@lid"},
 		{"555@s.whatsapp.net", ""},
 	}
+
 	for pair in malformed {
 		error := wa.socket_record_lid_mapping(&fixture.socket, pair[0], pair[1])
 		testing.expect_value(t, error.kind, wa.Socket_Error_Kind.Invalid_Config)
@@ -157,6 +161,7 @@ lid_mapping_rejects_conflicts_and_malformed_pairs_without_mutation :: proc(t: ^t
 	testing.expect_value(t, fixture.store.revision, revision)
 	testing.expect_value(t, wa.socket_record_lid_mapping(nil, "555@s.whatsapp.net", "777@lid").kind, wa.Socket_Error_Kind.Invalid_State)
 	bare := wa.Socket{}
+
 	testing.expect_value(t, wa.socket_record_lid_mapping(&bare, "555@s.whatsapp.net", "777@lid").kind, wa.Socket_Error_Kind.Invalid_State)
 }
 
@@ -177,6 +182,7 @@ lid_mapping_migrates_existing_lid_state_to_the_phone_address :: proc(t: ^testing
 
 	canonical, address_error := wa.socket_signal_address(&fixture.socket, "777:1@lid")
 	defer delete(canonical)
+
 	testing.expect_value(t, address_error.kind, wa.Socket_Error_Kind.None)
 	testing.expect_value(t, canonical, "555:1@s.whatsapp.net")
 }
@@ -185,6 +191,7 @@ lid_mapping_migrates_existing_lid_state_to_the_phone_address :: proc(t: ^testing
 lid_mapping_failed_save_keeps_the_store_unchanged :: proc(t: ^testing.T) {
 	fixture := identity_api_fixture()
 	defer identity_api_fixture_destroy(fixture)
+
 	fixture.socket.config.state_path = "/nonexistent-whatsapp-library-directory/state"
 	revision := fixture.store.revision
 

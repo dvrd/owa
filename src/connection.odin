@@ -112,6 +112,7 @@ noise_credentials_generate :: proc() -> (credentials: Noise_Credentials, error: 
 	when !crypto.HAS_RAND_BYTES {
 		return {}, {kind = .Entropy_Unavailable}
 	}
+
 	crypto.rand_bytes(credentials.static_private_key[:])
 
 	return credentials, {}
@@ -144,6 +145,7 @@ client_init :: proc(
 
 	private := credentials.static_private_key
 	defer crypto.zero_explicit(&private, size_of(private))
+
 	if crypto.is_zero_constant_time(private[:]) == 1 {
 		return {kind = .Invalid_Credentials}
 	}
@@ -151,6 +153,7 @@ client_init :: proc(
 	when !crypto.HAS_RAND_BYTES {
 		return {kind = .Entropy_Unavailable}
 	}
+
 	if err := frame_transport_init(&client.frames, websocket, settings.max_frame_payload); err.kind != .None {
 		return {kind = .Transport_Failed, transport = err}
 	}
@@ -302,6 +305,7 @@ client_handshake_server_read :: proc(client: ^Client, server_buffer: []u8) -> (H
 client_noise_mix_dh :: proc(client: ^Client, private, remote: []u8) -> Client_Error {
 	shared: [32]u8
 	defer crypto.zero_explicit(&shared, size_of(shared))
+
 	x25519.scalarmult(shared[:], private, remote)
 
 	if crypto.is_zero_constant_time(shared[:]) == 1 {
@@ -327,6 +331,7 @@ client_handshake_server_static_decrypt :: proc(
 	if dh_error := client_noise_mix_dh(client, client.ephemeral_private[:], server.ephemeral); dh_error.kind != .None {
 		return dh_error
 	}
+
 	if _, err := noise_decrypt(&client.noise, server_static, server.static); err != .None {
 		return client_fail(client, {kind = .Noise_Failed, noise = err})
 	}
@@ -343,8 +348,8 @@ client_decrypt_and_verify_server_certificate :: proc(
 	if cert_alloc_err != nil {
 		return client_fail(client, {kind = .Allocation_Failed, allocation = cert_alloc_err})
 	}
-
 	defer delete(certificate)
+
 	if _, err := noise_decrypt(&client.noise, certificate, server.payload); err != .None {
 		return client_fail(client, {kind = .Noise_Failed, noise = err})
 	}
@@ -382,8 +387,8 @@ client_handshake_finish_send :: proc(
 	if finish_alloc_err != nil {
 		return client_fail(client, {kind = .Allocation_Failed, allocation = finish_alloc_err})
 	}
-
 	defer delete(finish)
+
 	_, finish_err := handshake_client_finish_encode(finish, encrypted_static, encrypted_payload)
 	if finish_err != .None {
 		return client_fail(client, {kind = .Protobuf_Failed, protobuf = finish_err})
@@ -405,8 +410,8 @@ client_handshake_payload_send :: proc(
 	if payload_alloc_err != nil {
 		return client_fail(client, {kind = .Allocation_Failed, allocation = payload_alloc_err})
 	}
-
 	defer delete(encrypted_payload)
+
 	if _, err := noise_encrypt(&client.noise, encrypted_payload, client_payload); err != .None {
 		return client_fail(client, {kind = .Noise_Failed, noise = err})
 	}
@@ -424,19 +429,22 @@ client_handshake_exchange :: proc(client: ^Client, client_payload: []u8, finish_
 	if allocation_err != nil {
 		return client_fail(client, {kind = .Allocation_Failed, allocation = allocation_err})
 	}
-
 	defer delete(server_buffer)
+
 	server, server_error := client_handshake_server_read(client, server_buffer)
 	if server_error.kind != .None {
 		return server_error
 	}
+
 	server_static: [32]u8
 	if static_error := client_handshake_server_static_decrypt(client, server, server_static[:]); static_error.kind != .None {
 		return static_error
 	}
+
 	if certificate_error := client_decrypt_and_verify_server_certificate(client, server, &server_static); certificate_error.kind != .None {
 		return certificate_error
 	}
+
 	encrypted_static: [48]u8
 	if static_error := client_handshake_static_send_prepare(client, server, encrypted_static[:]); static_error.kind != .None {
 		return static_error
@@ -503,38 +511,48 @@ verify_certificate_chain_against_root :: proc(
 	if decoded != .None {
 		return .Invalid_Certificate_Chain
 	}
+
 	if !chain.has_intermediate {
 		return .Missing_Intermediate
 	}
+
 	if !chain.has_leaf {
 		return .Missing_Leaf
 	}
+
 	intermediate, intermediate_error := decode_and_validate_certificate_details(chain.intermediate, true)
 	if intermediate_error != .None {
 		return intermediate_error
 	}
+
 	leaf, leaf_error := decode_and_validate_certificate_details(chain.leaf, false)
 	if leaf_error != .None {
 		return leaf_error
 	}
+
 	if intermediate.issuer_serial != 0 || leaf.issuer_serial != intermediate.serial {
 		return .Unexpected_Issuer_Serial
 	}
+
 	if signal_curve_verify(root, chain.intermediate.details, chain.intermediate.signature) != .None {
 		return .Invalid_Intermediate_Signature
 	}
+
 	intermediate_key: [32]u8
 	copy(intermediate_key[:], intermediate.key)
 	if signal_curve_verify(intermediate_key, chain.leaf.details, chain.leaf.signature) != .None {
 		return .Invalid_Leaf_Signature
 	}
+
 	observed_static := server_static
 	if crypto.compare_constant_time(leaf.key, observed_static[:]) != 1 {
 		return .Static_Key_Mismatch
 	}
+
 	if error := check_certificate_validity_at(intermediate, now); error != .None {
 		return error
 	}
+
 	return check_certificate_validity_at(leaf, now)
 }
 
@@ -549,28 +567,35 @@ decode_and_validate_certificate_details :: proc(
 	if intermediate {
 		detail_error = .Invalid_Intermediate_Details
 	}
+
 	if !certificate.has_details {
 		return {}, detail_error
 	}
+
 	if !certificate.has_signature || len(certificate.signature) != 64 {
 		return {}, .Invalid_Signature_Length
 	}
+
 	details, decoded := certificate_details_decode(certificate.details)
 	if decoded != .None {
 		return {}, detail_error
 	}
+
 	if !details.has_issuer_serial || intermediate && !details.has_serial {
 		return {}, .Unexpected_Issuer_Serial
 	}
+
 	if !details.has_key || len(details.key) != 32 {
 		return {}, .Invalid_Key_Length
 	}
+
 	if !details.has_not_before ||
 	   !details.has_not_after ||
 	   details.not_before > details.not_after ||
 	   details.not_after > u64(max(i64)) {
 		return {}, .Invalid_Validity
 	}
+
 	return details, .None
 }
 
@@ -667,8 +692,8 @@ client_write :: proc(client: ^Client, payload: []u8) -> Client_Error {
 	if allocation_err != nil {
 		return {kind = .Allocation_Failed, allocation = allocation_err}
 	}
-
 	defer delete(ciphertext)
+
 	_, encrypt_err := noise_encrypt(&client.noise, ciphertext, payload)
 
 	if encrypt_err != .None {
@@ -709,8 +734,8 @@ client_read :: proc(client: ^Client, dst: []u8) -> (n: int, error: Client_Error)
 	if allocation_err != nil {
 		return 0, {kind = .Allocation_Failed, allocation = allocation_err}
 	}
-
 	defer delete(ciphertext)
+
 	size, frame_error := client_encrypted_frame_receive(client, ciphertext)
 	if frame_error.kind != .None {
 		return size, frame_error
@@ -806,6 +831,7 @@ frame_decode :: proc(src: []u8) -> (payload: []u8, consumed: int, error: Frame_E
 	}
 
 	header := [3]u8{src[0], src[1], src[2]}
+
 	payload_size := frame_decode_len(header)
 
 	required := FRAME_HEADER_SIZE + payload_size
@@ -854,6 +880,7 @@ frame_reader_consume :: proc(reader: ^Frame_Reader, count: int) -> Frame_Error {
 }
 
 FRAME_INTRO :: [4]u8{87, 65, 6, 3}
+
 DEFAULT_TRANSPORT_MAX_PAYLOAD :: 1 << 20
 MAX_EMPTY_WEBSOCKET_MESSAGES :: 128
 
@@ -933,6 +960,7 @@ frame_transport_init :: proc(
 		ws_message  = make([dynamic]u8, context.allocator),
 		payload     = make([dynamic]u8, context.allocator),
 	}
+
 	return {frame = .None}
 }
 
@@ -965,7 +993,6 @@ frame_transport_send :: proc(state: ^Frame_Transport, payload: []u8) -> Frame_Tr
 	if allocation_err != nil {
 		return frame_transport_fail(state, {kind = .Allocation_Failed, allocation = allocation_err, frame = .None})
 	}
-
 	defer delete(wire, state.allocator)
 
 	if intro_size != 0 {
@@ -1024,6 +1051,7 @@ frame_transport_receive :: proc(state: ^Frame_Transport, dst: []u8) -> (n: int, 
 			if header_error.kind != .None {
 				return 0, header_error
 			}
+
 			if !complete {
 				continue
 			}
@@ -1178,6 +1206,7 @@ frame_transport_fail :: proc(state: ^Frame_Transport, err: Frame_Transport_Error
 }
 
 NOISE_HEADER :: [4]u8{87, 65, 6, 3}
+
 NOISE_MODE :: "Noise_XX_25519_AESGCM_SHA256\x00\x00\x00\x00"
 NOISE_TAG_SIZE :: 16
 MAX_NOISE_PLAINTEXT_SIZE :: MAX_FRAME_PAYLOAD - NOISE_TAG_SIZE
@@ -1269,8 +1298,10 @@ noise_mix_key :: proc(state: ^Noise_State, shared: [32]u8) -> Noise_Error {
 
 	secret := shared
 	defer crypto.zero_explicit(&secret, size_of(secret))
+
 	derived: [64]u8
 	defer crypto.zero_explicit(&derived, size_of(derived))
+
 	hkdf.extract_and_expand(.SHA256, state.chaining_key[:], secret[:], nil, derived[:])
 	copy(state.chaining_key[:], derived[:32])
 	copy(state.write_key[:], derived[32:])
@@ -1294,6 +1325,7 @@ noise_split :: proc(state: ^Noise_State) -> Noise_Error {
 
 	derived: [64]u8
 	defer crypto.zero_explicit(&derived, size_of(derived))
+
 	hkdf.extract_and_expand(.SHA256, state.chaining_key[:], nil, nil, derived[:])
 	copy(state.write_key[:], derived[:32])
 	copy(state.read_key[:], derived[32:])
@@ -1333,6 +1365,7 @@ noise_encrypt :: proc(state: ^Noise_State, dst, plaintext: []u8) -> (written: in
 	ctx: aes.Context_GCM
 	aes.init_gcm(&ctx, state.write_key[:])
 	defer crypto.zero_explicit(&ctx, size_of(ctx))
+
 	nonce := noise_nonce(state.write_counter)
 	aad: []u8
 	if state.phase == .Handshake {
@@ -1384,6 +1417,7 @@ noise_decrypt :: proc(state: ^Noise_State, dst, ciphertext: []u8) -> (written: i
 	ctx: aes.Context_GCM
 	aes.init_gcm(&ctx, state.read_key[:])
 	defer crypto.zero_explicit(&ctx, size_of(ctx))
+
 	nonce := noise_nonce(counter)
 	aad: []u8
 	if state.phase == .Handshake {
@@ -1480,6 +1514,7 @@ Signal_Error :: enum {
 signal_curve_public :: proc(private: [32]u8) -> [32]u8 {
 	secret := private
 	defer crypto.zero_explicit(&secret, size_of(secret))
+
 	public: [32]u8
 	x25519.scalarmult_basepoint(public[:], secret[:])
 
@@ -1494,32 +1529,44 @@ signal_curve_sign :: proc(private: [32]u8, message: []u8) -> (signature: [64]u8,
 	when !crypto.HAS_RAND_BYTES {
 		return {}, .Entropy_Unavailable
 	}
+
 	secret := private
 	defer crypto.zero_explicit(&secret, size_of(secret))
+
 	secret[0] &= 248
 	secret[31] = (secret[31] & 127) | 64
 	a, nonce, challenge, s: grp.Scalar
 	defer grp.sc_clear(&a)
+
 	defer grp.sc_clear(&nonce)
+
 	defer grp.sc_clear(&challenge)
+
 	defer grp.sc_clear(&s)
+
 	grp.sc_set_bytes_rfc8032(&a, secret[:])
 	A, R: grp.Group_Element
 	defer grp.ge_clear(&A)
+
 	defer grp.ge_clear(&R)
+
 	grp.ge_scalarmult_basepoint(&A, &a)
 	public: [32]u8
 	grp.ge_bytes(&A, public[:])
 	random, digest: [64]u8
 	defer crypto.zero_explicit(&random, size_of(random))
+
 	defer crypto.zero_explicit(&digest, size_of(digest))
+
 	domain: [32]u8
 	for &value in domain {
 		value = 0xff
 	}
+
 	domain[0] = 0xfe
 	ctx: sha2.Context_512
 	defer crypto.zero_explicit(&ctx, size_of(ctx))
+
 	// Avoid the negligible zero-nonce case because verification rejects all
 	// low-order R points. Independent randomness is sampled on each attempt.
 	zero: grp.Scalar
@@ -1573,6 +1620,7 @@ signal_curve_verify :: proc(public: [32]u8, message, signature: []u8) -> Signal_
 	if public_error != .None {
 		return public_error
 	}
+
 	A, R, neg_A, calculated: grp.Group_Element
 	if !grp.ge_set_bytes(&A, ed_public[:]) ||
 	   grp.ge_is_small_order(&A) ||

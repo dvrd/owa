@@ -19,10 +19,12 @@ MAX_BINARY_DOCUMENT_STORAGE :: 8 << 20
 Binary_Node_Attribute :: struct {
 	key, value: string,
 }
+
 Binary_Node_Content :: union {
 	[]u8,
 	[]Binary_Node,
 }
+
 Binary_Node :: struct {
 	tag:     string,
 	attrs:   []Binary_Node_Attribute,
@@ -107,6 +109,7 @@ binary_node_encode :: proc(
 		limit  = max_payload,
 		target = dst,
 	}
+
 	binary_write_byte(&measure, 0)
 	binary_write_node(&measure, node, 0)
 	if measure.err.kind != .None {
@@ -121,6 +124,7 @@ binary_node_encode :: proc(
 		dst   = dst,
 		limit = max_payload,
 	}
+
 	binary_write_byte(&writer, 0)
 	binary_write_node(&writer, node, 0)
 	return writer.used, writer.err
@@ -158,10 +162,12 @@ binary_node_decode :: proc(
 	if payload_error := binary_document_payload_copy(&document, src, allocator, max_payload); payload_error.kind != .None {
 		return {}, payload_error
 	}
+
 	if tree_error := binary_document_tree_decode(&document, allocator); tree_error.kind != .None {
 		binary_document_destroy(&document)
 		return {}, tree_error
 	}
+
 	return document, {}
 }
 
@@ -341,6 +347,7 @@ binary_write_integer :: proc(writer: ^Binary_Writer, value: u32, bytes: int) {
 	for _ in 4 ..< bytes {
 		binary_write_byte(writer, 0)
 	}
+
 	for b in encoded[4 - clamp(bytes, 0, 4):] {
 		binary_write_byte(writer, b)
 	}
@@ -501,6 +508,7 @@ binary_write_string :: proc(writer: ^Binary_Writer, value: string, depth: int) {
 	if binary_write_token(writer, value) {
 		return
 	}
+
 	if binary_write_packed_string(writer, value) {
 		return
 	}
@@ -795,6 +803,7 @@ binary_read_node :: proc(reader: ^Binary_Reader, depth: int) -> (node: Binary_No
 	if reader.err.kind != .None {
 		return
 	}
+
 	if size % 2 == 0 {
 		binary_read_content(reader, &node, depth)
 	}
@@ -819,6 +828,7 @@ binary_read_attribute_keys_validate :: proc(reader: ^Binary_Reader, node: ^Binar
 		for attr, i in node.attrs {
 			keys[i] = attr.key
 		}
+
 		sort.quick_sort(keys)
 
 		for i in 1 ..< len(keys) {
@@ -984,6 +994,8 @@ binary_read_string :: proc(reader: ^Binary_Reader, tag: u8, depth: int) -> strin
 			offset = reader.at,
 			token  = tag,
 		}
+
+
 	case:
 		reader.err = {
 			kind   = .Invalid_Token,

@@ -62,7 +62,6 @@ socket_groups_participating :: proc(
 	if query_error.kind != .None {
 		return {}, query_error
 	}
-
 	defer binary_document_destroy(&doc)
 
 	return socket_groups_decode(doc.root, id)
@@ -84,6 +83,7 @@ socket_groups_decode :: proc(
 	groups.allocator = context.allocator
 	seen := make(map[string]bool)
 	defer delete(seen)
+
 	success := false
 	defer if !success {
 		socket_group_summaries_destroy(&groups)
@@ -172,6 +172,7 @@ Socket_Group :: struct {
 	participants: []Group_Participant,
 	jid:          string,
 }
+
 socket_group_destroy :: proc(group: ^Socket_Group) {
 	if group == nil {
 		return
@@ -221,6 +222,7 @@ socket_group_metadata :: proc(socket: ^Socket, jid: string) -> (Socket_Group, So
 	   metadata_error.kind != .None {
 		return {}, metadata_error
 	}
+
 	metadata := result.metadata
 
 	if e := socket_record_group_lid_mappings(socket, metadata); e.kind != .None {
@@ -269,6 +271,7 @@ socket_send_text :: proc(
 		kind = .Conversation,
 		text = text,
 	}
+
 	if quote != nil {
 		if quote.group != group {
 			return "", {kind = .Invalid_Config}
@@ -295,6 +298,7 @@ socket_send_text :: proc(
 		),
 	)
 	defer delete(buffer)
+
 	n, err := text_message_encode(buffer, message)
 	if err != .None {
 		return "", {kind = .Message_Failed, message = err}
@@ -330,12 +334,13 @@ socket_send_group :: proc(
 	); handled {
 		return id, error
 	}
+
 	metadata, meta_err := socket_group_metadata(socket, group)
 	if meta_err.kind != .None {
 		return "", meta_err
 	}
-
 	defer socket_group_destroy(&metadata)
+
 	devices, device_err := socket_group_devices(socket, metadata.metadata)
 	if device_err.kind == .None && only_device != "" {
 		devices, device_err = socket_group_device_select(socket, devices, only_device)
@@ -344,17 +349,19 @@ socket_send_group :: proc(
 	if device_err.kind != .None {
 		return "", device_err
 	}
-
 	defer {
 		for jid in devices {
 			delete(jid)
 		}
+
 		delete(devices)
 	}
+
 	mode := metadata.metadata.addressing_mode
 	me := cast(string)socket.auth.account.jid[:socket.auth.account.jid_size]
 	self_lid_copy := ""
 	defer delete(self_lid_copy)
+
 	if mode == "lid" {
 		lid, found := state_store_get(socket.store, .LID_Mapping, "self")
 		if !found {
@@ -371,8 +378,8 @@ socket_send_group :: proc(
 	if canonical_err.kind != .None {
 		return "", canonical_err
 	}
-
 	defer delete(canonical_me)
+
 	return socket_group_send_prepared(
 		socket,
 		group,
@@ -398,6 +405,7 @@ socket_group_device_select :: proc(
 		for jid in devices {
 			delete(jid)
 		}
+
 		delete(devices)
 		return nil, {kind = .Invalid_Config}
 	}
@@ -407,11 +415,12 @@ socket_group_device_select :: proc(
 		for jid in devices {
 			delete(jid)
 		}
+
 		delete(devices)
 		return nil, e
 	}
-
 	defer delete(requested)
+
 	selected := ""
 	for jid in devices {
 		canonical, canonical_err := socket_signal_address(socket, jid)
@@ -420,6 +429,7 @@ socket_group_device_select :: proc(
 			for item in devices {
 				delete(item)
 			}
+
 			delete(devices)
 			return nil, canonical_err
 		}
@@ -431,9 +441,11 @@ socket_group_device_select :: proc(
 
 		delete(canonical)
 	}
+
 	for jid in devices {
 		delete(jid)
 	}
+
 	delete(devices)
 	if selected == "" {
 		return nil, {kind = .Invalid_Config}
@@ -466,7 +478,9 @@ socket_group_sender_prepare :: proc(
 		crypto.rand_bytes(signing[:])
 		crypto.rand_bytes(id_bytes[:])
 		defer crypto.zero_explicit(&seed, size_of(seed))
+
 		defer crypto.zero_explicit(&signing, size_of(signing))
+
 		id := endian.unchecked_get_u32be(id_bytes[:])
 
 		if e := signal_group_init_sender(record, id, seed, signing); e != .None {
@@ -527,6 +541,7 @@ socket_group_participants_destroy :: proc(participants: ^Socket_Group_Participan
 	for data in participants.ciphertexts {
 		delete(data)
 	}
+
 	delete(participants.ciphertexts)
 	delete(participants.participant_nodes)
 	delete(participants.participant_children)
@@ -549,6 +564,7 @@ socket_group_distribution_encrypt :: proc(
 		signal_session_clear(session)
 		free(session)
 	}
+
 	if e := socket_outgoing_session(socket, jid, session); e.kind != .None {
 		return {}, 0, e
 	}
@@ -589,6 +605,7 @@ socket_group_participants_prepare :: proc(
 	defer if !success {
 		socket_group_participants_destroy(&result)
 	}
+
 	for jid, i in devices {
 		result.ciphertexts[i] = make([]u8, 2048)
 		kind, size, encryption_error := socket_group_distribution_encrypt(
@@ -600,6 +617,7 @@ socket_group_participants_prepare :: proc(
 		if encryption_error.kind != .None {
 			return {}, encryption_error
 		}
+
 		type := "msg"
 
 		if kind == .Prekey {
@@ -608,6 +626,7 @@ socket_group_participants_prepare :: proc(
 		}
 
 		result.enc_attrs[i] = {{"v", "2"}, {"type", type}, {"mediatype", media_type}}
+
 		attr_count := media_type == "" ? 2 : 3
 		result.participant_children[i] = {
 			{
@@ -618,12 +637,14 @@ socket_group_participants_prepare :: proc(
 		}
 
 		result.participant_attrs[i] = {{"jid", jid}}
+
 		result.participant_nodes[i] = {
 			tag     = "to",
 			attrs   = result.participant_attrs[i][:],
 			content = result.participant_children[i][:],
 		}
 	}
+
 	success = true
 	return result, {}
 }
@@ -637,6 +658,7 @@ socket_group_sender_stage :: proc(
 	defer {
 		crypto.zero_explicit(raw_data(group_snapshot), len(group_snapshot)); delete(group_snapshot)
 	}
+
 	group_size, stored := signal_group_record_encode(group_snapshot, record)
 	if stored != .None {
 		return {kind = .Group_Failed, group = stored}
@@ -679,6 +701,7 @@ socket_group_stanza_wire :: proc(
 		{tag = "participants", content = participant_nodes[:]},
 		{tag = "device-identity", content = identity},
 	}
+
 	child_count := include_identity ? 3 : 2
 	effective_mode := mode
 	if effective_mode == "" {
@@ -695,6 +718,7 @@ socket_group_stanza_wire :: proc(
 		},
 		content = children[:child_count],
 	}
+
 	node_attrs := [5]Binary_Node_Attribute {
 		{"id", id},
 		{"type", "text"},
@@ -702,6 +726,7 @@ socket_group_stanza_wire :: proc(
 		{"addressing_mode", effective_mode},
 		{"participant", only_device},
 	}
+
 	node.attrs = node_attrs[:only_device == "" ? 4 : 5]
 	size, measured := binary_node_encode(nil, node)
 	if measured.kind != .Destination_Undersized {
@@ -769,6 +794,7 @@ socket_group_content_stage :: proc(
 	// can replay this stanza without ever regenerating a used message key.
 	created := fmt.aprintf("%d", time.to_unix_seconds(time.now()))
 	defer delete(created)
+
 	saved_content := Binary_Node {
 		tag     = "saved",
 		attrs   = []Binary_Node_Attribute {
@@ -808,16 +834,19 @@ socket_group_existing_send :: proc(
 	if id == "" {
 		return "", false, {}
 	}
+
 	if _, error := socket_group_existing_intent(socket, group, media_type, id, protobuf);
 	   error.kind != .None {
 		return "", true, error
 	}
+
 	if only_device == "" {
 		if wire, pending := state_store_get(socket.store, .Outbound_Message, id); pending {
 			owned, error := socket_group_pending_replay(socket, id, wire)
 			return owned, true, error
 		}
 	}
+
 	// No durable ACK marker exists; absence of wire must not fabricate success.
 	// Equal retained content without pending wire keeps the existing resend path.
 	return "", false, {}
@@ -836,9 +865,11 @@ socket_group_existing_intent :: proc(
 	if !socket_inbox_id_valid(id) {
 		return false, {kind = .Invalid_Config}
 	}
+
 	if socket.store == nil || !socket.store.initialized {
 		return false, {kind = .Invalid_State}
 	}
+
 	content, exists := state_store_get(socket.store, .Outbound_Content, id)
 	if !exists {
 		if _, pending := state_store_get(socket.store, .Outbound_Message, id); pending {
@@ -847,23 +878,28 @@ socket_group_existing_intent :: proc(
 
 		return false, {}
 	}
+
 	document, decoded := binary_node_decode(content)
 	if decoded.kind != .None {
 		return false, {kind = .Binary_Failed, binary = decoded}
 	}
 	defer binary_document_destroy(&document)
+
 	stored_group, _ := node_attr(document.root, "to")
 	stored_media, _ := node_attr(document.root, "mediatype")
 	stored_protobuf, valid := document.root.content.([]u8)
 	if document.root.tag != "saved" || !valid {
 		return false, {kind = .Protocol_Error}
 	}
+
 	if group != stored_group || media_type != stored_media {
 		return false, {kind = .Invalid_Config}
 	}
+
 	if !bytes.equal(protobuf, stored_protobuf) {
 		return false, {kind = .Invalid_Config}
 	}
+
 	return true, {}
 }
 
@@ -889,7 +925,6 @@ socket_group_pending_replay :: proc(
 		delete(id)
 		return "", {kind = .Allocation_Failed, allocation = wire_error}
 	}
-
 	defer {
 		crypto.zero_explicit(raw_data(wire), len(wire))
 		delete(wire)
@@ -909,10 +944,12 @@ socket_group_outbound_commit :: proc(
 	   intent_error.kind != .None {
 		return intent_error
 	}
+
 	if content_error := socket_group_content_stage(socket, group, media_type, id, protobuf);
 	   content_error.kind != .None {
 		return content_error
 	}
+
 	if e := state_store_set(socket.store, .Outbound_Message, id, wire); e.kind != .None {
 		return {kind = .State_Failed, state = e}
 	}
@@ -957,6 +994,7 @@ socket_group_dispatch :: proc(
 		return "", wire_error
 	}
 	defer delete(wire)
+
 	commit_error := socket_group_outbound_commit(socket, group, media_type, id, protobuf, wire)
 	if commit_error.kind != .None {
 		return "", commit_error
@@ -985,8 +1023,10 @@ socket_group_payload_send :: proc(
 		crypto.zero_explicit(raw_data(padded), len(padded))
 		delete(padded)
 	}
+
 	ciphertext := make([]u8, len(padded) + 256)
 	defer delete(ciphertext)
+
 	cipher_size, group_err := signal_group_encrypt(ciphertext, record, padded)
 	if group_err != .None {
 		return "", {kind = .Group_Failed, group = group_err}
@@ -996,6 +1036,7 @@ socket_group_payload_send :: proc(
 	   stage_error.kind != .None {
 		return "", stage_error
 	}
+
 	return socket_group_dispatch(
 		socket,
 		group,
@@ -1020,17 +1061,21 @@ socket_group_send_prepared :: proc(
 ) {
 	key_name := fmt.aprintf("%s|%s", group, canonical_me)
 	defer delete(key_name)
+
 	record := new(Signal_Group_Record)
 	defer {
 		signal_group_record_clear(record)
 		free(record)
 	}
+
 	members := strings.join(devices[:], "\n")
 	defer delete(members)
+
 	if sender_error := socket_group_sender_prepare(socket, record, key_name, members, only_device);
 	   sender_error.kind != .None {
 		return "", sender_error
 	}
+
 	padded_distribution, distribution_error := socket_group_distribution_pad(group, record)
 	if distribution_error.kind != .None {
 		return "", distribution_error
@@ -1039,6 +1084,7 @@ socket_group_send_prepared :: proc(
 		crypto.zero_explicit(raw_data(padded_distribution), len(padded_distribution))
 		delete(padded_distribution)
 	}
+
 	participants, participant_error := socket_group_participants_prepare(
 		socket,
 		devices,
@@ -1049,6 +1095,7 @@ socket_group_send_prepared :: proc(
 		return "", participant_error
 	}
 	defer socket_group_participants_destroy(&participants)
+
 	return socket_group_payload_send(
 		socket,
 		group,
@@ -1080,10 +1127,11 @@ socket_stage_session :: proc(
 	if e.kind != .None {
 		return e
 	}
-
 	defer delete(canonical)
+
 	address := fmt.aprintf("%s%s", canonical, suffix)
 	defer delete(address)
+
 	buffer := make([]u8, MAX_SIGNAL_SESSION_STORE_SIZE)
 	defer {
 		crypto.zero_explicit(raw_data(buffer), len(buffer))
@@ -1112,7 +1160,6 @@ socket_outgoing_session :: proc(
 	if address_err.kind != .None {
 		return address_err
 	}
-
 	defer delete(address)
 
 	if data, found := state_store_get(socket.store, .Session, address); found {
@@ -1125,9 +1172,10 @@ socket_outgoing_session :: proc(
 	if query_err.kind != .None {
 		return query_err
 	}
-
 	defer binary_document_destroy(&doc)
+
 	requested := [1]string{jid}
+
 	bundles: [1]Remote_Key_Bundle
 	_, e := device_keys_response_decode(doc.root, requested[:], id, bundles[:])
 
@@ -1234,12 +1282,14 @@ socket_group_devices :: proc(
 		for user in users {
 			delete(user)
 		}
+
 		delete(users)
 	}
 
 	if users_error := socket_group_users_collect(group, &users); users_error.kind != .None {
 		return nil, users_error
 	}
+
 	devices := make([dynamic]string)
 	success := false
 
@@ -1247,6 +1297,7 @@ socket_group_devices :: proc(
 		for jid in devices {
 			delete(jid)
 		}
+
 		delete(devices)
 	}
 
@@ -1336,6 +1387,7 @@ socket_group_devices_append :: proc(
 			append(devices, strings.clone(jid))
 		}
 	}
+
 	return {}
 }
 
@@ -1348,6 +1400,7 @@ socket_group_devices_batch :: proc(
 ) -> Socket_Error {
 	query_buffer := make([]u8, 65536)
 	defer delete(query_buffer)
+
 	id_buffer: [128]u8
 	id := socket_next_iq_id(socket, id_buffer[:])
 	n, encoded := devices_query_encode(query_buffer, batch, id)
@@ -1359,14 +1412,14 @@ socket_group_devices_batch :: proc(
 	if decoded.kind != .None {
 		return {kind = .Binary_Failed, binary = decoded}
 	}
-
 	defer binary_document_destroy(&query)
+
 	doc, query_err := socket_query(socket, query.root)
 	if query_err.kind != .None {
 		return query_err
 	}
-
 	defer binary_document_destroy(&doc)
+
 	_, measured := devices_response_decode(doc.root, batch, id, nil)
 	if measured.kind != .None && measured.kind != .Destination_Undersized {
 		return {kind = .Device_Failed, device = measured}
@@ -1374,6 +1427,7 @@ socket_group_devices_batch :: proc(
 
 	storage := make([]Remote_Device, measured.required)
 	defer delete(storage)
+
 	count, parsed := devices_response_decode(doc.root, batch, id, storage)
 	if parsed.kind != .None {
 		return {kind = .Device_Failed, device = parsed}
@@ -1394,6 +1448,7 @@ pad_outbound_message :: proc(message: []u8) -> []u8 {
 
 	return result
 }
+
 generate_outbound_message_id :: proc() -> string {
 	random: [9]u8
 	crypto.rand_bytes(random[:])
@@ -1427,32 +1482,41 @@ socket_send_primary_device_message :: proc(
 	if e.kind != .None {
 		return {kind = .Invalid_State}
 	}
+
 	server := "@lid" if strings.has_suffix(me, "@lid") else "@s.whatsapp.net"
 	jid := fmt.aprintf("%s%s", user, server)
 	defer delete(jid)
+
 	padded := pad_outbound_message(message)
 	defer delete(padded)
+
 	session := new(Signal_Session)
 	defer {signal_session_clear(session); free(session)}
+
 	encryption_jid := jid
 	owned_lid: string
 	defer delete(owned_lid)
+
 	if own_lid, known := state_store_get(socket.store, .LID_Mapping, "self");
 	   known && strings.has_suffix(jid, "@s.whatsapp.net") {
 		lid_user, _, invalid := pairing_jid_decode(string(own_lid))
 		if invalid.kind != .None || !strings.has_suffix(string(own_lid), "@lid") {
 			return {kind = .Protocol_Error}
 		}
+
 		owned_lid = fmt.aprintf("%s@lid", lid_user)
 		if err := socket_record_lid_mapping(socket, jid, owned_lid); err.kind != .None {
 			return err
 		}
+
 		// Keep an owned value across the prekey IQ, which can replace the store.
 		encryption_jid = owned_lid
 	}
+
 	if err := socket_outgoing_session(socket, encryption_jid, session); err.kind != .None {
 		return err
 	}
+
 	cipher: [2048]u8
 	kind, n, encrypt_err := signal_session_encrypt(
 		session,
@@ -1463,6 +1527,7 @@ socket_send_primary_device_message :: proc(
 	if encrypt_err.kind != .None {
 		return {kind = .Signal_Failed, signal = encrypt_err}
 	}
+
 	enc_type := "pkmsg" if kind == .Prekey else "msg"
 	children := [3]Binary_Node {
 		{tag = "meta", attrs = []Binary_Node_Attribute{{"appdata", "default"}}},
@@ -1473,6 +1538,7 @@ socket_send_primary_device_message :: proc(
 		},
 		{},
 	}
+
 	count := 2
 	identity: [2048]u8
 	if kind == .Prekey {
@@ -1490,12 +1556,15 @@ socket_send_primary_device_message :: proc(
 		if error != .None {
 			return {kind = .Protocol_Error}
 		}
+
 		children[2] = {
 			tag     = "device-identity",
 			content = identity[:size],
 		}
+
 		count = 3
 	}
+
 	attrs := [6]Binary_Node_Attribute {
 		{"id", id},
 		{"type", "text"},
@@ -1504,40 +1573,51 @@ socket_send_primary_device_message :: proc(
 		{"push_priority", "high"},
 		{"privacy_sensitive", "1"},
 	}
+
 	attr_count := 4 if placeholder_resend else 5
 	if history {
 		attrs[4].value = "high_force"
 		attr_count = 6
 	}
+
 	node := Binary_Node {
 		tag     = "message",
 		attrs   = attrs[:attr_count],
 		content = children[:count],
 	}
+
 	wire: [8192]u8
 	size, error := binary_node_encode(wire[:], node)
 	if error.kind != .None {
 		return {kind = .Binary_Failed, binary = error}
 	}
+
 	candidate: State_Store
 	defer state_store_clear(&candidate)
+
 	if err := socket_store_clone(&candidate, socket.store); err.kind != .None {
 		return err
 	}
+
 	staged := new(Socket)
 	defer free(staged)
+
 	staged.store = &candidate
 	if err := socket_stage_session(staged, encryption_jid, session); err.kind != .None {
 		return err
 	}
+
 	if err := state_store_set(&candidate, .Outbound_Message, id, wire[:size]); err.kind != .None {
 		return {kind = .State_Failed, state = err}
 	}
+
 	if err := socket_store_commit(socket, &candidate); err.kind != .None {
 		return err
 	}
+
 	if err := socket_write(socket, wire[:size]); err.kind != .None {
 		return err
 	}
+
 	return {}
 }

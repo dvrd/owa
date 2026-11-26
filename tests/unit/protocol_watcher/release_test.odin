@@ -44,16 +44,19 @@ receipt_inputs :: proc(root: string) -> (w.Value, w.Value) {
 			"pdf_opened",
 			"same_ids_after_restart",
 		}) {w.put(&live, name, w.boolean(true))}
+
 	return offline, live
 }
 
 gate_case :: proc(t: ^testing.T, mode: int) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	root, error := os.make_directory_temp("", "owa-gate-*", context.allocator)
 	assert(error == nil)
 	defer os.remove_all(root)
+
 	offline, live := receipt_inputs(root)
 
 	if mode == 1 {
@@ -90,13 +93,17 @@ gate_case :: proc(t: ^testing.T, mode: int) {
 			slice.contains(array_strings(failures[:]), "OFFLINE_SOURCE_MISMATCH") &&
 			slice.contains(array_strings(failures[:]), "LIVE_SOURCE_MISMATCH"),
 		)
-	}; if mode == 2 {
+	}
+
+	if mode == 2 {
 		for expected in ([]string {
 				"LIVE_QUALIFICATION_INCOMPLETE",
 				"MISSING_OR_INVALID_UNIT_ASAN",
 				"MISSING_OR_INVALID_PROTOCOL_REVIEW",
 			}) {testing.expect(t, slice.contains(array_strings(failures[:]), expected))}
-	}; if mode == 3 {
+	}
+
+	if mode == 3 {
 		testing.expect(t, slice.contains(array_strings(failures[:]), "LIVE_EVIDENCE_MISSING_OR_CHANGED"))
 	}
 }
@@ -148,10 +155,13 @@ ci_scan :: proc(data: rawptr, state, approved_contract: string) -> (w.Value, w.F
 ci_case :: proc(t: ^testing.T, mode: int) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	root, error := os.make_directory_temp("", "owa-ci-*", context.allocator)
 	assert(error == nil)
-	defer os.remove_all(root); output := w.join(root, "out"); kind := mode
+	defer os.remove_all(root)
+
+	output := w.join(root, "out"); kind := mode
 	result, failure := w.ci_prepare(w.join(root, "state"), output, "", ci_scan, &kind)
 	testing.expect(t, failure == nil)
 	testing.expect_value(

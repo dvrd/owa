@@ -64,6 +64,7 @@ OWNER :: "OWA-ENCRYPTED-RECOVERY-V1"
 Pair :: struct {
 	a, b: wa.Signal_Session,
 }
+
 Fixture :: struct {
 	pair:    Pair,
 	prekeys: wa.Prekey_Store,
@@ -145,6 +146,7 @@ prekeys_get :: proc(f: ^Fixture) {
 
 	credentials.adv_secret[0] = 1
 	defer wa.device_credentials_clear(&credentials)
+
 	assert(found && wa.prekey_store_decode(&f.prekeys, data, &credentials).kind == .None)
 }
 
@@ -159,9 +161,11 @@ fixture_open :: proc(directory: string, initialize: bool) -> ^Fixture {
 	assert(!strings.contains(directory[len(prefix):], "/"))
 	owner_path := fmt.aprintf("%s/owner", directory)
 	defer delete(owner_path)
+
 	owner, owner_error := os.read_entire_file(owner_path, context.allocator)
 	assert(owner_error == nil)
 	defer delete(owner)
+
 	assert(string(owner) == OWNER)
 	f := new(Fixture)
 	f.path = fmt.aprintf("%s/state.bin", directory)
@@ -265,6 +269,7 @@ fixture_load_pair :: proc(f: ^Fixture) {
 	session_get(&f.store, "device-b", &f.pair.b)
 	marker, found := wa.state_store_get(&f.store, .Consumed_Prekey, "device-b/9")
 	assert(found && bytes.equal(marker, []u8{9}))
+
 	prekeys_get(f)
 	assert(wa.prekey_store_get(&f.prekeys, 9) == nil)
 }

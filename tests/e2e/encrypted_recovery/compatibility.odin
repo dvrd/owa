@@ -31,14 +31,17 @@ compat_credentials :: proc() -> wa.Device_Credentials {
 compat_verify :: proc(directory: string) {
 	f := fixture_open(directory, false)
 	defer fixture_close(f)
+
 	fixture_load_pair(f)
 	before, io_error := os.read_entire_file(f.path, context.allocator)
 	assert(io_error == nil)
 	defer delete(before)
+
 	size, measured := wa.state_store_encode(nil, &f.store)
 	assert(measured.kind == .Destination_Undersized)
 	encoded := make([]u8, size)
 	defer delete(encoded)
+
 	_, encode_error := wa.state_store_encode(encoded, &f.store)
 	assert(encode_error.kind == .None && bytes.equal(before, encoded))
 
@@ -50,6 +53,7 @@ compat_verify :: proc(directory: string) {
 		assert(found)
 		canonical := session_bytes(entry.session)
 		defer delete(canonical)
+
 		assert(bytes.equal(saved, canonical))
 	}
 
@@ -61,13 +65,16 @@ compat_verify :: proc(directory: string) {
 	assert(content_found && string(content) == BODY && pending_found && len(pending) > 0)
 	prekey_path := fmt.aprintf("%s/prekeys.bin", directory)
 	defer delete(prekey_path)
+
 	prekey_bytes, prekey_io := os.read_entire_file(prekey_path, context.allocator)
 	assert(prekey_io == nil)
 	defer delete(prekey_bytes)
+
 	snapshot, snapshot_found := wa.state_store_get(&f.store, .Captured_Message, "prekeys-b")
 	assert(snapshot_found && bytes.equal(snapshot, prekey_bytes))
 	credentials := compat_credentials()
 	defer wa.device_credentials_clear(&credentials)
+
 	loaded := new(wa.Prekey_Store)
 	defer {
 		wa.prekey_store_clear(loaded)
@@ -96,9 +103,11 @@ compat_verify :: proc(directory: string) {
 	after, after_error := os.read_entire_file(f.path, context.allocator)
 	assert(after_error == nil)
 	defer delete(after)
+
 	prekey_after, prekey_after_error := os.read_entire_file(prekey_path, context.allocator)
 	assert(prekey_after_error == nil)
 	defer delete(prekey_after)
+
 	assert(bytes.equal(before, after) && bytes.equal(prekey_bytes, prekey_after))
 	fmt.println(
 		"COMPAT_VERIFIED same_format=true stable_intent=true exact_store_and_session_bytes=true prekey_metadata=true pending_authenticated=true readonly=true",

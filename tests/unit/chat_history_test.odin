@@ -12,6 +12,7 @@ chat_history_request_encodes_initial_and_anchored_pages :: proc(t: ^testing.T) {
 		"6221101082011c080322180a1232323240732e77686174736170702e6e657440012032",
 		"622f101082012a080322260a1232323240732e77686174736170702e6e65741206616e63686f72180128d2ebcfaa062032",
 	}
+
 	for anchor, index in ([2]wa.Chat_History_Cursor {
 			{},
 			{id = "anchor", from_me = true, timestamp = 1700001234},
@@ -20,14 +21,17 @@ chat_history_request_encodes_initial_and_anchored_pages :: proc(t: ^testing.T) {
 		n, e := wa.chat_history_request_encode(buf[:], "222@s.whatsapp.net", anchor, 50)
 		testing.expect(t, e.kind == .None && bytes.equal(expected, buf[:n]))
 	}
+
 	for count in ([]int{0, 51}) {
 		_, e := wa.chat_history_request_encode(buf[:], "222@s.whatsapp.net", {}, count)
 		testing.expect_value(t, e.kind, .Invalid_Config)
 	}
+
 	for jid in ([]string{"222@g.us", "222:1@lid"}) {
 		_, e := wa.chat_history_request_encode(buf[:], jid, {}, 50)
 		testing.expect_value(t, e.kind, .Invalid_Config)
 	}
+
 	_, missing := wa.chat_history_request_encode(buf[:], "222@lid", {id = "unknown"}, 1)
 	testing.expect_value(t, missing.kind, .Invalid_Config)
 }
@@ -37,7 +41,11 @@ history_pages_match_request_and_chat_and_preserve_original_messages :: proc(t: ^
 	request := wa.Pending_Chat_History {
 		id = "q",
 	}
-	defer {for ref in request.notifications {delete(ref)}; delete(request.notifications)}
+
+	defer {for ref in request.notifications {delete(ref)}
+
+	delete(request.notifications)}
+
 	for ignored in ([][]u8{{48, 4, 98, 1, 'q'}, {48, 6, 98, 1, 'z'}, {48, 6}}) {
 		testing.expect_value(
 			t,
@@ -45,6 +53,7 @@ history_pages_match_request_and_chat_and_preserve_original_messages :: proc(t: ^
 			.None,
 		)
 	}
+
 	testing.expect_value(t, len(request.notifications), 0)
 	testing.expect_value(
 		t,
@@ -55,6 +64,7 @@ history_pages_match_request_and_chat_and_preserve_original_messages :: proc(t: ^
 	store: wa.State_Store
 	assert(wa.state_store_init(&store, [32]u8{0 = 1}).kind == .None)
 	defer wa.state_store_clear(&store)
+
 	assert(wa.socket_lid_mapping_stage(&store, "222@s.whatsapp.net", "777@lid").kind == .None)
 	raw: [512]u8
 	compressed := fixtures.codec_api_hex(
@@ -63,7 +73,10 @@ history_pages_match_request_and_chat_and_preserve_original_messages :: proc(t: ^
 	page, decompressed := wa.decompress_history_chunk(raw[:], compressed)
 	assert(decompressed.kind == .None)
 	messages: [dynamic]^wa.Socket_Message
-	defer {for msg in messages {wa.socket_message_destroy(msg)}; delete(messages)}
+	defer {for msg in messages {wa.socket_message_destroy(msg)}
+
+	delete(messages)}
+
 	testing.expect_value(
 		t,
 		wa.decode_chat_history_chunk(&store, "888@lid", "111@lid", page, 2, &messages).kind,
@@ -77,6 +90,7 @@ history_pages_match_request_and_chat_and_preserve_original_messages :: proc(t: ^
 			.None,
 		)
 	}
+
 	assert(len(messages) == 2)
 	voice, _ := wa.media_message_decode(messages[0].protobuf)
 	testing.expect(
@@ -103,6 +117,7 @@ private_chat_history_cursor_survives_older_deliveries_and_accepts_legacy_sent_me
 	store: wa.State_Store
 	assert(wa.state_store_init(&store, [32]u8{0 = 1}).kind == .None)
 	defer wa.state_store_clear(&store)
+
 	chat := "111@s.whatsapp.net"
 	assert(wa.socket_lid_mapping_stage(&store, chat, "333@lid").kind == .None)
 	// The sender's legacy record supplies its original creation time even when
@@ -112,6 +127,7 @@ private_chat_history_cursor_survives_older_deliveries_and_accepts_legacy_sent_me
 		attrs   = []wa.Binary_Node_Attribute{{"to", chat}, {"t", "90"}},
 		content = []u8{10, 1, 'x'},
 	}
+
 	wire: [256]u8
 	n, e := wa.binary_node_encode(wire[:], doc)
 	assert(e.kind == .None)
@@ -127,6 +143,7 @@ private_chat_history_cursor_survives_older_deliveries_and_accepts_legacy_sent_me
 		id          = "in",
 		timestamp   = 95,
 	}
+
 	assert(wa.store_chat_history_cursor(&store, &newer).kind == .None)
 	newer.timestamp, newer.id = 80, "delayed"
 	assert(wa.store_chat_history_cursor(&store, &newer).kind == .None)

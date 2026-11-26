@@ -24,7 +24,9 @@ fixture_blob :: proc(blobs, key: w.Value) -> []u8 {
 	if repeat, ok := w.integer(w.get(record, "repeat")); ok {
 		n, _ := w.integer(w.get(record, "length"))
 		data := make([]u8, int(n))
-		for &c in data {c = u8(repeat)}; return data
+		for &c in data {c = u8(repeat)}
+
+		return data
 	}
 
 	data := make([dynamic]u8)
@@ -51,6 +53,7 @@ triage_cases :: proc(t: ^testing.T, suffix: string) {
 	arena: mem.Dynamic_Arena
 	mem.dynamic_arena_init(&arena)
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	corpus, error := w.decode(#load("../../fixtures/protocol_watch/triage.json"), 16 * 1024 * 1024)
 
@@ -259,6 +262,7 @@ triage_real_owned_dictionary :: proc(t: ^testing.T) {
 	arena: mem.Dynamic_Arena
 	mem.dynamic_arena_init(&arena)
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	bytes, error := w.read_file(w.join(SOURCE, "binary_tokens.odin"))
 
@@ -281,10 +285,13 @@ triage_real_owned_dictionary :: proc(t: ^testing.T) {
 reviewed_contract_paths_follow_the_watcher_directory :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	root, err := os.make_directory_temp("", "owa-contract-path-*", context.allocator)
 	if !testing.expect_value(t, err, nil) { return }
+
 	defer os.remove_all(root)
+
 	// A missing file in the owned directory passes path validation and reaches the filesystem.
 	_, missing := w.approved_metadata(w.null(), root, "tools/protocol_watcher/contracts/missing.json")
 	testing.expect_value(t, missing, "CONTRACT_FILE")

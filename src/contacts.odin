@@ -26,11 +26,13 @@ decode_saved_contact :: proc(jid: string, data: []u8) -> (Contact, bool) {
 	if first < 0 {
 		return {}, false
 	}
+
 	tail := encoded[first + 1:]
 	second := strings.index_byte(tail, 0)
 	if second < 0 {
 		return {}, false
 	}
+
 	return Contact {
 			jid = jid,
 			is_saved = true,
@@ -47,6 +49,7 @@ contact_by_jid :: proc(store: ^State_Store, jid: string) -> (Contact, bool) {
 	if store == nil || !store.initialized || !device_user_jid_valid(jid, false) {
 		return {}, false
 	}
+
 	result: Contact
 	saved := false
 	if stored, exact := state_store_find_record(store, .Contact_Name, jid); exact {
@@ -56,6 +59,7 @@ contact_by_jid :: proc(store: ^State_Store, jid: string) -> (Contact, bool) {
 			if record.kind != .Contact_Name {
 				continue
 			}
+
 			candidate, ok := decode_saved_contact(record.name, record.data)
 			if ok && candidate.alternate_jid == jid {
 				result, saved = candidate, true
@@ -63,12 +67,15 @@ contact_by_jid :: proc(store: ^State_Store, jid: string) -> (Contact, bool) {
 			}
 		}
 	}
+
 	profile_jid := result.jid if saved else jid
 	profile, seen := state_store_find_record(store, .Contact_Profile, profile_jid)
 	if !seen && result.alternate_jid != "" {
 		profile, seen = state_store_find_record(store, .Contact_Profile, result.alternate_jid)
 	}
+
 	if !saved && seen { result.jid = profile.name }
+
 	result.profile_name = string(profile.data)
 	return result, saved || seen
 }
@@ -86,35 +93,45 @@ search_contact_jids :: proc(
 	if store == nil || !store.initialized {
 		return nil, .Syncing, {kind = .Invalid_State}
 	}
+
 	status = contact_sync_status(store)
 	query := strings.trim_space(name)
 	if query == "" || !contact_name_valid(query) {
 		return nil, status, {kind = .Invalid_Record}
 	}
+
 	needle, alloc_err := strings.to_lower(query)
 	if alloc_err != nil {
 		return nil, status, {kind = .Allocation_Failed, allocation = alloc_err}
 	}
 	defer delete(needle)
+
 	for record in store.records {
 		if record.kind != .Contact_Name {
 			continue
 		}
+
 		// The NUL between the two fields cannot match a valid query.
 		contact, valid := decode_saved_contact(record.name, record.data)
 		if !valid {
 			error = {
 				kind = .Invalid_Record,
-			}; break
+			}
+
+			break
 		}
+
 		names_length := len(contact.full_name) + 1 + len(contact.first_name)
 		names, e := strings.to_lower(string(record.data[:names_length]))
 		if e != nil {
 			error = {
 				kind       = .Allocation_Failed,
 				allocation = e,
-			}; break
+			}
+
+			break
 		}
+
 		matches := strings.contains(names, needle)
 		delete(names)
 		if matches {
@@ -123,13 +140,16 @@ search_contact_jids :: proc(
 					kind       = .Allocation_Failed,
 					allocation = err,
 				}
+
 				break
 			}
 		}
 	}
+
 	if error.kind != .None {
 		delete(jids); return nil, status, error
 	}
+
 	slice.sort(jids[:])
 	return
 }
