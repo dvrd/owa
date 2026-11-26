@@ -55,7 +55,7 @@ integration_case :: proc(t: ^testing.T, mode: int) {
 
 	for name in ([]string {
 			"socket.odin",
-			"connection.odin",
+			"noise_handshake.odin",
 			"binary_node.odin",
 			"auth.odin",
 			"pairing.odin",

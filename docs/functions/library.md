@@ -2,7 +2,11 @@
 
 [Catalog index](README.md) · [Name changes](renames.md)
 
-642 entries across 16 source files. Select a function to open its declaration.
+642 entries across 20 source files. Select a function to open its declaration.
+
+The WhatsApp connection uses Surf for the WebSocket upgrade, message I/O and write deadlines. Owa adds the WhatsApp binary frame envelope, Noise XX handshake and transport encryption, and verification of the server certificate against WhatsApp’s pinned key. The synchronous socket pump checks for buffered data before waiting for network input or HTTP worker completion.
+
+Set `config.pool_media_downloads = true` before `socket_connect` to reuse one Surf HTTPS connection for sequential online calls to `socket_download_media`. The pool uses HTTP/1.1 when permitted by the TLS configuration. Each request has its own ciphertext limit derived from the descriptor. Owa verifies the ciphertext hash, MAC and plaintext hash before returning the audio. Keep the configured TLS roots alive until `socket_close`, which releases the pool. Provisioning downloads, custom HTTP executors and HTTP/2-only configurations keep their existing transport.
 
 | Source file | Functions |
 |---|---:|
@@ -11,7 +15,11 @@
 | [src/auth.odin](#file-src-auth-odin) | 41 |
 | [src/binary_node.odin](#file-src-binary-node-odin) | 35 |
 | [src/chat_history.odin](#file-src-chat-history-odin) | 9 |
-| [src/connection.odin](#file-src-connection-odin) | 56 |
+| [src/binary_framing.odin](#file-src-binary-framing-odin) | 17 |
+| [src/noise_certificate.odin](#file-src-noise-certificate-odin) | 5 |
+| [src/noise_cipher.odin](#file-src-noise-cipher-odin) | 10 |
+| [src/noise_handshake.odin](#file-src-noise-handshake-odin) | 20 |
+| [src/signal_curve25519.odin](#file-src-signal-curve25519-odin) | 4 |
 | [src/contact_sync.odin](#file-src-contact-sync-odin) | 24 |
 | [src/contacts.odin](#file-src-contacts-odin) | 5 |
 | [src/media.odin](#file-src-media-odin) | 89 |
@@ -181,68 +189,96 @@
 | [`decode_chat_history_chunk`](../../src/chat_history.odin#L263) | Validate the selected conversation and collect distinct messages within the page limits. |
 | [`socket_fetch_chat_history`](../../src/chat_history.odin#L336) | Request a private conversation page from the primary phone and return owned messages. |
 
-<a id="file-src-connection-odin"></a>
+<a id="file-src-binary-framing-odin"></a>
 
-## src/connection.odin
+## src/binary_framing.odin
 
 | Function | Behavior |
 |---|---|
-| [`noise_credentials_generate`](../../src/connection.odin#L111) | Generate a fresh static Noise credential for a client. |
-| [`client_init`](../../src/connection.odin#L120) | Bind credentials and an upgraded WebSocket to a new Noise client. |
-| [`client_handshake`](../../src/connection.odin#L175) | Complete the WhatsApp handshake and install transport keys. |
-| [`client_handshake_deadline_start`](../../src/connection.odin#L233) | Set the handshake deadline on the WebSocket stream. |
-| [`client_handshake_hello_send`](../../src/connection.odin#L255) | Encode and send ClientHello with the client's ephemeral public key. |
-| [`client_handshake_server_read`](../../src/connection.odin#L270) | Receive and decode the ServerHello frame. |
-| [`client_noise_mix_dh`](../../src/connection.odin#L302) | Mix an X25519 shared secret into the handshake chaining key. |
-| [`client_handshake_server_static_decrypt`](../../src/connection.odin#L318) | Decrypt the server's static key and mix the next handshake secret. |
-| [`client_decrypt_and_verify_server_certificate`](../../src/connection.odin#L337) | Decrypt the server's certificate payload and invoke the configured verifier. |
-| [`client_handshake_static_send_prepare`](../../src/connection.odin#L364) | Encrypt the client's static key and mix its handshake secret. |
-| [`client_handshake_finish_send`](../../src/connection.odin#L376) | Frame and send the encoded ClientFinish. |
-| [`client_handshake_payload_send`](../../src/connection.odin#L399) | Encrypt the client payload and send it in ClientFinish. |
-| [`client_handshake_exchange`](../../src/connection.odin#L417) | Sequence ClientHello, server authentication and ClientFinish. |
-| [`verify_whatsapp_server_certificate`](../../src/connection.odin#L486) | Authenticate the WhatsApp server's certificate chain and handshake key at the current time. |
-| [`verify_whatsapp_server_certificate_at`](../../src/connection.odin#L492) | Verify the server certificate against the pinned WhatsApp root at a supplied time. |
-| [`verify_certificate_chain_against_root`](../../src/connection.odin#L496) | Verify issuer linkage, both signatures, the leaf key and certificate validity against a supplied root. |
-| [`decode_and_validate_certificate_details`](../../src/connection.odin#L541) | Decode and validate the required fields of an intermediate or leaf certificate. |
-| [`check_certificate_validity_at`](../../src/connection.odin#L577) | Check that the supplied time falls within the certificate's validity interval. |
-| [`client_close`](../../src/connection.odin#L597) | Release transport buffers, erase secrets and close the WebSocket. |
-| [`client_fail`](../../src/connection.odin#L618) | Record the terminal client error, erase keys and close the transport. |
-| [`client_secret_keys_clear`](../../src/connection.odin#L629) | Zero the static and ephemeral client private keys. |
-| [`client_finish_wire_size`](../../src/connection.odin#L634) | Calculate the encoded size of ClientFinish before sending. |
-| [`client_write`](../../src/connection.odin#L647) | Encrypt and send one application payload on an established client. |
-| [`client_read`](../../src/connection.odin#L688) | Receive and authenticate one encrypted application payload. |
-| [`client_encrypted_frame_receive`](../../src/connection.odin#L731) | Read an encrypted transport frame and validate its size. |
-| [`frame_encode_len`](../../src/connection.odin#L765) | Encode a frame length in the three-byte WhatsApp header. |
-| [`frame_decode_len`](../../src/connection.odin#L781) | Decode the three-byte big-endian frame length. |
-| [`frame_encode`](../../src/connection.odin#L785) | Write a length-prefixed frame. |
-| [`frame_decode`](../../src/connection.odin#L803) | Read a complete length-prefixed frame from buffered bytes. |
-| [`frame_reader_feed`](../../src/connection.odin#L826) | Append received bytes to the bounded frame reader. |
-| [`frame_reader_peek`](../../src/connection.odin#L840) | Inspect the next frame without advancing the reader. |
-| [`frame_reader_consume`](../../src/connection.odin#L844) | Discard consumed bytes and retain the unread suffix. |
-| [`frame_transport_init`](../../src/connection.odin#L907) | Initialize framed transport around the supplied WebSocket. |
-| [`frame_transport_send`](../../src/connection.odin#L943) | Frame the payload and send it as a binary WebSocket message. |
-| [`frame_transport_receive`](../../src/connection.odin#L994) | Assemble and deliver the next complete WhatsApp frame. |
-| [`frame_transport_header_receive`](../../src/connection.odin#L1043) | Collect the frame header and allocate space for its payload. |
-| [`frame_transport_clear`](../../src/connection.odin#L1071) | Release the transport's pending buffers and reset its state. |
-| [`frame_transport_validate`](../../src/connection.odin#L1081) | Check whether the transport is initialized and usable. |
-| [`frame_transport_next_message`](../../src/connection.odin#L1097) | Read the next binary WebSocket message into the transport. |
-| [`frame_transport_read_fail`](../../src/connection.odin#L1136) | Translate a WebSocket read failure into a frame transport error. |
-| [`frame_transport_deliver`](../../src/connection.odin#L1156) | Copy a completed frame into the caller's destination. |
-| [`frame_transport_fail`](../../src/connection.odin#L1169) | Record a terminal frame transport failure. |
-| [`noise_init`](../../src/connection.odin#L1220) | Initialize the Noise transcript with the protocol header and ephemeral key. |
-| [`noise_mix_hash`](../../src/connection.odin#L1241) | Mix new handshake bytes into the transcript hash. |
-| [`noise_mix_key`](../../src/connection.odin#L1261) | Derive fresh handshake encryption and chaining keys. |
-| [`noise_split`](../../src/connection.odin#L1286) | Derive separate read and write keys for the transport phase. |
-| [`noise_encrypt`](../../src/connection.odin#L1310) | Authenticate and encrypt a handshake or transport payload. |
-| [`noise_decrypt`](../../src/connection.odin#L1351) | Authenticate and decrypt a handshake or transport payload. |
-| [`noise_clear`](../../src/connection.odin#L1411) | Erase Noise keys, counters and transcript state. |
-| [`noise_nonce`](../../src/connection.odin#L1417) | Encode the message counter into the 12-byte Noise nonce. |
-| [`noise_state_validate`](../../src/connection.odin#L1423) | Check the Noise phase and any previously recorded failure. |
-| [`noise_fail`](../../src/connection.odin#L1435) | Erase Noise state and record its terminal error. |
-| [`signal_curve_public`](../../src/connection.odin#L1480) | Derive the X25519 public key for a private scalar. |
-| [`signal_curve_sign`](../../src/connection.odin#L1493) | Sign bytes with the Signal Curve25519 signature scheme. |
-| [`signal_curve_verify`](../../src/connection.odin#L1567) | Verify a Signal Curve25519 signature against the public key. |
-| [`signal_curve_edwards_public`](../../src/connection.odin#L1616) | Convert a Montgomery public key to the Edwards representation used for signature verification. |
+| [`frame_encode_len`](../../src/binary_framing.odin#L20) | Encode a frame length in the three-byte WhatsApp header. |
+| [`frame_decode_len`](../../src/binary_framing.odin#L36) | Decode the three-byte big-endian frame length. |
+| [`frame_encode`](../../src/binary_framing.odin#L40) | Write a length-prefixed frame. |
+| [`frame_decode`](../../src/binary_framing.odin#L58) | Read a complete length-prefixed frame from buffered bytes. |
+| [`frame_reader_feed`](../../src/binary_framing.odin#L82) | Append received bytes to the bounded frame reader. |
+| [`frame_reader_peek`](../../src/binary_framing.odin#L96) | Inspect the next frame without advancing the reader. |
+| [`frame_reader_consume`](../../src/binary_framing.odin#L106) | Discard consumed bytes and retain the unread suffix. |
+| [`frame_transport_init`](../../src/binary_framing.odin#L170) | Initialize framed transport around the supplied WebSocket. |
+| [`frame_transport_send`](../../src/binary_framing.odin#L207) | Frame the payload and send it as a binary WebSocket message. |
+| [`frame_transport_receive`](../../src/binary_framing.odin#L267) | Assemble and deliver the next complete WhatsApp frame. |
+| [`frame_transport_header_receive`](../../src/binary_framing.odin#L326) | Collect the frame header and allocate space for its payload. |
+| [`frame_transport_clear`](../../src/binary_framing.odin#L357) | Release the transport's pending buffers and reset its state. |
+| [`frame_transport_validate`](../../src/binary_framing.odin#L367) | Check whether the transport is initialized and usable. |
+| [`frame_transport_next_message`](../../src/binary_framing.odin#L383) | Read the next binary WebSocket message into the transport. |
+| [`frame_transport_read_fail`](../../src/binary_framing.odin#L425) | Translate a WebSocket read failure into a frame transport error. |
+| [`frame_transport_deliver`](../../src/binary_framing.odin#L445) | Copy a completed frame into the caller's destination. |
+| [`frame_transport_fail`](../../src/binary_framing.odin#L467) | Record a terminal frame transport failure. |
+
+<a id="file-src-noise-certificate-odin"></a>
+
+## src/noise_certificate.odin
+
+| Function | Behavior |
+|---|---|
+| [`verify_whatsapp_server_certificate`](../../src/noise_certificate.odin#L65) | Authenticate the WhatsApp server's certificate chain and handshake key at the current time. |
+| [`verify_whatsapp_server_certificate_at`](../../src/noise_certificate.odin#L74) | Verify the server certificate against the pinned WhatsApp root at a supplied time. |
+| [`verify_certificate_chain_against_root`](../../src/noise_certificate.odin#L87) | Verify issuer linkage, both signatures, the leaf key and certificate validity against a supplied root. |
+| [`decode_and_validate_certificate_details`](../../src/noise_certificate.odin#L146) | Decode and validate the required fields of an intermediate or leaf certificate. |
+| [`check_certificate_validity_at`](../../src/noise_certificate.odin#L189) | Check that the supplied time falls within the certificate's validity interval. |
+
+<a id="file-src-noise-cipher-odin"></a>
+
+## src/noise_cipher.odin
+
+| Function | Behavior |
+|---|---|
+| [`noise_init`](../../src/noise_cipher.odin#L51) | Initialize the Noise transcript with the protocol header and ephemeral key. |
+| [`noise_mix_hash`](../../src/noise_cipher.odin#L72) | Mix new handshake bytes into the transcript hash. |
+| [`noise_mix_key`](../../src/noise_cipher.odin#L92) | Derive fresh handshake encryption and chaining keys. |
+| [`noise_split`](../../src/noise_cipher.odin#L119) | Derive separate read and write keys for the transport phase. |
+| [`noise_encrypt`](../../src/noise_cipher.odin#L144) | Authenticate and encrypt a handshake or transport payload. |
+| [`noise_decrypt`](../../src/noise_cipher.odin#L192) | Authenticate and decrypt a handshake or transport payload. |
+| [`noise_clear`](../../src/noise_cipher.odin#L266) | Erase Noise keys, counters and transcript state. |
+| [`noise_nonce`](../../src/noise_cipher.odin#L272) | Encode the message counter into the 12-byte Noise nonce. |
+| [`noise_state_validate`](../../src/noise_cipher.odin#L278) | Check the Noise phase and any previously recorded failure. |
+| [`noise_fail`](../../src/noise_cipher.odin#L290) | Erase Noise state and record its terminal error. |
+
+<a id="file-src-noise-handshake-odin"></a>
+
+## src/noise_handshake.odin
+
+| Function | Behavior |
+|---|---|
+| [`noise_credentials_generate`](../../src/noise_handshake.odin#L81) | Generate a fresh static Noise credential for a client. |
+| [`client_init`](../../src/noise_handshake.odin#L91) | Bind credentials and an upgraded WebSocket to a new Noise client. |
+| [`client_handshake`](../../src/noise_handshake.odin#L149) | Complete the WhatsApp handshake and install transport keys. |
+| [`client_handshake_deadline_start`](../../src/noise_handshake.odin#L211) | Set the handshake deadline on the WebSocket stream. |
+| [`client_handshake_hello_send`](../../src/noise_handshake.odin#L239) | Encode and send ClientHello with the client's ephemeral public key. |
+| [`client_handshake_server_read`](../../src/noise_handshake.odin#L254) | Receive and decode the ServerHello frame. |
+| [`client_noise_mix_dh`](../../src/noise_handshake.odin#L292) | Mix an X25519 shared secret into the handshake chaining key. |
+| [`client_handshake_server_static_decrypt`](../../src/noise_handshake.odin#L309) | Decrypt the server's static key and mix the next handshake secret. |
+| [`client_decrypt_and_verify_server_certificate`](../../src/noise_handshake.odin#L330) | Decrypt the server's certificate payload and invoke the configured verifier. |
+| [`client_handshake_static_send_prepare`](../../src/noise_handshake.odin#L361) | Encrypt the client's static key and mix its handshake secret. |
+| [`client_handshake_finish_send`](../../src/noise_handshake.odin#L374) | Frame and send the encoded ClientFinish. |
+| [`client_handshake_payload_send`](../../src/noise_handshake.odin#L397) | Encrypt the client payload and send it in ClientFinish. |
+| [`client_handshake_exchange`](../../src/noise_handshake.odin#L419) | Sequence ClientHello, server authentication and ClientFinish. |
+| [`client_close`](../../src/noise_handshake.odin#L463) | Release transport buffers, erase secrets and close the WebSocket. |
+| [`client_fail`](../../src/noise_handshake.odin#L484) | Record the terminal client error, erase keys and close the transport. |
+| [`client_secret_keys_clear`](../../src/noise_handshake.odin#L495) | Zero the static and ephemeral client private keys. |
+| [`client_finish_wire_size`](../../src/noise_handshake.odin#L500) | Calculate the encoded size of ClientFinish before sending. |
+| [`client_write`](../../src/noise_handshake.odin#L513) | Encrypt and send one application payload on an established client. |
+| [`client_read`](../../src/noise_handshake.odin#L555) | Receive and authenticate one encrypted application payload. |
+| [`client_encrypted_frame_receive`](../../src/noise_handshake.odin#L598) | Read an encrypted transport frame and validate its size. |
+
+<a id="file-src-signal-curve25519-odin"></a>
+
+## src/signal_curve25519.odin
+
+| Function | Behavior |
+|---|---|
+| [`signal_curve_public`](../../src/signal_curve25519.odin#L47) | Derive the X25519 public key for a private scalar. |
+| [`signal_curve_sign`](../../src/signal_curve25519.odin#L61) | Sign bytes with the Signal Curve25519 signature scheme. |
+| [`signal_curve_verify`](../../src/signal_curve25519.odin#L153) | Verify a Signal Curve25519 signature against the public key. |
+| [`signal_curve_edwards_public`](../../src/signal_curve25519.odin#L203) | Convert a Montgomery public key to the Edwards representation used for signature verification. |
 
 <a id="file-src-contact-sync-odin"></a>
 

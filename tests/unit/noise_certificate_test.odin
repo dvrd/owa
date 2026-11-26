@@ -2,7 +2,6 @@ package whatsapp_test
 
 import "core:testing"
 import "core:time"
-import "shared:surf"
 import wa "shared:whatsapp"
 
 Policy_Test_Details :: struct {
@@ -363,64 +362,4 @@ certificate_policy_genuine_public_chain_matches_pinned_signal_root :: proc(t: ^t
 		wa.verify_whatsapp_server_certificate_at(transmute([]u8)PUBLIC_CERTIFICATE, server_static, captured),
 		.None,
 	)
-}
-
-@(test)
-frame_reader_reassembles_split_frames_and_bounds_its_storage :: proc(t: ^testing.T) {
-	wire: [12]u8
-	_, encoded := wa.frame_encode(wire[:], {1, 2, 3, 4, 5})
-
-	testing.expect_value(t, encoded, wa.Frame_Error.None)
-	storage: [16]u8
-	reader := wa.Frame_Reader {
-		storage = storage[:],
-	}
-
-	testing.expect_value(t, wa.frame_reader_feed(&reader, wire[:2]), wa.Frame_Error.None)
-	_, _, error := wa.frame_reader_peek(&reader)
-	testing.expect_value(t, error, wa.Frame_Error.Header_Incomplete)
-	testing.expect_value(t, wa.frame_reader_feed(&reader, wire[2:5]), wa.Frame_Error.None)
-	_, _, error = wa.frame_reader_peek(&reader)
-	testing.expect_value(t, error, wa.Frame_Error.Payload_Incomplete)
-	testing.expect_value(t, wa.frame_reader_feed(&reader, wire[5:8]), wa.Frame_Error.None)
-	payload, consumed, peek_error := wa.frame_reader_peek(&reader)
-	testing.expect_value(t, peek_error, wa.Frame_Error.None)
-	testing.expect_value(t, consumed, 8)
-	testing.expect_value(t, len(payload), 5)
-	testing.expect_value(t, wa.frame_reader_consume(&reader, -1), wa.Frame_Error.Invalid_Consume_Count)
-	testing.expect_value(t, wa.frame_reader_consume(&reader, 9), wa.Frame_Error.Invalid_Consume_Count)
-	testing.expect_value(t, wa.frame_reader_consume(&reader, consumed), wa.Frame_Error.None)
-	testing.expect_value(t, reader.used, 0)
-	testing.expect_value(t, wa.frame_reader_feed(&reader, wire[:]), wa.Frame_Error.None)
-	testing.expect_value(t, wa.frame_reader_feed(&reader, wire[:6]), wa.Frame_Error.Receive_Buffer_Full)
-}
-
-@(test)
-noise_credentials_are_random_nonzero_and_accepted_by_client_init :: proc(t: ^testing.T) {
-	first, first_error := wa.noise_credentials_generate()
-	second, second_error := wa.noise_credentials_generate()
-	testing.expect_value(t, first_error.kind, wa.Client_Error_Kind.None)
-	testing.expect_value(t, second_error.kind, wa.Client_Error_Kind.None)
-
-	zero: [32]u8
-	testing.expect(t, first.static_private_key != zero)
-	testing.expect(t, second.static_private_key != zero)
-	testing.expect(t, first.static_private_key != second.static_private_key)
-
-	websocket := surf.WebSocket_Conn {
-		phase = .Open,
-		allocator = context.allocator,
-		config = {host = "synthetic.invalid", max_message_size = 4096},
-		stream = {read = media_retry_test_read, write = media_retry_test_write, close = media_retry_test_close},
-	}
-
-	client: wa.Client
-	defer wa.noise_clear(&client.noise)
-
-	testing.expect_value(t, wa.client_init(&client, &websocket, first).kind, wa.Client_Error_Kind.None)
-	testing.expect_value(t, client.static_private, first.static_private_key)
-	testing.expect_value(t, client.static_public, wa.signal_curve_public(first.static_private_key))
-
-	rejected: wa.Client
-	testing.expect_value(t, wa.client_init(&rejected, &websocket, {}).kind, wa.Client_Error_Kind.Invalid_Credentials)
 }

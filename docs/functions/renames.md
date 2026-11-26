@@ -13,12 +13,12 @@ For callers upgrading from a checkout that used `strict_certificate_policy`, the
 | `device_user_valid` | [`device_user_jid_valid`](../../src/addressing.odin#L552) | Check the user JID against the supported addressing domains. |
 | `prekey_count_response` | [`decode_prekey_count_response`](../../src/auth.odin#L914) | Parse the prekey count from a matching server response. |
 | `prekey_id_bytes` | [`encode_prekey_id_u24`](../../src/auth.odin#L1376) | Encode a prekey ID as three big-endian bytes. |
-| `client_handshake_certificate_verify` | [`client_decrypt_and_verify_server_certificate`](../../src/connection.odin#L337) | Decrypt the server's certificate payload and invoke the configured verifier. |
-| `verify_noise_server_certificate` | [`verify_whatsapp_server_certificate`](../../src/connection.odin#L486) | Authenticate the WhatsApp server's certificate chain and handshake key at the current time. |
-| `verify_noise_server_certificate_at` | [`verify_whatsapp_server_certificate_at`](../../src/connection.odin#L492) | Verify the server certificate against the pinned WhatsApp root at a supplied time. |
-| `strict_certificate_chain_verify` | [`verify_certificate_chain_against_root`](../../src/connection.odin#L496) | Verify issuer linkage, both signatures, the leaf key and certificate validity against a supplied root. |
-| `strict_certificate_details` | [`decode_and_validate_certificate_details`](../../src/connection.odin#L541) | Decode and validate the required fields of an intermediate or leaf certificate. |
-| `strict_certificate_time` | [`check_certificate_validity_at`](../../src/connection.odin#L577) | Check that the supplied time falls within the certificate's validity interval. |
+| `client_handshake_certificate_verify` | [`client_decrypt_and_verify_server_certificate`](../../src/noise_handshake.odin#L330) | Decrypt the server's certificate payload and invoke the configured verifier. |
+| `verify_noise_server_certificate` | [`verify_whatsapp_server_certificate`](../../src/noise_certificate.odin#L65) | Authenticate the WhatsApp server's certificate chain and handshake key at the current time. |
+| `verify_noise_server_certificate_at` | [`verify_whatsapp_server_certificate_at`](../../src/noise_certificate.odin#L74) | Verify the server certificate against the pinned WhatsApp root at a supplied time. |
+| `strict_certificate_chain_verify` | [`verify_certificate_chain_against_root`](../../src/noise_certificate.odin#L87) | Verify issuer linkage, both signatures, the leaf key and certificate validity against a supplied root. |
+| `strict_certificate_details` | [`decode_and_validate_certificate_details`](../../src/noise_certificate.odin#L146) | Decode and validate the required fields of an intermediate or leaf certificate. |
+| `strict_certificate_time` | [`check_certificate_validity_at`](../../src/noise_certificate.odin#L189) | Check that the supplied time falls within the certificate's validity interval. |
 | `media_mac` | [`compute_media_authentication_tag`](../../src/media.odin#L335) | Compute the media authentication tag over the IV and ciphertext. |
 | `media_write_error` | [`media_error_from_protobuf_writer`](../../src/media.odin#L834) | Translate protobuf writer errors into media errors. |
 | `media_key_decode` | [`decode_reaction_target_message_key`](../../src/media.odin#L1252) | Decode a protobuf message key identifying the target stanza. |

@@ -12,7 +12,7 @@ OWNERS := [?]Owner {
 	{
 		"baileys",
 		"src/Socket/socket.ts",
-		[]string{"socket.odin", "connection.odin", "auth.odin", "pairing.odin"},
+		[]string{"socket.odin", "noise_handshake.odin", "auth.odin", "pairing.odin"},
 		[]string {
 			"tests/e2e/client/socket_test.odin",
 			"tests/e2e/loopback_noise",
@@ -38,10 +38,10 @@ OWNERS := [?]Owner {
 	{
 		"baileys",
 		"src/Utils/validate-connection.ts",
-		[]string{"pairing.odin", "connection.odin", "auth.odin", "protobuf.odin"},
+		[]string{"pairing.odin", "noise_handshake.odin", "auth.odin", "protobuf.odin"},
 		[]string {
 			"tests/e2e/client/socket_test.odin",
-			"tests/unit/connection_test.odin",
+			"tests/unit/noise_certificate_test.odin",
 			"tests/unit/pairing_test.odin",
 			"tests/unit/auth_test.odin",
 		},
@@ -50,14 +50,14 @@ OWNERS := [?]Owner {
 	{
 		"baileys",
 		"src/Utils/noise-handler.ts",
-		[]string{"connection.odin", "socket.odin"},
-		[]string{"tests/e2e/loopback_noise", "tests/unit/connection_test.odin"},
+		[]string{"noise_handshake.odin", "binary_framing.odin", "noise_cipher.odin", "noise_certificate.odin", "socket.odin"},
+		[]string{"tests/e2e/loopback_noise", "tests/unit/noise_certificate_test.odin"},
 		"Does the Noise transcript, frame boundary or certificate authentication contract change?",
 	},
 	{
 		"baileys",
 		"src/Defaults/baileys-version.json",
-		[]string{"pairing.odin", "connection.odin"},
+		[]string{"pairing.odin", "noise_handshake.odin"},
 		[]string{"tests/unit/pairing_test.odin"},
 		"Does this advertised version require a payload change, or only a separately qualified version choice?",
 	},
@@ -82,22 +82,22 @@ OWNERS := [?]Owner {
 	{
 		"whatsmeow",
 		"client.go",
-		[]string{"socket.odin", "connection.odin"},
+		[]string{"socket.odin", "noise_handshake.odin"},
 		[]string{"tests/e2e/loopback_noise", "tests/e2e/encrypted_recovery"},
 		"Does the client lifecycle change affect locally owned admission or recovery state?",
 	},
 	{
 		"whatsmeow",
 		"connectionevents.go",
-		[]string{"connection.odin", "receive.odin"},
+		[]string{"noise_handshake.odin", "receive.odin"},
 		[]string{"tests/unit/receive_test.odin"},
 		"Which disconnect, notification or ACK state transition changes locally?",
 	},
 	{
 		"whatsmeow",
 		"handshake.go",
-		[]string{"connection.odin", "protobuf.odin"},
-		[]string{"tests/unit/connection_test.odin", "tests/e2e/loopback_noise"},
+		[]string{"noise_handshake.odin", "noise_certificate.odin", "signal_curve25519.odin", "protobuf.odin"},
+		[]string{"tests/unit/noise_certificate_test.odin", "tests/e2e/loopback_noise"},
 		"Does the authenticated handshake transcript or certificate predicate change?",
 	},
 	{

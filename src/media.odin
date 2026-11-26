@@ -9,6 +9,7 @@ import "core:encoding/base64"
 import "core:encoding/json"
 import "core:fmt"
 import "core:mem"
+import "core:os"
 import "core:strconv"
 import "core:strings"
 import "core:sync"
@@ -2665,6 +2666,7 @@ media_retry_notification_decode :: proc(
 // request bytes, media metadata, connection strings and TLS roots remain alive
 // until join. Its default thread allocator owns/frees all HTTP scratch state.
 Socket_HTTP_Job :: struct {
+	media_pool:              ^Media_HTTP_Pool,
 	kind:                   enum {
 		HTTP,
 		Upload,
@@ -2672,6 +2674,7 @@ Socket_HTTP_Job :: struct {
 		Contact_Blob,
 	},
 	done, cancel:           bool,
+	completion:             ^os.File,
 	request:                http.Request,
 	config:                 surf.Config,
 	execute:                Media_HTTP_Execute,
@@ -2824,6 +2827,29 @@ socket_media_download_http :: proc(
 
 	defer crypto.zero_explicit(&job, size_of(job))
 
+	// The pump can close the socket or start another download before this worker joins.
+	if socket.phase == .Online && socket.config.pool_media_downloads &&
+	   media_http_pool_supports(config.tls.alpn_protocols) {
+		job.media_pool = socket.media_pool
+		socket.media_pool = nil
+		if job.media_pool == nil {
+			pool, e := media_http_pool_open(config)
+			if e.kind != .None {
+				return 0, {kind = .HTTP_Failed, http = e}, {}
+			}
+
+			job.media_pool = pool
+		}
+	}
+
+	defer {
+		if socket.phase == .Online && socket.media_pool == nil {
+			socket.media_pool = job.media_pool
+		} else {
+			media_http_pool_close(job.media_pool)
+		}
+	}
+
 	if socket.phase == .Provisioning {
 		job.n, job.media_error = socket_media_download_direct(&job)
 	} else if e := socket_http_run(socket, &job); e.kind != .None {
@@ -2857,6 +2883,8 @@ socket_http_worker :: proc(data: rawptr) {
 	defer {
 		socket_http_current_job = nil
 		sync.atomic_store(&job.done, true)
+		// Closing the worker's end wakes poll even if completion preceded the wait.
+		os.close(job.completion)
 	}
 
 	// A canceled multi-host upload does not begin another request. The active
@@ -2913,6 +2941,10 @@ socket_http_worker_execute :: proc(
 	e: surf.HTTP_Error
 	if job.execute != nil {
 		response, e = job.execute(request, config)
+	} else if job.media_pool != nil {
+		response, e = media_http_pool_download(
+			job.media_pool, request, config.max_body_size, config.timeout, &job.cancel,
+		)
 	} else {
 		response, e = surf.execute(request, config)
 	}
@@ -2933,8 +2965,17 @@ socket_http_run :: proc(socket: ^Socket, job: ^Socket_HTTP_Job) -> Socket_Error 
 	socket.query_depth += 1
 	defer socket.query_depth -= 1
 
+	wakeup, completion, pipe_err := os.pipe()
+	if pipe_err != nil {
+		return {kind = .Poll_Failed}
+	}
+
+	defer os.close(wakeup)
+
+	job.completion = completion
 	worker := thread.create_and_start_with_data(job, socket_http_worker)
 	if worker == nil {
+		os.close(completion)
 		return {kind = .Allocation_Failed}
 	}
 
@@ -2949,7 +2990,7 @@ socket_http_run :: proc(socket: ^Socket, job: ^Socket_HTTP_Job) -> Socket_Error 
 			return e
 		}
 
-		ready, poll_error := socket_network_poll(socket, 100 * time.Millisecond)
+		ready, poll_error := socket_network_poll_with_wakeup(socket, 100 * time.Millisecond, wakeup)
 		if poll_error.kind != .None {
 			return poll_error
 		}

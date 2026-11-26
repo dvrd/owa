@@ -3,6 +3,7 @@ package whatsapp
 import "core:crypto"
 import "core:fmt"
 import "core:mem"
+import "core:os"
 import "core:strconv"
 import "core:sync"
 import "core:sys/posix"
@@ -87,6 +88,8 @@ Socket_Config :: struct {
 	query_timeout:                      time.Duration,
 	observe_node:                       Protocol_Node_Observer,
 	observer_data:                      rawptr,
+	// Reuse HTTPS connections for online media downloads. TLS settings and roots must stay immutable until close.
+	pool_media_downloads:               bool,
 }
 
 Socket_Event_Kind :: enum {
@@ -137,6 +140,7 @@ socket_message_destroy :: proc(message: ^Socket_Message) {
 // Only one caller may use it. Config requires trusted CA roots. Reconnect uses
 // a fresh Socket with the SAME Auth_State, Prekey_Store and State_Store.
 Socket :: struct {
+	media_pool:                  ^Media_HTTP_Pool,
 	history_request:             ^Pending_Chat_History,
 	message_lookup:              ^Pending_Message_Lookup,
 	contact_refresh_due:         bool,
@@ -344,6 +348,9 @@ socket_close :: proc(socket: ^Socket) {
 	if socket == nil {
 		return
 	}
+
+	media_http_pool_close(socket.media_pool)
+	socket.media_pool = nil
 
 	if socket.websocket.phase == .Open && socket.websocket.stream.set_write_deadline != nil {
 		if e := surf.websocket_set_write_deadline(
@@ -927,6 +934,16 @@ socket_poll :: proc(
 }
 
 socket_network_poll :: proc(socket: ^Socket, timeout: time.Duration) -> (bool, Socket_Error) {
+	return socket_network_poll_with_wakeup(socket, timeout, nil)
+}
+
+// A wakeup interrupts the wait. Only WebSocket readiness authorizes a wire read.
+@(private)
+socket_network_poll_with_wakeup :: proc(
+	socket: ^Socket,
+	timeout: time.Duration,
+	wakeup: ^os.File,
+) -> (bool, Socket_Error) {
 	w := &socket.websocket
 	t := &socket.client.frames
 	if t.ready ||
@@ -938,18 +955,22 @@ socket_network_poll :: proc(socket: ^Socket, timeout: time.Duration) -> (bool, S
 	}
 
 	when (ODIN_OS in bit_set[type_of(ODIN_OS)]{.Darwin, .Linux}) {
-		fd := posix.pollfd {
-			fd     = cast(posix.FD)w.tls_client.tcp.socket,
-			events = {.IN},
+		fds := [2]posix.pollfd {
+			{fd = cast(posix.FD)w.tls_client.tcp.socket, events = {.IN}},
+			{fd = -1, events = {.IN}},
 		}
 
-		result := posix.poll(&fd, 1, cast(i32)(timeout / time.Millisecond))
+		if wakeup != nil {
+			fds[1].fd = posix.FD(os.fd(wakeup))
+		}
+
+		result := posix.poll(&fds[0], len(fds), cast(i32)(timeout / time.Millisecond))
 
 		if result < 0 {
 			return false, socket_fail(socket, {kind = .Poll_Failed})
 		}
 
-		return result > 0, {}
+		return fds[0].revents != {}, {}
 	} else {
 		return false, {kind = .Poll_Failed}
 	}
@@ -1213,7 +1234,7 @@ socket_write_deadline :: proc(socket: ^Socket, deadline: time.Time) -> Socket_Er
 		return {}
 	}
 
-	if e := socket.websocket.stream.set_write_deadline(socket.websocket.stream.data, deadline);
+	if e := surf.websocket_set_write_deadline(&socket.websocket, deadline);
 	   e.kind != .None {
 		return socket_fail(socket, {kind = .Deadline_Failed, stream = e})
 	}
