@@ -507,11 +507,9 @@ socket_fetch_history_page :: proc(
 
 	socket.history_request = &request
 	socket.query_depth += 1
-	socket.read_deadline_scopes += 1
 	defer {
 		socket.history_request = nil
 		socket.query_depth -= 1
-		socket.read_deadline_scopes -= 1
 		delete(request.id)
 		for ref in request.notifications {
 			crypto.zero_explicit(raw_data(ref), len(ref)); delete(ref)
@@ -676,11 +674,9 @@ socket_fetch_private_message_by_id :: proc(
 
 	socket.message_lookup = &request
 	socket.query_depth += 1
-	socket.read_deadline_scopes += 1
 	defer {
 		socket.message_lookup = nil
 		socket.query_depth -= 1
-		socket.read_deadline_scopes -= 1
 		delete(request.request_id)
 		socket_message_destroy(request.message)
 	}

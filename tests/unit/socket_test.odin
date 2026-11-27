@@ -1,6 +1,5 @@
 package whatsapp_test
 
-import "core:crypto/x509"
 import "core:sync"
 import "core:testing"
 import "core:time"
@@ -62,11 +61,7 @@ whatsapp_query_observer_reports_sent_queries_only :: proc(t: ^testing.T) {
 official_version_explicit_payload_is_preserved_by_socket_settings :: proc(t: ^testing.T) {
 	explicit := [3]u32{2, 3000, 1234567890}
 
-	root: x509.Certificate
-	roots := [1]^x509.Certificate{&root}
-
-	// Settings-only fixture; no TLS handshake or external request.
-	settings, error := wa.socket_connect_settings({payload = {version = explicit}, tls = {root_cas = roots[:]}})
+	settings, error := wa.socket_connect_settings({payload = {version = explicit}})
 
 	testing.expect_value(t, error.kind, .None)
 	testing.expect_value(t, settings.payload.version, explicit)

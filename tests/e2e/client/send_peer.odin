@@ -1,15 +1,15 @@
 package whatsapp_test
 
+import wire_frames "../../fixtures/message_transport"
 import "core:bytes"
 import "core:fmt"
-import "core:net"
 import "core:os"
 import "core:slice"
 import "core:sys/posix"
 import "core:time"
 import "shared:async/http"
 import "shared:surf"
-import ws "shared:websocket"
+import ws "shared:async/websocket"
 import wa "shared:whatsapp"
 
 // Synthetic WhatsApp peer for the send paths. Real WebSocket framing, Noise
@@ -122,7 +122,7 @@ send_peer_server_frame :: proc(dst: []u8, payload: []u8) -> int {
 	return at + len(payload)
 }
 
-send_peer_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Stream_Error) {
+send_peer_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Async_Error) {
 	peer := cast(^Send_Peer)data
 
 	if peer.pipe_pending {
@@ -144,11 +144,7 @@ send_peer_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Stream_E
 	return n, {}
 }
 
-send_peer_close :: proc(data: rawptr) -> surf.WebSocket_Stream_Error {
-	return {}
-}
-
-send_peer_deadline :: proc(data: rawptr, deadline: time.Time) -> surf.WebSocket_Stream_Error {
+send_peer_close :: proc(data: rawptr, _: u16) -> surf.WebSocket_Async_Error {
 	return {}
 }
 
@@ -490,7 +486,7 @@ send_peer_message :: proc(peer: ^Send_Peer, node: wa.Binary_Node, raw: []u8) {
 	}
 }
 
-send_peer_write :: proc(data: rawptr, wire: []u8) -> (int, surf.WebSocket_Stream_Error) {
+send_peer_write :: proc(data: rawptr, wire: []u8) -> (int, surf.WebSocket_Async_Error) {
 	peer := cast(^Send_Peer)data
 	header, at, frame_error := ws.frame_header_decode(wire, true)
 
@@ -500,7 +496,7 @@ send_peer_write :: proc(data: rawptr, wire: []u8) -> (int, surf.WebSocket_Stream
 
 	if frame_error != .None || header.opcode != .Binary || !header.fin || header.payload_length != u64(len(wire) - at) {
 		peer.failed = true
-		return 0, {kind = .TCP_Failed}
+		return 0, {kind = .IO_Failed}
 	}
 
 	payload := make([]u8, len(wire) - at)
@@ -516,14 +512,14 @@ send_peer_write :: proc(data: rawptr, wire: []u8) -> (int, surf.WebSocket_Stream
 
 	if len(envelope) < 3 {
 		peer.failed = true
-		return 0, {kind = .TCP_Failed}
+		return 0, {kind = .IO_Failed}
 	}
 
 	size := int(envelope[0]) << 16 | int(envelope[1]) << 8 | int(envelope[2])
 
 	if size != len(envelope) - 3 {
 		peer.failed = true
-		return 0, {kind = .TCP_Failed}
+		return 0, {kind = .IO_Failed}
 	}
 
 	plaintext := make([]u8, size)
@@ -533,14 +529,14 @@ send_peer_write :: proc(data: rawptr, wire: []u8) -> (int, surf.WebSocket_Stream
 
 	if noise_error != .None {
 		peer.failed = true
-		return 0, {kind = .TCP_Failed}
+		return 0, {kind = .IO_Failed}
 	}
 
 	document, decode_error := wa.binary_node_decode(plaintext[:n])
 
 	if decode_error.kind != .None {
 		peer.failed = true
-		return 0, {kind = .TCP_Failed}
+		return 0, {kind = .IO_Failed}
 	}
 	defer wa.binary_document_destroy(&document)
 
@@ -550,7 +546,7 @@ send_peer_write :: proc(data: rawptr, wire: []u8) -> (int, surf.WebSocket_Stream
 		send_peer_message(peer, document.root, plaintext[:n])
 
 		if peer.fail_message {
-			return 0, {kind = .TCP_Failed}
+			return 0, {kind = .IO_Failed}
 		}
 	}
 
@@ -616,21 +612,13 @@ send_peer_new :: proc() -> ^Send_Peer {
 
 	peer.socket.websocket = {
 		phase = .Open,
-		allocator = context.allocator,
-		config = {host = "synthetic.invalid", max_message_size = 8192},
-		stream = {
-			data = peer,
-			read = send_peer_read,
-			write = send_peer_write,
-			close = send_peer_close,
-			abort = send_peer_close,
-			set_read_deadline = send_peer_deadline,
-			set_write_deadline = send_peer_deadline,
-		},
+		max_message_size = 8192,
+		data = peer,
+		read = wire_frames.reader(send_peer_read),
+		write = wire_frames.writer(send_peer_write),
+		close = send_peer_close,
 	}
 
-	// Readiness hook only: bytes are delivered by the in-memory stream.
-	peer.socket.websocket.tls_client.application.inbound_size = 1
 	assert(wa.client_init(&peer.socket.client, &peer.socket.websocket, {static_private_key = peer.auth.credentials.noise_private}, {max_frame_payload = 8192}).kind == .None)
 	wa.noise_clear(&peer.socket.client.noise)
 	peer.socket.client.noise = {
@@ -695,8 +683,7 @@ send_peer_destroy :: proc(peer: ^Send_Peer) {
 // writing one byte to the pipe.
 send_peer_use_pipe :: proc(peer: ^Send_Peer) {
 	assert(posix.pipe(&peer.pipe) == .OK)
-	peer.socket.websocket.tls_client.application.inbound_size = 0
-	peer.socket.websocket.tls_client.tcp.socket = cast(net.TCP_Socket)peer.pipe[0]
+	peer.socket.websocket.poll = send_peer_pipe_poll
 }
 
 send_peer_announce :: proc(peer: ^Send_Peer) {
@@ -704,4 +691,9 @@ send_peer_announce :: proc(peer: ^Send_Peer) {
 	byte := [1]u8{1}
 
 	posix.write(peer.pipe[1], raw_data(byte[:]), 1)
+}
+
+send_peer_pipe_poll :: proc(data: rawptr, timeout: time.Duration, wakeup: ^os.File) -> (bool, surf.WebSocket_Async_Error) {
+	peer := cast(^Send_Peer)data
+	return wa.message_poll_fd(peer.pipe[0], timeout, wakeup)
 }

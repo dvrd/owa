@@ -1,5 +1,6 @@
 package client_fixture
 
+import wire_frames "../message_transport"
 import "core:bytes"
 import "core:encoding/hex"
 import "core:fmt"
@@ -9,7 +10,7 @@ import "core:testing"
 import "core:time"
 import "shared:async/http"
 import "shared:surf"
-import ws "shared:websocket"
+import ws "shared:async/websocket"
 import wa "shared:whatsapp"
 
 codec_api_hex :: proc(text: string) -> []u8 {
@@ -242,9 +243,8 @@ send_id_http :: proc(
 send_id_wire_connect :: proc(socket: ^wa.Socket, wire: ^Send_Id_Wire) {
 	socket.websocket = {
 		phase = .Open,
-		allocator = context.allocator,
-		config = {host = "synthetic.invalid", max_message_size = 4096},
-		stream = {data = wire, write = send_id_wire_write, read = send_id_wire_read, close = send_id_wire_close},
+		max_message_size = 4096,
+		data = wire, write = wire_frames.writer(send_id_wire_write), read = wire_frames.reader(send_id_wire_read), close = send_id_wire_close,
 	}
 
 	socket.client = {
@@ -260,7 +260,7 @@ send_id_wire_connect :: proc(socket: ^wa.Socket, wire: ^Send_Id_Wire) {
 	send_id_http_calls = 0
 }
 
-send_id_wire_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Stream_Error) {
+send_id_wire_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Async_Error) {
 	wire := cast(^Send_Id_Wire)data
 	assert(len(source) <= len(wire.data) - wire.used)
 	wire.used += copy(wire.data[wire.used:], source)
@@ -268,11 +268,11 @@ send_id_wire_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_S
 	return len(source), {}
 }
 
-send_id_wire_read :: proc(data: rawptr, destination: []u8) -> (int, surf.WebSocket_Stream_Error) {
+send_id_wire_read :: proc(data: rawptr, destination: []u8) -> (int, surf.WebSocket_Async_Error) {
 	return 0, {kind = .EOF}
 }
 
-send_id_wire_close :: proc(data: rawptr) -> surf.WebSocket_Stream_Error {
+send_id_wire_close :: proc(data: rawptr, _: u16) -> surf.WebSocket_Async_Error {
 	return {}
 }
 

@@ -12,6 +12,7 @@
 __pycache__/
 *.py[cod]
 node_modules/
+.cruft/
 
 # Local credentials and runtime state
 .env

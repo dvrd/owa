@@ -2828,12 +2828,11 @@ socket_media_download_http :: proc(
 	defer crypto.zero_explicit(&job, size_of(job))
 
 	// The pump can close the socket or start another download before this worker joins.
-	if socket.phase == .Online && socket.config.pool_media_downloads &&
-	   media_http_pool_supports(config.tls.alpn_protocols) {
+	if socket.phase == .Online && socket.config.pool_media_downloads {
 		job.media_pool = socket.media_pool
 		socket.media_pool = nil
 		if job.media_pool == nil {
-			pool, e := media_http_pool_open(config)
+			pool, e := media_http_pool_open(config, socket.websocket.transport)
 			if e.kind != .None {
 				return 0, {kind = .HTTP_Failed, http = e}, {}
 			}
@@ -3684,11 +3683,7 @@ socket_media_wait_retry :: proc(
 	Socket_Error,
 ) {
 	socket.query_depth += 1
-	socket.read_deadline_scopes += 1
-	defer {
-		socket.query_depth -= 1
-		socket.read_deadline_scopes -= 1
-	}
+	defer socket.query_depth -= 1
 
 	timeout := socket.config.query_timeout
 	if timeout == 0 {
@@ -3762,7 +3757,7 @@ socket_media_retry_event_read :: proc(
 		return {}, false, e
 	}
 
-	ready, poll_err := socket_network_poll(socket, 100 * time.Millisecond)
+	ready, poll_err := socket_network_poll(socket, clamp(time.diff(time.now(), deadline), time.Duration(0), 100 * time.Millisecond))
 	if poll_err.kind != .None {
 		return {}, false, poll_err
 	}
@@ -3771,21 +3766,9 @@ socket_media_retry_event_read :: proc(
 		return {}, false, {}
 	}
 
-	if e := socket_read_deadline(socket, deadline); e.kind != .None {
-		return {}, false, e
-	}
-
-	event, e := socket_receive_wire(socket)
+	event, e := socket_receive_wire(socket, deadline)
 	if e.kind != .None {
 		return {}, false, e
-	}
-
-	if reset := socket_read_deadline(socket, {}); reset.kind != .None {
-		if event.message != nil {
-			socket_message_destroy(event.message)
-		}
-
-		return {}, false, reset
 	}
 
 	return event, true, {}

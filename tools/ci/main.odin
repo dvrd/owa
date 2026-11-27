@@ -11,7 +11,7 @@ import "core:strconv"
 import "core:strings"
 
 Package :: struct {
-	name, hash: string,
+	name, source, tag, commit, hash: string,
 }
 
 Lock :: struct {
@@ -85,6 +85,34 @@ verify_package :: proc(pkg: Package, shared, mirror: string) -> os.Error {
 	if string(hex.encode(digest[:])) != pkg.hash {
 		fmt.eprintln("Locked package mismatch:", pkg.name)
 		return .Invalid_File
+	}
+
+	return nil
+}
+
+// Materialize the source files, embedded data and license used by the locked
+// releases. Reading Git objects keeps concurrent checkout edits out of the build.
+install_locked_release :: proc(pkg: Package, work, shared, repositories: string) -> os.Error {
+	repo := join(repositories, pkg.name)
+	if repositories == "" {
+		repo = join(work, pkg.name)
+		run({"git", "clone", "--quiet", "--depth=1", "--no-checkout", "--branch", pkg.tag, "--", pkg.source, repo}) or_return
+	}
+
+	files := capture({"git", "-C", repo, "ls-tree", "-rz", "--name-only", pkg.commit, "--", "src", "LICENSE"}) or_return
+	dest := join(shared, pkg.name)
+	for file in strings.split_iterator(&files, "\x00") {
+		if file != "LICENSE" && !strings.has_suffix(file, ".odin") && !strings.has_suffix(file, ".bin") {
+			continue
+		}
+
+		target := join(dest, strings.trim_prefix(file, "src/"))
+		if err := os.make_directory_all(os.dir(target)); err != nil && err != .Exist {
+			return err
+		}
+
+		blob := capture({"git", "-C", repo, "show", fmt.aprintf("%s:%s", pkg.commit, file)}) or_return
+		os.write_entire_file(target, transmute([]u8)blob) or_return
 	}
 
 	return nil
@@ -224,34 +252,19 @@ check :: proc() -> os.Error {
 	shared := fmt.aprintf("%s/shared", sdk)
 	os.make_directory_all(shared) or_return
 
-	imports := strings.builder_make()
-	strings.write_string(&imports, "package consumer\n")
-
+	mirror := os.get_env("OWA_LOCKED_SHARED", context.allocator)
+	repositories := os.get_env("OWA_LOCKED_REPOS", context.allocator)
 	for pkg in lock.packages {
 		if pkg.name == "" || strings.index_any(pkg.name, "/\\.") >= 0 {
 			return .Invalid_File
 		}
 
-		fmt.sbprintf(&imports, "import \"shared:%s\"\n", pkg.name)
-	}
+		if mirror == "" {
+			install_locked_release(pkg, work, shared, repositories) or_return
+		}
 
-	mirror := os.get_env("OWA_LOCKED_SHARED", context.allocator)
-	if mirror == "" {
-		// The repo's tests import owa itself. Resolve only external packages.
-		consumer := fmt.aprintf("%s/consumer", work)
-		os.make_directory_all(fmt.aprintf("%s/.krs", consumer)) or_return
-		os.write_entire_file(fmt.aprintf("%s/.krs/packages.json", consumer), bytes) or_return
-		os.write_entire_file(
-			fmt.aprintf("%s/main.odin", consumer),
-			strings.to_string(imports),
-		) or_return
-		run(
-			{"krs", "install", "--frozen", "--yes", fmt.aprintf("--root=%s", sdk)},
-			consumer,
-		) or_return
+		verify_package(pkg, shared, mirror) or_return
 	}
-
-	for pkg in lock.packages {verify_package(pkg, shared, mirror) or_return}
 
 	root := os.get_working_directory(context.allocator) or_return
 	os.symlink(fmt.aprintf("%s/src", root), fmt.aprintf("%s/whatsapp", shared)) or_return
@@ -265,6 +278,7 @@ check :: proc() -> os.Error {
 			fmt.aprintf("-collection:shared=%s", shared),
 			"-no-entry-point",
 			"-vet",
+			OWA_VET_PACKAGES,
 			"-warnings-as-errors",
 		},
 	) or_return

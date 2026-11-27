@@ -1,11 +1,12 @@
 package whatsapp_test
 
+import wire_frames "../../fixtures/message_transport"
 import "core:crypto"
 import "core:crypto/x25519"
 import "core:encoding/hex"
 import "core:testing"
 import "shared:surf"
-import ws "shared:websocket"
+import ws "shared:async/websocket"
 import wa "shared:whatsapp"
 
 // Fixed handshake transcript with an intermediate certificate and no leaf.
@@ -21,7 +22,7 @@ Socket_Cert_Test :: struct {
 	reject:                          bool,
 }
 
-socket_cert_test_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Stream_Error) {
+socket_cert_test_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Async_Error) {
 	state := cast(^Socket_Cert_Test)data
 	n := min(len(dst), len(state.input) - state.read_at, 5)
 	copy(dst[:n], state.input[state.read_at:][:n])
@@ -34,7 +35,7 @@ socket_cert_test_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_S
 	return n, {}
 }
 
-socket_cert_test_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Stream_Error) {
+socket_cert_test_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Async_Error) {
 	state := cast(^Socket_Cert_Test)data
 	n := min(len(src), len(state.output) - state.written)
 	copy(state.output[state.written:][:n], src[:n])
@@ -43,7 +44,7 @@ socket_cert_test_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_
 	return n, {}
 }
 
-socket_cert_test_close :: proc(data: rawptr) -> surf.WebSocket_Stream_Error {
+socket_cert_test_close :: proc(data: rawptr, _: u16) -> surf.WebSocket_Async_Error {
 	state := cast(^Socket_Cert_Test)data
 	state.closed += 1
 
@@ -75,14 +76,11 @@ socket_cert_test_init :: proc(
 	socket.auth = auth
 	socket.websocket = {
 		phase = .Open,
-		allocator = context.allocator,
-		config = {host = "synthetic.invalid", max_message_size = 1024},
-		stream = {
-			data = state,
-			read = socket_cert_test_read,
-			write = socket_cert_test_write,
-			close = socket_cert_test_close,
-		},
+		max_message_size = 1024,
+		data = state,
+		read = wire_frames.reader(socket_cert_test_read),
+		write = wire_frames.writer(socket_cert_test_write),
+		close = socket_cert_test_close,
 	}
 
 	settings := wa.Socket_Config {

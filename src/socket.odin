@@ -6,9 +6,7 @@ import "core:mem"
 import "core:os"
 import "core:strconv"
 import "core:sync"
-import "core:sys/posix"
 import "core:time"
-import "shared:async/tls"
 import "shared:surf"
 
 // Application socket lifecycle.
@@ -57,8 +55,8 @@ Socket_Error_Kind :: enum {
 
 Socket_Error :: struct {
 	kind:       Socket_Error_Kind,
-	websocket:  surf.WebSocket_Dial_Error,
-	stream:     surf.WebSocket_Stream_Error,
+	websocket:  surf.WebSocket_Async_Error,
+	stream:     surf.WebSocket_Async_Error,
 	session:    Session_Error,
 	prekey:     Prekey_Error,
 	state:      State_Error,
@@ -76,7 +74,7 @@ Socket_Config :: struct {
 	sync_contacts:                      bool, // Refresh the address book after login and server updates in socket_tick.
 	host, target, origin:               string,
 	port:                               int,
-	tls:                                tls.Config,
+	tls:                                surf.TLS_Config,
 	http_execute:                       Media_HTTP_Execute,
 	// Nil verifies the signed Noise chain, static-key binding and validity times.
 	// An explicit callback replaces that policy. Verified TLS is still required.
@@ -137,7 +135,7 @@ socket_message_destroy :: proc(message: ^Socket_Message) {
 }
 
 // All borrowed settings/auth/stores must outlive this stable-address object.
-// Only one caller may use it. Config requires trusted CA roots. Reconnect uses
+// Only one caller may use it. Nil TLS roots select system trust. Reconnect uses
 // a fresh Socket with the SAME Auth_State, Prekey_Store and State_Store.
 Socket :: struct {
 	media_pool:                  ^Media_HTTP_Pool,
@@ -157,7 +155,7 @@ Socket :: struct {
 	auth:                        ^Auth_State,
 	prekeys:                     ^Prekey_Store,
 	store:                       ^State_Store,
-	websocket:                   surf.WebSocket_Conn,
+	websocket:                   Message_Connection,
 	client:                      Client,
 	session:                     Session,
 	sequence:                    u64,
@@ -172,7 +170,6 @@ Socket :: struct {
 	},
 	queue:                       [dynamic]^Socket_Message,
 	query_depth:                 int,
-	read_deadline_scopes:        int,
 	deferred_retries:            [dynamic]Binary_Document,
 	pending_media_retry:         [dynamic]Binary_Document,
 	last_error:                  Socket_Error,
@@ -246,18 +243,12 @@ socket_client_init :: proc(socket: ^Socket, settings: Socket_Config) -> Client_E
 }
 
 socket_websocket_dial :: proc(socket: ^Socket, settings: Socket_Config) -> Socket_Error {
-	err := surf.websocket_dial(
-		&socket.websocket,
-		settings.host,
-		settings.port,
-		{
-			host = settings.host,
-			target = settings.target,
-			origin = settings.origin,
-			max_message_size = MAX_BINARY_NODE_PAYLOAD + 32,
-		},
-		settings.tls,
-	)
+	err := message_connection_open(&socket.websocket, {
+		host = settings.host, port = settings.port, target = settings.target, origin = settings.origin,
+		secure = true, roots = settings.tls.roots, max_message_size = MAX_BINARY_NODE_PAYLOAD + 32,
+		max_queued_bytes = MAX_BINARY_NODE_PAYLOAD + 32,
+		frame_timeout = 15 * time.Second, message_timeout = 15 * time.Second,
+	})
 
 	if err.kind != .None {
 		return socket_fail(socket, {kind = .Websocket_Failed, websocket = err})
@@ -337,10 +328,6 @@ socket_connect_settings :: proc(config: Socket_Config) -> (Socket_Config, Socket
 		settings.payload = default_client_payload_config()
 	}
 
-	if len(settings.tls.root_cas) == 0 {
-		return {}, {kind = .Invalid_Config}
-	}
-
 	return settings, {}
 }
 
@@ -352,19 +339,10 @@ socket_close :: proc(socket: ^Socket) {
 	media_http_pool_close(socket.media_pool)
 	socket.media_pool = nil
 
-	if socket.websocket.phase == .Open && socket.websocket.stream.set_write_deadline != nil {
-		if e := surf.websocket_set_write_deadline(
-			&socket.websocket,
-			time.time_add(time.now(), time.Second),
-		); e.kind != .None {
-			socket.websocket.phase = .Failed
-		}
-	}
-
 	if socket.session.phase != .Uninitialized {
 		session_close(&socket.session)
 	} else if socket.websocket.phase != .Uninitialized {
-		surf.websocket_close(&socket.websocket)
+		message_connection_close(&socket.websocket)
 	}
 
 	for message in socket.queue {
@@ -460,33 +438,16 @@ socket_tick :: proc(socket: ^Socket, now: time.Time) -> (Socket_Event, Socket_Er
 	return {}, {}
 }
 
-socket_receive_wire :: proc(socket: ^Socket) -> (Socket_Event, Socket_Error) {
+socket_receive_wire :: proc(socket: ^Socket, deadline: time.Time = {}) -> (Socket_Event, Socket_Error) {
 	if socket == nil || socket.phase == .Closed || socket.phase == .Failed {
 		return {}, {kind = .Invalid_State}
 	}
 
-	scoped := socket.websocket.stream.set_read_deadline != nil && socket.read_deadline_scopes == 0
+	previous := socket.websocket.read_deadline
+	socket.websocket.read_deadline = deadline if deadline != {} else time.time_add(time.now(), 15 * time.Second)
+	defer socket.websocket.read_deadline = previous
 
-	if scoped {
-		if e := socket_read_deadline(socket, time.time_add(time.now(), 15 * time.Second));
-		   e.kind != .None {
-			return {}, e
-		}
-	}
-
-	output, failure := socket_receive_inner(socket)
-
-	if scoped && socket.websocket.phase == .Open {
-		if e := socket_read_deadline(socket, {}); e.kind != .None {
-			if output.message != nil {
-				socket_message_destroy(output.message)
-			}
-
-			return {}, e
-		}
-	}
-
-	return output, failure
+	return socket_receive_inner(socket)
 }
 
 socket_receive_inner :: proc(socket: ^Socket) -> (Socket_Event, Socket_Error) {
@@ -786,33 +747,20 @@ socket_next_iq_id :: proc(socket: ^Socket, dst: []u8) -> string {
 }
 
 socket_write :: proc(socket: ^Socket, encoded: []u8) -> Socket_Error {
-	deadline_set := false
-
-	if socket.websocket.stream.set_write_deadline != nil {
-		timeout := socket.config.query_timeout
-		if timeout == 0 {
-			timeout = 30 * time.Second
-		}
-
-		if e := socket_write_deadline(socket, time.time_add(time.now(), timeout));
-		   e.kind != .None {
-			return e
-		}
-
-		deadline_set = true
+	timeout := socket.config.query_timeout
+	if timeout == 0 {
+		timeout = 30 * time.Second
 	}
+
+	previous := socket.websocket.write_deadline
+	socket.websocket.write_deadline = time.time_add(time.now(), timeout)
+	defer socket.websocket.write_deadline = previous
 
 	if err := client_write(&socket.client, encoded); err.kind != .None {
 		return socket_fail(
 			socket,
 			{kind = .Session_Failed, session = {kind = .Client_Failed, client = err}},
 		)
-	}
-
-	if deadline_set {
-		if e := socket_write_deadline(socket, {}); e.kind != .None {
-			return e
-		}
 	}
 
 	return {}
@@ -903,9 +851,8 @@ socket_control_node :: proc(socket: ^Socket, node: Binary_Node) -> Socket_Error 
 	return socket_provision_write(socket, buffer[:size])
 }
 
-// Polls the native connection without consuming an incomplete TLS/WS record.
-// This keeps timers on the same thread as I/O. Once a peer starts a frame, the
-// bounded read deadline prevents a partial frame from stalling indefinitely.
+// Surf retains a partial WebSocket message across polls so the owner can
+// service timers and HTTP completions while waiting for the rest.
 socket_poll :: proc(
 	socket: ^Socket,
 	timeout: time.Duration = 250 * time.Millisecond,
@@ -946,34 +893,20 @@ socket_network_poll_with_wakeup :: proc(
 ) -> (bool, Socket_Error) {
 	w := &socket.websocket
 	t := &socket.client.frames
-	if t.ready ||
-	   t.ws_at < t.ws_size ||
-	   w.message_ready ||
-	   w.prefetched_at < w.prefetched_size ||
-	   w.tls_client.application.inbound_at < w.tls_client.application.inbound_size {
+	if t.ready || t.ws_at < t.ws_size {
 		return true, {}
 	}
 
-	when (ODIN_OS in bit_set[type_of(ODIN_OS)]{.Darwin, .Linux}) {
-		fds := [2]posix.pollfd {
-			{fd = cast(posix.FD)w.tls_client.tcp.socket, events = {.IN}},
-			{fd = -1, events = {.IN}},
-		}
-
-		if wakeup != nil {
-			fds[1].fd = posix.FD(os.fd(wakeup))
-		}
-
-		result := posix.poll(&fds[0], len(fds), cast(i32)(timeout / time.Millisecond))
-
-		if result < 0 {
-			return false, socket_fail(socket, {kind = .Poll_Failed})
-		}
-
-		return fds[0].revents != {}, {}
-	} else {
-		return false, {kind = .Poll_Failed}
+	if w.poll == nil {
+		return w.phase == .Open, {}
 	}
+
+	ready, err := w.poll(w.data, timeout, wakeup)
+	if err.kind != .None {
+		return false, socket_fail(socket, {kind = .Poll_Failed, websocket = err})
+	}
+
+	return ready, {}
 }
 
 // Optional process-wide observer of socket_query round trips for application
@@ -1010,11 +943,7 @@ socket_query :: proc(socket: ^Socket, query: Binary_Node) -> (Binary_Document, S
 	}
 
 	socket.query_depth += 1
-	socket.read_deadline_scopes += 1
-	defer {
-		socket.query_depth -= 1
-		socket.read_deadline_scopes -= 1
-	}
+	defer socket.query_depth -= 1
 
 	attrs: [17]Binary_Node_Attribute
 	copy(attrs[:], query.attrs)
@@ -1169,7 +1098,7 @@ socket_receive_while_waiting :: proc(
 		return {}, err
 	}
 
-	ready, poll_err := socket_network_poll(socket, 100 * time.Millisecond)
+	ready, poll_err := socket_network_poll(socket, clamp(time.diff(time.now(), deadline), time.Duration(0), 100 * time.Millisecond))
 	if poll_err.kind != .None {
 		return {}, poll_err
 	}
@@ -1178,21 +1107,9 @@ socket_receive_while_waiting :: proc(
 		return {}, {}
 	}
 
-	if e := socket_read_deadline(socket, deadline); e.kind != .None {
-		return {}, e
-	}
-
-	event, err := socket_receive_wire(socket)
+	event, err := socket_receive_wire(socket, deadline)
 	if err.kind != .None {
 		return {}, err
-	}
-
-	if e := socket_read_deadline(socket, {}); e.kind != .None {
-		if event.message != nil {
-			socket_message_destroy(event.message)
-		}
-
-		return {}, e
 	}
 
 	if event.kind == .Message {
@@ -1209,35 +1126,4 @@ socket_receive_while_waiting :: proc(
 	}
 
 	return event, {}
-}
-
-socket_read_deadline :: proc(socket: ^Socket, deadline: time.Time) -> Socket_Error {
-	if deadline == (time.Time{}) &&
-	   (socket.websocket.phase == .Closed || socket.websocket.phase == .Failed) {
-		return {}
-	}
-
-	if socket.websocket.stream.set_read_deadline == nil {
-		return {}
-	}
-
-	if e := socket.websocket.stream.set_read_deadline(socket.websocket.stream.data, deadline);
-	   e.kind != .None {
-		return socket_fail(socket, {kind = .Deadline_Failed, stream = e})
-	}
-
-	return {}
-}
-
-socket_write_deadline :: proc(socket: ^Socket, deadline: time.Time) -> Socket_Error {
-	if socket.websocket.stream.set_write_deadline == nil {
-		return {}
-	}
-
-	if e := surf.websocket_set_write_deadline(&socket.websocket, deadline);
-	   e.kind != .None {
-		return socket_fail(socket, {kind = .Deadline_Failed, stream = e})
-	}
-
-	return {}
 }

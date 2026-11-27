@@ -57,8 +57,8 @@ Client_Error :: struct {
 	protobuf:    Protobuf_Error,
 	noise:       Noise_Error,
 	certificate: Certificate_Error,
-	websocket:   surf.WebSocket_Error,
-	stream:      surf.WebSocket_Stream_Error,
+	websocket:   surf.WebSocket_Async_Error,
+	stream:      surf.WebSocket_Async_Error,
 	allocation:  mem.Allocator_Error,
 }
 
@@ -66,7 +66,7 @@ Client_Error :: struct {
 // responsibility for websocket to this client. Noise_Ready means encryption
 // is established, not that this device has been paired or logged in.
 Client :: struct {
-	websocket:         ^surf.WebSocket_Conn,
+	websocket:         ^Message_Connection,
 	config:            Client_Config,
 	phase:             Client_Phase,
 	frames:            Frame_Transport,
@@ -90,7 +90,7 @@ noise_credentials_generate :: proc() -> (credentials: Noise_Credentials, error: 
 
 client_init :: proc(
 	client: ^Client,
-	websocket: ^surf.WebSocket_Conn,
+	websocket: ^Message_Connection,
 	credentials: Noise_Credentials,
 	config: Client_Config = {},
 ) -> Client_Error {
@@ -166,21 +166,21 @@ client_handshake :: proc(client: ^Client, client_payload: []u8) -> Client_Error 
 	finish_size := client_finish_wire_size(len(client_payload))
 
 	if finish_size > client.config.max_frame_payload ||
-	   finish_size > client.websocket.config.max_message_size - 3 {
+	   finish_size > client.websocket.max_message_size - 3 {
 		return {kind = .Payload_Oversized}
 	}
 
-	deadlines_set, deadline_error := client_handshake_deadline_start(client)
-	if deadline_error.kind != .None {
-		return deadline_error
+	timeout := client.config.handshake_timeout
+	if timeout == 0 {
+		timeout = 10 * time.Second
 	}
 
+	conn := client.websocket
+	previous_read, previous_write := conn.read_deadline, conn.write_deadline
+	conn.read_deadline = time.time_add(time.now(), timeout)
+	conn.write_deadline = conn.read_deadline
 	defer {
-		if deadlines_set &&
-		   (client.phase != .Failed && client.phase != .Closed) &&
-		   client.websocket.phase == .Open {
-			surf.websocket_set_deadline(client.websocket, {})
-		}
+		conn.read_deadline, conn.write_deadline = previous_read, previous_write
 	}
 
 	client.phase = .Handshake
@@ -195,45 +195,9 @@ client_handshake :: proc(client: ^Client, client_payload: []u8) -> Client_Error 
 
 	client_secret_keys_clear(client)
 
-	if deadlines_set {
-		if err := surf.websocket_set_deadline(client.websocket, {}); err.kind != .None {
-			return client_fail(client, {kind = .Deadline_Failed, stream = err})
-		}
-
-		deadlines_set = false
-	}
-
 	client.phase = .Noise_Ready
 
 	return {}
-}
-
-client_handshake_deadline_start :: proc(client: ^Client) -> (bool, Client_Error) {
-	deadlines_set := false
-
-	if client.websocket.stream.set_read_deadline != nil &&
-	   client.websocket.stream.set_write_deadline != nil {
-		timeout := client.config.handshake_timeout
-		if timeout == 0 {
-			timeout = 10 * time.Second
-		}
-
-		if err := surf.websocket_set_deadline(
-			client.websocket,
-			time.time_add(time.now(), timeout),
-		); err.kind != .None {
-			return false, client_fail(client, {kind = .Deadline_Failed, stream = err})
-		}
-
-		deadlines_set = true
-	} else if client.config.handshake_timeout > 0 {
-		return false, client_fail(
-			client,
-			{kind = .Deadline_Failed, stream = {kind = .Deadline_Unsupported}},
-		)
-	}
-
-	return deadlines_set, {}
 }
 
 client_handshake_hello_send :: proc(client: ^Client) -> Client_Error {
@@ -474,7 +438,7 @@ client_close :: proc(client: ^Client) -> Client_Error {
 	client_secret_keys_clear(client)
 	client.phase = .Closed
 
-	if err := surf.websocket_close(client.websocket); err.kind != .None {
+	if err := message_connection_close(client.websocket); err.kind != .None {
 		return {kind = .WebSocket_Close_Failed, websocket = err}
 	}
 
@@ -487,7 +451,7 @@ client_fail :: proc(client: ^Client, err: Client_Error) -> Client_Error {
 	frame_transport_clear(&client.frames)
 	noise_clear(&client.noise)
 	client_secret_keys_clear(client)
-	surf.websocket_close(client.websocket, 1008)
+	message_connection_close(client.websocket, 1008)
 
 	return err
 }
@@ -525,7 +489,7 @@ client_write :: proc(client: ^Client, payload: []u8) -> Client_Error {
 
 	if len(payload) > client.config.max_frame_payload - NOISE_TAG_SIZE ||
 	   len(payload) >
-		   client.websocket.config.max_message_size - FRAME_HEADER_SIZE - NOISE_TAG_SIZE {
+		   client.websocket.max_message_size - FRAME_HEADER_SIZE - NOISE_TAG_SIZE {
 		return {kind = .Payload_Oversized}
 	}
 

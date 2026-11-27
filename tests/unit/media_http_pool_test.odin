@@ -6,13 +6,6 @@ import "shared:async/http"
 import wa "shared:whatsapp"
 
 @(test)
-media_pool_respects_existing_protocol_offers :: proc(t: ^testing.T) {
-	testing.expect(t, wa.media_http_pool_supports(nil))
-	testing.expect(t, wa.media_http_pool_supports([]string{"h2", "http/1.1"}))
-	testing.expect(t, !wa.media_http_pool_supports([]string{"h2"}))
-}
-
-@(test)
 media_pool_rejects_cleartext_on_each_request :: proc(t: ^testing.T) {
 	pool, open_error := wa.media_http_pool_open({})
 	if !testing.expect_value(t, open_error.kind, http.Error_Kind.None) {

@@ -1,7 +1,6 @@
 package protocol_watch
 
 import "core:slice"
-import "core:crypto/x509"
 import "core:c"
 import j "core:encoding/json"
 import "core:strings"
@@ -27,9 +26,6 @@ Network :: struct {
 	allow_loopback:         bool,
 }
 
-// A non-nil, empty root list selects the platform certificate store in core:crypto/tls.
-platform_roots: [1]^x509.Certificate
-
 transport :: proc(
 	data: rawptr,
 	url: string,
@@ -40,7 +36,6 @@ transport :: proc(
 	failure: Failure,
 ) {
 	config := surf.Config {
-		tls = {root_cas = platform_roots[:0]},
 		max_body_size = MAX_BYTES,
 		timeout       = timeout,
 		max_redirects = 0,
@@ -109,7 +104,7 @@ linear_transport :: proc(data: rawptr, query: string, variables: Value) -> (valu
 			body = transmute([]u8)encode(object({"query", text(query)}, {"variables", variables})),
 		},
 		surf.Config {
-			tls = {root_cas = platform_roots[:0]},			max_body_size = MAX_REPORT,
+			max_body_size = MAX_REPORT,
 			timeout = 20 * time.Second,
 			max_redirects = 0,
 			allow_http = network.allow_loopback,

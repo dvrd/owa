@@ -1,5 +1,6 @@
 package whatsapp_test
 
+import wire_frames "../fixtures/message_transport"
 import "core:bytes"
 import "core:crypto"
 import "core:fmt"
@@ -48,7 +49,7 @@ mandatory_control_ack_write_failure_is_terminal_without_chat_commit :: proc(t: ^
 		test_fixtures.send_id_wire_connect(&f.socket, &wire)
 		defer wa.socket_close(&f.socket)
 
-		f.socket.websocket.stream.write = status_ack_failed_write
+		f.socket.websocket.write = wire_frames.writer(status_ack_failed_write)
 		before := test_fixtures.negative_ack_disk(f)
 		defer delete(before)
 
@@ -801,7 +802,7 @@ message_ack_write_failure_does_not_mutate_or_replay_intent :: proc(t: ^testing.T
 	test_fixtures.send_id_wire_connect(&f.socket, &wire)
 	defer wa.socket_close(&f.socket)
 
-	f.socket.websocket.stream.write = status_ack_failed_write
+	f.socket.websocket.write = wire_frames.writer(status_ack_failed_write)
 	before := test_fixtures.negative_ack_disk(f)
 	defer delete(before)
 
@@ -1106,8 +1107,8 @@ status_ack_malformed_envelopes_fail_without_output_or_store_changes :: proc(t: ^
 	}
 }
 
-status_ack_failed_write :: proc(_: rawptr, _: []u8) -> (int, surf.WebSocket_Stream_Error) {
-	return 0, {kind = .No_Progress}
+status_ack_failed_write :: proc(_: rawptr, _: []u8) -> (int, surf.WebSocket_Async_Error) {
+	return 0, {kind = .IO_Failed}
 }
 
 @(test)
@@ -1119,7 +1120,7 @@ status_ack_write_failure_is_propagated_without_chat_state_commit :: proc(t: ^tes
 	test_fixtures.send_id_wire_connect(&f.socket, &wire)
 	defer wa.socket_close(&f.socket)
 
-	f.socket.websocket.stream.write = status_ack_failed_write
+	f.socket.websocket.write = wire_frames.writer(status_ack_failed_write)
 	before := test_fixtures.negative_ack_disk(f)
 	defer delete(before)
 
@@ -1302,8 +1303,8 @@ unsupported_encryption_rejects_mixed_children_before_any_ratchet_mutation :: pro
 	}
 }
 
-unsupported_enc_write_fail :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Stream_Error) {
-	return 0, {kind = .No_Progress}
+unsupported_enc_write_fail :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Async_Error) {
+	return 0, {kind = .IO_Failed}
 }
 
 @(test)
@@ -1319,7 +1320,7 @@ unsupported_encryption_failed_nack_does_not_commit_or_enqueue_retry :: proc(t: ^
 	test_fixtures.send_id_wire_connect(&f.socket, &wire)
 	defer wa.socket_close(&f.socket)
 
-	f.socket.websocket.stream.write = unsupported_enc_write_fail
+	f.socket.websocket.write = wire_frames.writer(unsupported_enc_write_fail)
 	node := unsupported_enc_node("msmsg", false, false, false)
 	defer unsupported_enc_node_destroy(node)
 

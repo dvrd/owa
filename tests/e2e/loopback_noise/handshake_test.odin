@@ -9,8 +9,7 @@ import "core:net"
 import "core:testing"
 import "core:thread"
 import "core:time"
-import "shared:surf"
-import ws "shared:websocket"
+import ws "shared:async/websocket"
 import wa "shared:whatsapp"
 
 // Match the exact certificate bytes in the fixed loopback transcript.
@@ -20,7 +19,7 @@ fixture_verify_certificate :: proc(payload: []u8, _: [32]u8) -> wa.Certificate_E
 
 // Fixed synthetic handshake keys for this fixture.
 // This explicitly replaces only this test connection's ephemeral before I/O.
-fixture_client :: proc(client: ^wa.Client, connection: ^surf.WebSocket_Conn) {
+fixture_client :: proc(client: ^wa.Client, connection: ^wa.Message_Connection) {
 	credentials: wa.Noise_Credentials
 
 	for &byte, index in credentials.static_private_key {
@@ -42,30 +41,13 @@ fixture_client :: proc(client: ^wa.Client, connection: ^surf.WebSocket_Conn) {
 }
 
 fixture_run :: proc(port: int, mode: string) {
-	socket, dial_error := net.dial_tcp_from_endpoint({net.IP4_Loopback, port})
+	connection: wa.Message_Connection
+	assert(wa.message_connection_open(&connection, {
+		host = "127.0.0.1", port = port, target = "/synthetic",
+		max_message_size = 1024, handshake_timeout = time.Second,
+	}).kind == .None)
+	defer wa.message_connection_close(&connection)
 
-	assert(dial_error == nil)
-	tcp := net.TCP_Connection {
-		socket = socket,
-	}
-
-	connection: surf.WebSocket_Conn
-	assert(
-		surf.websocket_client(
-			&connection,
-			surf.websocket_tcp_stream(&tcp),
-			{
-				host = "127.0.0.1",
-				target = "/synthetic",
-				max_message_size = 1024,
-				handshake_timeout = time.Second,
-			},
-		) ==
-		.None,
-	)
-	defer surf.websocket_close(&connection)
-
-	assert(surf.websocket_upgrade(&connection).kind == .None)
 	client: wa.Client
 	fixture_client(&client, &connection)
 
@@ -90,7 +72,7 @@ fixture_run :: proc(port: int, mode: string) {
 
 		if mode == "timeout" {
 			assert(elapsed >= 150 * time.Millisecond)
-			assert(error.transport.websocket.stream.transport == net.TCP_Recv_Error.Timeout)
+			assert(error.transport.websocket.kind == .Timeout)
 		}
 
 		assert(crypto.is_zero_constant_time(client.static_private[:]) == 1)
@@ -102,7 +84,7 @@ fixture_run :: proc(port: int, mode: string) {
 			"WA_LOOPBACK_OK mode=%s error=%v transport=%v\n",
 			mode,
 			error.kind,
-			error.transport.websocket.stream.transport,
+			error.transport.websocket.kind,
 		)
 		return
 	}

@@ -9,8 +9,12 @@ import "core:sync"
 import "core:sys/posix"
 import "core:time"
 
+// Vet owa and Surf. The released async tag contains diagnostics under owa’s compiler.
+OWA_VET_PACKAGES :: "-vet-packages:surf,whatsapp,whatsapp_test,main,private_audio,protocol_watch,protocol_watch_test,protocol_fixture,client_fixture,message_transport,child_process,loopback"
+
 STRICT := []string {
 	"-vet",
+	OWA_VET_PACKAGES,
 	"-warnings-as-errors",
 	"-define:ODIN_TEST_THREADS=1",
 	"-define:ODIN_TEST_FAIL_ON_BAD_MEMORY=true",

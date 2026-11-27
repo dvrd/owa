@@ -1,7 +1,7 @@
 package whatsapp_test
 
+import wire_frames "../fixtures/message_transport"
 import "core:testing"
-import "shared:surf"
 import wa "shared:whatsapp"
 
 @(test)
@@ -16,11 +16,10 @@ noise_credentials_are_random_nonzero_and_accepted_by_client_init :: proc(t: ^tes
 	testing.expect(t, second.static_private_key != zero)
 	testing.expect(t, first.static_private_key != second.static_private_key)
 
-	websocket := surf.WebSocket_Conn {
+	websocket := wa.Message_Connection {
 		phase = .Open,
-		allocator = context.allocator,
-		config = {host = "synthetic.invalid", max_message_size = 4096},
-		stream = {read = media_retry_test_read, write = media_retry_test_write, close = media_retry_test_close},
+		max_message_size = 4096,
+		read = wire_frames.reader(media_retry_test_read), write = wire_frames.writer(media_retry_test_write), close = media_retry_test_close,
 	}
 
 	client: wa.Client

@@ -1,8 +1,9 @@
 package main
 
+import wire_frames "../../fixtures/message_transport"
 import wa "shared:whatsapp"
 import "shared:surf"
-import ws "shared:websocket"
+import ws "shared:async/websocket"
 import "core:bytes"
 import "core:crypto/hash"
 import "core:encoding/hex"
@@ -14,10 +15,14 @@ import "core:time"
 
 socket_tcp_port: int
 
-socket_tcp_close :: proc(data: rawptr) -> surf.WebSocket_Stream_Error {
+socket_tcp_close :: proc(data: rawptr, _: u16) -> surf.WebSocket_Async_Error {
 	peer := cast(^Socket_Recovery)data
 
-	return peer.native_stream.close(peer.native_stream.data)
+	if peer.native_stream.close(peer.native_stream.data) != nil {
+		return {kind = .IO_Failed}
+	}
+
+	return {}
 }
 
 socket_tcp_connect :: proc(peer: ^Socket_Recovery) {
@@ -30,16 +35,12 @@ socket_tcp_connect :: proc(peer: ^Socket_Recovery) {
 
 	connection := net.tcp_connection(&peer.tcp)
 	assert(net.set_deadline(connection, time.time_add(time.now(), 10 * time.Second)) == nil)
-	peer.native_stream = surf.websocket_tcp_stream(&peer.tcp)
+	peer.native_stream = connection
 	peer.tcp_enabled = true
-	peer.socket.websocket.config.host = "127.0.0.1"
-	peer.socket.websocket.stream = {
-		data  = peer,
-		read  = socket_recovery_read,
-		write = socket_recovery_write,
-		close = socket_tcp_close,
-		abort = socket_tcp_close,
-	}
+	peer.socket.websocket.data  = peer
+	peer.socket.websocket.read  = wire_frames.reader(socket_recovery_read)
+	peer.socket.websocket.write = wire_frames.writer(socket_recovery_write)
+	peer.socket.websocket.close = socket_tcp_close
 }
 
 socket_tcp_wait_replay :: proc(peer: ^Socket_Recovery) {

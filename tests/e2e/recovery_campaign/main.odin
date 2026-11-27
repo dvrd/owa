@@ -1,8 +1,9 @@
 package main
 
+import wire_frames "../../fixtures/message_transport"
 import wa "shared:whatsapp"
 import "shared:surf"
-import ws "shared:websocket"
+import ws "shared:async/websocket"
 import "core:bytes"
 import "core:crypto/hash"
 import "core:fmt"
@@ -156,11 +157,11 @@ child_write_stage :: proc(directory, stage: string) {
 	fmt.println("CONTROL_READY")
 }
 
-wire_read :: proc(_: rawptr, _: []u8) -> (int, surf.WebSocket_Stream_Error) {
+wire_read :: proc(_: rawptr, _: []u8) -> (int, surf.WebSocket_Async_Error) {
 	return 0, {kind = .EOF}
 }
 
-wire_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Stream_Error) {
+wire_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Async_Error) {
 	wire := cast(^Wire)data
 	assert(len(source) <= len(wire.data) - wire.used)
 	wire.used += copy(wire.data[wire.used:], source)
@@ -168,7 +169,7 @@ wire_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Stream_Er
 	return len(source), {}
 }
 
-wire_close :: proc(_: rawptr) -> surf.WebSocket_Stream_Error {
+wire_close :: proc(_: rawptr, _: u16) -> surf.WebSocket_Async_Error {
 	return {}
 }
 
@@ -181,9 +182,8 @@ verify_replay :: proc(f: ^Fixture) {
 
 	socket.websocket = {
 		phase = .Open,
-		allocator = context.allocator,
-		config = {host = "synthetic.invalid", max_message_size = 4096},
-		stream = {data = &wire, read = wire_read, write = wire_write, close = wire_close},
+		max_message_size = 4096,
+		data = &wire, read = wire_frames.reader(wire_read), write = wire_frames.writer(wire_write), close = wire_close,
 	}
 
 	socket.client = {

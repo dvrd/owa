@@ -2,11 +2,11 @@
 
 [Catalog index](README.md) · [Name changes](renames.md)
 
-642 entries across 20 source files. Select a function to open its declaration.
+641 entries across 21 source files. Select a function to open its declaration.
 
-The WhatsApp connection uses Surf for the WebSocket upgrade, message I/O and write deadlines. Owa adds the WhatsApp binary frame envelope, Noise XX handshake and transport encryption, and verification of the server certificate against WhatsApp’s pinned key. The synchronous socket pump checks for buffered data before waiting for network input or HTTP worker completion.
+Owa runs Surf’s asynchronous WebSocket session behind its synchronous socket API. Surf resolves the hostname, verifies TLS, upgrades the connection and reassembles WebSocket messages. Owa owns the WhatsApp frame envelope, Noise handshake, certificate pin and transport encryption. One pending read can survive a poll timeout or an HTTP worker wakeup. WhatsApp queries retain their original deadline across unrelated messages.
 
-Set `config.pool_media_downloads = true` before `socket_connect` to reuse one Surf HTTPS connection for sequential online calls to `socket_download_media`. The pool uses HTTP/1.1 when permitted by the TLS configuration. Each request has its own ciphertext limit derived from the descriptor. Owa verifies the ciphertext hash, MAC and plaintext hash before returning the audio. Keep the configured TLS roots alive until `socket_close`, which releases the pool. Provisioning downloads, custom HTTP executors and HTTP/2-only configurations keep their existing transport.
+Use `Socket_Config.tls.roots` to supply a borrowed `^async.Root_Pool`. The default uses platform trust. Keep explicit roots alive through `socket_close`. Set `pool_media_downloads = true` before connecting to reuse a Surf HTTP client on the socket’s async runtime for online media downloads. Each descriptor sets its own ciphertext limit and owa verifies the ciphertext hash, MAC and plaintext hash. Provisioning downloads and custom executors keep their existing paths.
 
 | Source file | Functions |
 |---|---:|
@@ -16,9 +16,10 @@ Set `config.pool_media_downloads = true` before `socket_connect` to reuse one Su
 | [src/binary_node.odin](#file-src-binary-node-odin) | 35 |
 | [src/chat_history.odin](#file-src-chat-history-odin) | 9 |
 | [src/binary_framing.odin](#file-src-binary-framing-odin) | 17 |
+| [src/message_connection.odin](#file-src-message-connection-odin) | 2 |
 | [src/noise_certificate.odin](#file-src-noise-certificate-odin) | 5 |
 | [src/noise_cipher.odin](#file-src-noise-cipher-odin) | 10 |
-| [src/noise_handshake.odin](#file-src-noise-handshake-odin) | 20 |
+| [src/noise_handshake.odin](#file-src-noise-handshake-odin) | 19 |
 | [src/signal_curve25519.odin](#file-src-signal-curve25519-odin) | 4 |
 | [src/contact_sync.odin](#file-src-contact-sync-odin) | 24 |
 | [src/contacts.odin](#file-src-contacts-odin) | 5 |
@@ -28,7 +29,7 @@ Set `config.pool_media_downloads = true` before `socket_connect` to reuse one Su
 | [src/receive.odin](#file-src-receive-odin) | 65 |
 | [src/send.odin](#file-src-send-odin) | 39 |
 | [src/signal.odin](#file-src-signal-odin) | 75 |
-| [src/socket.odin](#file-src-socket-odin) | 34 |
+| [src/socket.odin](#file-src-socket-odin) | 32 |
 | [src/state_store.odin](#file-src-state-store-odin) | 21 |
 
 <a id="file-src-addressing-odin"></a>
@@ -209,9 +210,18 @@ Set `config.pool_media_downloads = true` before `socket_connect` to reuse one Su
 | [`frame_transport_clear`](../../src/binary_framing.odin#L357) | Release the transport's pending buffers and reset its state. |
 | [`frame_transport_validate`](../../src/binary_framing.odin#L367) | Check whether the transport is initialized and usable. |
 | [`frame_transport_next_message`](../../src/binary_framing.odin#L383) | Read the next binary WebSocket message into the transport. |
-| [`frame_transport_read_fail`](../../src/binary_framing.odin#L425) | Translate a WebSocket read failure into a frame transport error. |
-| [`frame_transport_deliver`](../../src/binary_framing.odin#L445) | Copy a completed frame into the caller's destination. |
-| [`frame_transport_fail`](../../src/binary_framing.odin#L467) | Record a terminal frame transport failure. |
+| [`frame_transport_read_fail`](../../src/binary_framing.odin#L408) | Translate a WebSocket read failure into a frame transport error. |
+| [`frame_transport_deliver`](../../src/binary_framing.odin#L428) | Copy a completed frame into the caller's destination. |
+| [`frame_transport_fail`](../../src/binary_framing.odin#L450) | Record a terminal frame transport failure. |
+
+<a id="file-src-message-connection-odin"></a>
+
+## src/message_connection.odin
+
+| Function | Behavior |
+|---|---|
+| [`message_connection_open`](../../src/message_connection.odin#L109) | Open a Surf WebSocket session and expose whole binary messages to owa. |
+| [`message_connection_close`](../../src/message_connection.odin#L215) | Close the session and wait for its pending callbacks. |
 
 <a id="file-src-noise-certificate-odin"></a>
 
@@ -251,23 +261,22 @@ Set `config.pool_media_downloads = true` before `socket_connect` to reuse one Su
 | [`noise_credentials_generate`](../../src/noise_handshake.odin#L81) | Generate a fresh static Noise credential for a client. |
 | [`client_init`](../../src/noise_handshake.odin#L91) | Bind credentials and an upgraded WebSocket to a new Noise client. |
 | [`client_handshake`](../../src/noise_handshake.odin#L149) | Complete the WhatsApp handshake and install transport keys. |
-| [`client_handshake_deadline_start`](../../src/noise_handshake.odin#L211) | Set the handshake deadline on the WebSocket stream. |
-| [`client_handshake_hello_send`](../../src/noise_handshake.odin#L239) | Encode and send ClientHello with the client's ephemeral public key. |
-| [`client_handshake_server_read`](../../src/noise_handshake.odin#L254) | Receive and decode the ServerHello frame. |
-| [`client_noise_mix_dh`](../../src/noise_handshake.odin#L292) | Mix an X25519 shared secret into the handshake chaining key. |
-| [`client_handshake_server_static_decrypt`](../../src/noise_handshake.odin#L309) | Decrypt the server's static key and mix the next handshake secret. |
-| [`client_decrypt_and_verify_server_certificate`](../../src/noise_handshake.odin#L330) | Decrypt the server's certificate payload and invoke the configured verifier. |
-| [`client_handshake_static_send_prepare`](../../src/noise_handshake.odin#L361) | Encrypt the client's static key and mix its handshake secret. |
-| [`client_handshake_finish_send`](../../src/noise_handshake.odin#L374) | Frame and send the encoded ClientFinish. |
-| [`client_handshake_payload_send`](../../src/noise_handshake.odin#L397) | Encrypt the client payload and send it in ClientFinish. |
-| [`client_handshake_exchange`](../../src/noise_handshake.odin#L419) | Sequence ClientHello, server authentication and ClientFinish. |
-| [`client_close`](../../src/noise_handshake.odin#L463) | Release transport buffers, erase secrets and close the WebSocket. |
-| [`client_fail`](../../src/noise_handshake.odin#L484) | Record the terminal client error, erase keys and close the transport. |
-| [`client_secret_keys_clear`](../../src/noise_handshake.odin#L495) | Zero the static and ephemeral client private keys. |
-| [`client_finish_wire_size`](../../src/noise_handshake.odin#L500) | Calculate the encoded size of ClientFinish before sending. |
-| [`client_write`](../../src/noise_handshake.odin#L513) | Encrypt and send one application payload on an established client. |
-| [`client_read`](../../src/noise_handshake.odin#L555) | Receive and authenticate one encrypted application payload. |
-| [`client_encrypted_frame_receive`](../../src/noise_handshake.odin#L598) | Read an encrypted transport frame and validate its size. |
+| [`client_handshake_hello_send`](../../src/noise_handshake.odin#L203) | Encode and send ClientHello with the client's ephemeral public key. |
+| [`client_handshake_server_read`](../../src/noise_handshake.odin#L218) | Receive and decode the ServerHello frame. |
+| [`client_noise_mix_dh`](../../src/noise_handshake.odin#L256) | Mix an X25519 shared secret into the handshake chaining key. |
+| [`client_handshake_server_static_decrypt`](../../src/noise_handshake.odin#L273) | Decrypt the server's static key and mix the next handshake secret. |
+| [`client_decrypt_and_verify_server_certificate`](../../src/noise_handshake.odin#L294) | Decrypt the server's certificate payload and invoke the configured verifier. |
+| [`client_handshake_static_send_prepare`](../../src/noise_handshake.odin#L325) | Encrypt the client's static key and mix its handshake secret. |
+| [`client_handshake_finish_send`](../../src/noise_handshake.odin#L338) | Frame and send the encoded ClientFinish. |
+| [`client_handshake_payload_send`](../../src/noise_handshake.odin#L361) | Encrypt the client payload and send it in ClientFinish. |
+| [`client_handshake_exchange`](../../src/noise_handshake.odin#L383) | Sequence ClientHello, server authentication and ClientFinish. |
+| [`client_close`](../../src/noise_handshake.odin#L427) | Release transport buffers, erase secrets and close the WebSocket. |
+| [`client_fail`](../../src/noise_handshake.odin#L448) | Record the terminal client error, erase keys and close the transport. |
+| [`client_secret_keys_clear`](../../src/noise_handshake.odin#L459) | Zero the static and ephemeral client private keys. |
+| [`client_finish_wire_size`](../../src/noise_handshake.odin#L464) | Calculate the encoded size of ClientFinish before sending. |
+| [`client_write`](../../src/noise_handshake.odin#L477) | Encrypt and send one application payload on an established client. |
+| [`client_read`](../../src/noise_handshake.odin#L519) | Receive and authenticate one encrypted application payload. |
+| [`client_encrypted_frame_receive`](../../src/noise_handshake.odin#L562) | Read an encrypted transport frame and validate its size. |
 
 <a id="file-src-signal-curve25519-odin"></a>
 
@@ -336,95 +345,95 @@ before allocating a destination. Pass the original message and buffer to
 
 | Function | Behavior |
 |---|---|
-| [`media_keys_clear`](../../src/media.odin#L86) | Erase derived media keys. |
-| [`media_metadata_clear`](../../src/media.odin#L91) | Erase media metadata including the file key. |
-| [`media_key_generate`](../../src/media.odin#L97) | Generate a random key for one media file. |
-| [`media_keys_derive`](../../src/media.odin#L106) | Derive the IV, encryption key and MAC key for the media type. |
-| [`media_encrypt`](../../src/media.odin#L140) | Encrypt a complete file and produce its authenticated download metadata. |
-| [`media_decrypt`](../../src/media.odin#L209) | Verify and decrypt a complete encrypted media file. |
-| [`media_ciphertext_authenticate`](../../src/media.odin#L267) | Check the encrypted file digest and authentication tag. |
-| [`media_cbc_decrypt_blocks`](../../src/media.odin#L285) | Decrypt the media payload one AES-CBC block at a time. |
-| [`media_plaintext_validate`](../../src/media.odin#L303) | Check decrypted size and plaintext digest against the message metadata. |
-| [`compute_media_authentication_tag`](../../src/media.odin#L335) | Compute the media authentication tag over the IV and ciphertext. |
-| [`media_metadata_from_message`](../../src/media.odin#L378) | Extract and validate decryption metadata from a media message. |
-| [`media_download_url`](../../src/media.odin#L400) | Select the canonical CDN URL or build it from a validated direct path. |
-| [`media_message_encode`](../../src/media.odin#L450) | Serialize an image or document message in its protobuf envelope. |
-| [`media_message_decode`](../../src/media.odin#L478) | Decode supported media fields from a WhatsApp message. |
-| [`decode_audio_message`](../../src/media.odin#L548) | Decode audio attachments and voice notes, including their duration, MIME type, CDN path, encryption key, and hashes. |
-| [`media_message_field_known`](../../src/media.odin#L586) | Recognize the fields supported for the selected media type. |
-| [`media_message_integer_decode`](../../src/media.odin#L606) | Read numeric media properties such as file length and timestamp. |
-| [`media_message_bytes_decode`](../../src/media.odin#L636) | Assign a bytes or nested-context field to the decoded media. |
-| [`media_message_string_decode`](../../src/media.odin#L681) | Validate and read text properties for the selected media type. |
-| [`reaction_message_encode`](../../src/media.odin#L711) | Encode a reaction and its target message key. |
-| [`reaction_message_decode`](../../src/media.odin#L735) | Decode a reaction and its target message key. |
-| [`reaction_message_field_decode`](../../src/media.odin#L778) | Decode one reaction field and check its type. |
-| [`reaction_checkmark_encode`](../../src/media.odin#L816) | Build the predefined checkmark reaction to a target message. |
-| [`media_error_from_protobuf_writer`](../../src/media.odin#L834) | Translate protobuf writer errors into media errors. |
-| [`media_emit_envelope`](../../src/media.odin#L853) | Write the outer WhatsApp message field containing the media body. |
-| [`media_emit_body`](../../src/media.odin#L875) | Write the fields of an image or document message. |
-| [`media_emit_kind_validate`](../../src/media.odin#L917) | Check that the supplied properties are valid for the selected media type. |
-| [`media_emit_bytes_fields`](../../src/media.odin#L938) | Write binary media fields such as keys and file digests. |
-| [`media_emit_integer_context_fields`](../../src/media.odin#L965) | Write numeric media properties and any nested context. |
-| [`media_emit_context`](../../src/media.odin#L1011) | Write mentions, quotes and other supported media context fields. |
-| [`reaction_emit_envelope`](../../src/media.odin#L1041) | Write the outer message containing a reaction. |
-| [`reaction_emit_body`](../../src/media.odin#L1058) | Write the reaction target, text and timestamp. |
-| [`media_emit_message_key`](../../src/media.odin#L1091) | Serialize the remote JID, stanza ID and sender information for a message key. |
-| [`media_extract_content`](../../src/media.odin#L1109) | Locate the requested content inside a supported message envelope. |
-| [`media_extract_wrapper`](../../src/media.odin#L1159) | Descend through a wrapped message to locate supported content. |
-| [`media_context_decode`](../../src/media.odin#L1197) | Decode the context attached to a media message. |
-| [`decode_reaction_target_message_key`](../../src/media.odin#L1252) | Decode a protobuf message key identifying the target stanza. |
-| [`media_validate_protobuf`](../../src/media.odin#L1307) | Check that a byte slice consists of readable protobuf fields. |
-| [`media_http_native`](../../src/media.odin#L1337) | Execute a media HTTP request using the native network client. |
-| [`media_connection_query_encode`](../../src/media.odin#L1365) | Encode an IQ requesting media connection credentials and hosts. |
-| [`media_connection_decode`](../../src/media.odin#L1392) | Parse upload authorization, expiry and host limits from the media connection result. |
-| [`media_connection_node_decode`](../../src/media.odin#L1441) | Validate the media connection IQ and select its media node. |
-| [`media_connection_hosts_validate`](../../src/media.odin#L1484) | Validate and count candidate media upload hosts. |
-| [`read_media_host_upload_limit`](../../src/media.odin#L1511) | Read a media host's maximum permitted content length. |
-| [`media_upload_url`](../../src/media.odin#L1522) | Build the upload endpoint from the host, encrypted hash and authorization. |
-| [`media_upload_auth_encode`](../../src/media.odin#L1584) | Percent-encode the upload authorization for the query string. |
-| [`media_upload_response_decode`](../../src/media.odin#L1619) | Decode the upload result and validate its URL and direct path. |
-| [`media_upload_json_depth_validate`](../../src/media.odin#L1675) | Bound JSON nesting before parsing a media upload response. |
-| [`media_upload`](../../src/media.odin#L1722) | Try eligible upload hosts within the overall time budget. |
-| [`media_upload_input_validate`](../../src/media.odin#L1809) | Check the upload inputs, metadata and encrypted payload digest. |
-| [`media_upload_exchange`](../../src/media.odin#L1834) | Send an upload to one host and parse its response. |
-| [`media_download`](../../src/media.odin#L1876) | Fetch the encrypted media, authenticate it and decrypt into the output. |
-| [`fetch_media_ciphertext`](../../src/media.odin#L1910) | Fetch bounded media ciphertext from a validated CDN URL and check the HTTP status. |
-| [`media_download_settings`](../../src/media.odin#L1932) | Validate download bounds and prepare HTTP settings. |
-| [`media_request_id_valid`](../../src/media.odin#L1952) | Check a media IQ request ID's length and UTF-8 encoding. |
-| [`media_hostname_valid`](../../src/media.odin#L1955) | Validate the labels of a media hostname. |
-| [`media_retry_request_encode`](../../src/media.odin#L2003) | Generate a nonce and encode an encrypted media retry request. |
-| [`media_retry_request_with_nonce`](../../src/media.odin#L2022) | Encrypt a retry request using the supplied nonce and derived key. |
-| [`media_retry_receipt_encode`](../../src/media.odin#L2064) | Build the retry receipt stanza with its encrypted payload. |
-| [`media_retry_request_validate`](../../src/media.odin#L2102) | Check the target message, owner JID and fields of a retry request. |
-| [`media_retry_event_decode`](../../src/media.odin#L2122) | Decode a media retry notification or server error. |
-| [`media_retry_event_route_validate`](../../src/media.odin#L2173) | Validate the notification's routing and its retry children. |
-| [`media_retry_decrypt`](../../src/media.odin#L2226) | Authenticate and decrypt a media retry response. |
-| [`derive_media_retry_key`](../../src/media.odin#L2283) | Derive the AES-GCM retry key from the file's media key. |
-| [`media_retry_notification_decode`](../../src/media.odin#L2293) | Read the result, stanza ID and refreshed direct path from retry data. |
-| [`socket_http_execute`](../../src/media.odin#L2395) | Execute an HTTP job while the socket continues processing events. |
-| [`socket_media_upload_http`](../../src/media.odin#L2424) | Upload media with the socket's HTTP configuration and event handling. |
-| [`socket_media_download_http`](../../src/media.odin#L2457) | Download media using the socket and the appropriate HTTP execution path. |
-| [`socket_media_download_direct`](../../src/media.odin#L2527) | Run the direct media download for the supplied job. |
-| [`socket_http_worker`](../../src/media.odin#L2537) | Dispatch an HTTP worker job and publish its completion. |
-| [`socket_http_worker_execute`](../../src/media.odin#L2578) | Execute one worker request with cancellation checks. |
-| [`socket_http_run`](../../src/media.odin#L2606) | Run the worker while pumping the socket and join it on exit. |
-| [`socket_media_retry_enqueue`](../../src/media.odin#L2659) | Queue an owning copy of a retry notification for later correlation. |
-| [`socket_http_event_process`](../../src/media.odin#L2698) | Preserve messages and retry notifications received during HTTP work. |
-| [`socket_send_image`](../../src/media.odin#L2716) | Encrypt, upload and send a group image with its caption. |
-| [`socket_send_document`](../../src/media.odin#L2728) | Encrypt, upload and send a group document with its filename. |
-| [`socket_send_reaction`](../../src/media.odin#L2743) | Encode and send a group reaction to the target message. |
-| [`socket_send_media`](../../src/media.odin#L2775) | Validate a media send, reuse stored intent if possible, then encrypt, upload and send. |
-| [`socket_media_existing_send`](../../src/media.odin#L2843) | Check whether a prior send can satisfy this media request and message ID. |
-| [`socket_media_send_validate`](../../src/media.odin#L2905) | Validate the destination and media properties before starting a send. |
-| [`socket_media_upload`](../../src/media.odin#L2945) | Request upload credentials and upload the encrypted file. |
-| [`socket_media_message_send`](../../src/media.odin#L2999) | Encode uploaded metadata and dispatch the group message. |
-| [`socket_download_media`](../../src/media.odin#L3060) | Download media from a received message and recover an expired location when supported. |
-| [`socket_media_retry_send`](../../src/media.odin#L3107) | Send an encrypted retry receipt for the requested media. |
-| [`socket_media_download_recover`](../../src/media.odin#L3128) | Obtain a refreshed direct path and retry the authenticated download. |
-| [`socket_media_owner_jid`](../../src/media.odin#L3191) | Resolve the account's owner JID for a media retry receipt. |
-| [`socket_media_wait_retry`](../../src/media.odin#L3229) | Wait for the media retry notification matching the stanza ID. |
-| [`socket_media_retry_event_read`](../../src/media.odin#L3296) | Poll for socket events within the retry deadline. |
-| [`socket_media_notification_open`](../../src/media.odin#L3334) | Validate the retry notification and decrypt its response. |
+| [`media_keys_clear`](../../src/media.odin#L91) | Erase derived media keys. |
+| [`media_metadata_clear`](../../src/media.odin#L97) | Erase media metadata including the file key. |
+| [`media_key_generate`](../../src/media.odin#L103) | Generate a random key for one media file. |
+| [`media_keys_derive`](../../src/media.odin#L113) | Derive the IV, encryption key and MAC key for the media type. |
+| [`media_encrypt`](../../src/media.odin#L155) | Encrypt a complete file and produce its authenticated download metadata. |
+| [`media_decrypt`](../../src/media.odin#L230) | Verify and decrypt a complete encrypted media file. |
+| [`media_ciphertext_authenticate`](../../src/media.odin#L295) | Check the encrypted file digest and authentication tag. |
+| [`media_cbc_decrypt_blocks`](../../src/media.odin#L317) | Decrypt the media payload one AES-CBC block at a time. |
+| [`media_plaintext_validate`](../../src/media.odin#L338) | Check decrypted size and plaintext digest against the message metadata. |
+| [`compute_media_authentication_tag`](../../src/media.odin#L371) | Compute the media authentication tag over the IV and ciphertext. |
+| [`media_metadata_from_message`](../../src/media.odin#L441) | Extract and validate decryption metadata from a media message. |
+| [`media_download_url`](../../src/media.odin#L472) | Select the canonical CDN URL or build it from a validated direct path. |
+| [`media_message_encode`](../../src/media.odin#L523) | Serialize an image or document message in its protobuf envelope. |
+| [`media_message_decode`](../../src/media.odin#L551) | Decode supported media fields from a WhatsApp message. |
+| [`decode_audio_message`](../../src/media.odin#L627) | Decode audio attachments and voice notes, including their duration, MIME type, CDN path, encryption key, and hashes. |
+| [`media_message_field_known`](../../src/media.odin#L702) | Recognize the fields supported for the selected media type. |
+| [`media_message_integer_decode`](../../src/media.odin#L729) | Read numeric media properties such as file length and timestamp. |
+| [`media_message_bytes_decode`](../../src/media.odin#L759) | Assign a bytes or nested-context field to the decoded media. |
+| [`media_message_string_decode`](../../src/media.odin#L804) | Validate and read text properties for the selected media type. |
+| [`reaction_message_encode`](../../src/media.odin#L838) | Encode a reaction and its target message key. |
+| [`reaction_message_decode`](../../src/media.odin#L862) | Decode a reaction and its target message key. |
+| [`reaction_message_field_decode`](../../src/media.odin#L906) | Decode one reaction field and check its type. |
+| [`reaction_checkmark_encode`](../../src/media.odin#L949) | Build the predefined checkmark reaction to a target message. |
+| [`media_error_from_protobuf_writer`](../../src/media.odin#L974) | Translate protobuf writer errors into media errors. |
+| [`media_emit_envelope`](../../src/media.odin#L1003) | Write the outer WhatsApp message field containing the media body. |
+| [`media_emit_body`](../../src/media.odin#L1025) | Write the fields of an image or document message. |
+| [`media_emit_kind_validate`](../../src/media.odin#L1068) | Check that the supplied properties are valid for the selected media type. |
+| [`media_emit_bytes_fields`](../../src/media.odin#L1089) | Write binary media fields such as keys and file digests. |
+| [`media_emit_integer_context_fields`](../../src/media.odin#L1121) | Write numeric media properties and any nested context. |
+| [`media_emit_context`](../../src/media.odin#L1167) | Write mentions, quotes and other supported media context fields. |
+| [`reaction_emit_envelope`](../../src/media.odin#L1197) | Write the outer message containing a reaction. |
+| [`reaction_emit_body`](../../src/media.odin#L1214) | Write the reaction target, text and timestamp. |
+| [`media_emit_message_key`](../../src/media.odin#L1247) | Serialize the remote JID, stanza ID and sender information for a message key. |
+| [`media_extract_content`](../../src/media.odin#L1265) | Locate the requested content inside a supported message envelope. |
+| [`media_extract_wrapper`](../../src/media.odin#L1324) | Descend through a wrapped message to locate supported content. |
+| [`media_context_decode`](../../src/media.odin#L1369) | Decode the context attached to a media message. |
+| [`decode_reaction_target_message_key`](../../src/media.odin#L1424) | Decode a protobuf message key identifying the target stanza. |
+| [`media_validate_protobuf`](../../src/media.odin#L1479) | Check that a byte slice consists of readable protobuf fields. |
+| [`media_http_native`](../../src/media.odin#L1509) | Execute a media HTTP request using the native network client. |
+| [`media_connection_query_encode`](../../src/media.odin#L1540) | Encode an IQ requesting media connection credentials and hosts. |
+| [`media_connection_decode`](../../src/media.odin#L1567) | Parse upload authorization, expiry and host limits from the media connection result. |
+| [`media_connection_node_decode`](../../src/media.odin#L1618) | Validate the media connection IQ and select its media node. |
+| [`media_connection_hosts_validate`](../../src/media.odin#L1669) | Validate and count candidate media upload hosts. |
+| [`read_media_host_upload_limit`](../../src/media.odin#L1696) | Read a media host's maximum permitted content length. |
+| [`media_upload_url`](../../src/media.odin#L1707) | Build the upload endpoint from the host, encrypted hash and authorization. |
+| [`media_upload_auth_encode`](../../src/media.odin#L1778) | Percent-encode the upload authorization for the query string. |
+| [`media_upload_response_decode`](../../src/media.odin#L1813) | Decode the upload result and validate its URL and direct path. |
+| [`media_upload_json_depth_validate`](../../src/media.odin#L1874) | Bound JSON nesting before parsing a media upload response. |
+| [`media_upload`](../../src/media.odin#L1921) | Try eligible upload hosts within the overall time budget. |
+| [`media_upload_input_validate`](../../src/media.odin#L2022) | Check the upload inputs, metadata and encrypted payload digest. |
+| [`media_upload_exchange`](../../src/media.odin#L2051) | Send an upload to one host and parse its response. |
+| [`media_download`](../../src/media.odin#L2093) | Fetch the encrypted media, authenticate it and decrypt into the output. |
+| [`fetch_media_ciphertext`](../../src/media.odin#L2131) | Fetch bounded media ciphertext from a validated CDN URL and check the HTTP status. |
+| [`media_download_settings`](../../src/media.odin#L2181) | Validate download bounds and prepare HTTP settings. |
+| [`media_request_id_valid`](../../src/media.odin#L2201) | Check a media IQ request ID's length and UTF-8 encoding. |
+| [`media_hostname_valid`](../../src/media.odin#L2205) | Validate the labels of a media hostname. |
+| [`media_retry_request_encode`](../../src/media.odin#L2255) | Generate a nonce and encode an encrypted media retry request. |
+| [`media_retry_request_with_nonce`](../../src/media.odin#L2275) | Encrypt a retry request using the supplied nonce and derived key. |
+| [`media_retry_receipt_encode`](../../src/media.odin#L2322) | Build the retry receipt stanza with its encrypted payload. |
+| [`media_retry_request_validate`](../../src/media.odin#L2373) | Check the target message, owner JID and fields of a retry request. |
+| [`media_retry_event_decode`](../../src/media.odin#L2393) | Decode a media retry notification or server error. |
+| [`media_retry_event_route_validate`](../../src/media.odin#L2450) | Validate the notification's routing and its retry children. |
+| [`media_retry_decrypt`](../../src/media.odin#L2509) | Authenticate and decrypt a media retry response. |
+| [`derive_media_retry_key`](../../src/media.odin#L2579) | Derive the AES-GCM retry key from the file's media key. |
+| [`media_retry_notification_decode`](../../src/media.odin#L2591) | Read the result, stanza ID and refreshed direct path from retry data. |
+| [`socket_http_execute`](../../src/media.odin#L2701) | Execute an HTTP job while the socket continues processing events. |
+| [`socket_media_upload_http`](../../src/media.odin#L2732) | Upload media with the socket's HTTP configuration and event handling. |
+| [`socket_media_download_http`](../../src/media.odin#L2774) | Download media using the socket and the appropriate HTTP execution path. |
+| [`socket_media_download_direct`](../../src/media.odin#L2869) | Run the direct media download for the supplied job. |
+| [`socket_http_worker`](../../src/media.odin#L2879) | Dispatch an HTTP worker job and publish its completion. |
+| [`socket_http_worker_execute`](../../src/media.odin#L2927) | Execute one worker request with cancellation checks. |
+| [`socket_http_run`](../../src/media.odin#L2959) | Run the worker while pumping the socket and join it on exit. |
+| [`socket_media_retry_enqueue`](../../src/media.odin#L3022) | Queue an owning copy of a retry notification for later correlation. |
+| [`socket_http_event_process`](../../src/media.odin#L3061) | Preserve messages and retry notifications received during HTTP work. |
+| [`socket_send_image`](../../src/media.odin#L3079) | Encrypt, upload and send a group image with its caption. |
+| [`socket_send_document`](../../src/media.odin#L3092) | Encrypt, upload and send a group document with its filename. |
+| [`socket_send_reaction`](../../src/media.odin#L3116) | Encode and send a group reaction to the target message. |
+| [`socket_send_media`](../../src/media.odin#L3155) | Validate a media send, reuse stored intent if possible, then encrypt, upload and send. |
+| [`socket_media_existing_send`](../../src/media.odin#L3234) | Check whether a prior send can satisfy this media request and message ID. |
+| [`socket_media_send_validate`](../../src/media.odin#L3310) | Validate the destination and media properties before starting a send. |
+| [`socket_media_upload`](../../src/media.odin#L3350) | Request upload credentials and upload the encrypted file. |
+| [`socket_media_message_send`](../../src/media.odin#L3404) | Encode uploaded metadata and dispatch the group message. |
+| [`socket_download_media`](../../src/media.odin#L3466) | Download media from a received message and recover an expired location when supported. |
+| [`socket_media_retry_send`](../../src/media.odin#L3525) | Send an encrypted retry receipt for the requested media. |
+| [`socket_media_download_recover`](../../src/media.odin#L3550) | Obtain a refreshed direct path and retry the authenticated download. |
+| [`socket_media_owner_jid`](../../src/media.odin#L3638) | Resolve the account's owner JID for a media retry receipt. |
+| [`socket_media_wait_retry`](../../src/media.odin#L3676) | Wait for the media retry notification matching the stanza ID. |
+| [`socket_media_retry_event_read`](../../src/media.odin#L3744) | Poll for socket events within the retry deadline. |
+| [`socket_media_notification_open`](../../src/media.odin#L3777) | Validate the retry notification and decrypt its response. |
 
 <a id="file-src-pairing-odin"></a>
 
@@ -759,40 +768,38 @@ Application loops can call `socket_read` or its alias `socket_receive`. Both ret
 
 | Function | Behavior |
 |---|---|
-| [`socket_message_destroy`](../../src/socket.odin#L115) | Release all allocations owned by a received socket message. |
-| [`socket_connect`](../../src/socket.odin#L171) | Validate settings, open the WebSocket and start the WhatsApp session. |
-| [`socket_client_init`](../../src/socket.odin#L221) | Initialize the Noise client on the socket's existing transport. |
-| [`socket_websocket_dial`](../../src/socket.odin#L232) | Dial the configured WhatsApp WebSocket and retain it on the socket. |
-| [`socket_connect_validate`](../../src/socket.odin#L253) | Validate credentials and stores before opening the connection. |
-| [`socket_connect_settings`](../../src/socket.odin#L281) | Fill in socket defaults and validate the pairing configuration. |
-| [`socket_close`](../../src/socket.odin#L323) | Close the session and release pending messages and transport resources. |
-| [`socket_tick`](../../src/socket.odin#L361) | Advance timers, retry work and maintenance for an open socket. |
-| [`socket_receive_wire`](../../src/socket.odin#L421) | Receive the next network event under a temporary read deadline while synchronous waiters retain queued messages. |
-| [`socket_receive_inner`](../../src/socket.odin#L448) | Route incoming session events through provisioning or online processing. |
-| [`socket_login_provision_start`](../../src/socket.odin#L502) | Start the post-login prekey check and record the socket's own LID. |
-| [`socket_provision`](../../src/socket.odin#L533) | Dispatch the IQ reply for the current provisioning stage. |
-| [`socket_provision_count`](../../src/socket.odin#L547) | Handle the reported prekey count and upload keys or request activation. |
-| [`socket_provision_upload`](../../src/socket.odin#L589) | Record an accepted prekey upload and request activation. |
-| [`socket_handle_activation_response`](../../src/socket.odin#L610) | Handle the activation reply, restore messages and move the socket online. |
-| [`socket_request_activation`](../../src/socket.odin#L658) | Send the active-state IQ and wait for its provisioning reply. |
-| [`socket_provision_write`](../../src/socket.odin#L685) | Send a provisioning request under its write deadline. |
-| [`socket_next_iq_id`](../../src/socket.odin#L696) | Generate the next IQ ID from time and the socket sequence. |
-| [`socket_write`](../../src/socket.odin#L701) | Write encrypted stanza bytes under a bounded write deadline. |
-| [`socket_fail`](../../src/socket.odin#L729) | Close the socket and retain its terminal error. |
-| [`socket_read`](../../src/socket.odin#L743) | Return a queued message first or receive the next socket event. |
-| [`socket_control_node`](../../src/socket.odin#L756) | Handle control stanzas such as offline previews and key notifications. |
-| [`socket_poll`](../../src/socket.odin#L817) | Check for queued or network activity within a timeout. |
-| [`socket_network_poll`](../../src/socket.odin#L838) | Poll the transport file descriptor for readable network events. |
-| [`query_observer_set`](../../src/socket.odin#L877) | Install the process-wide IQ query observer. |
-| [`query_observe`](../../src/socket.odin#L881) | Report a query observation to the installed observer. |
-| [`socket_query`](../../src/socket.odin#L891) | Send an IQ and wait for the reply with the matching ID. |
-| [`socket_query_send`](../../src/socket.odin#L941) | Encode a query node and write it to the socket. |
-| [`socket_query_message_enqueue`](../../src/socket.odin#L968) | Retain an unrelated incoming message while waiting for a query result. |
-| [`socket_query_response_copy`](../../src/socket.odin#L982) | Make an owning copy of the response node. |
-| [`socket_query_response_receive`](../../src/socket.odin#L1011) | Read events until the matching IQ arrives or the deadline expires. |
-| [`socket_receive_while_waiting`](../../src/socket.odin#L1032) | Poll for one frame during a synchronous request and queue unrelated live messages. |
-| [`socket_read_deadline`](../../src/socket.odin#L1081) | Set the transport stream's read deadline. |
-| [`socket_write_deadline`](../../src/socket.odin#L1096) | Set the transport stream's write deadline. |
+| [`socket_message_destroy`](../../src/socket.odin#L122) | Release all allocations owned by a received socket message. |
+| [`socket_connect`](../../src/socket.odin#L179) | Validate settings, open the WebSocket and start the WhatsApp session. |
+| [`socket_client_init`](../../src/socket.odin#L234) | Initialize the Noise client on the socket's existing transport. |
+| [`socket_websocket_dial`](../../src/socket.odin#L245) | Dial the configured WhatsApp WebSocket and retain it on the socket. |
+| [`socket_connect_validate`](../../src/socket.odin#L260) | Validate credentials and stores before opening the connection. |
+| [`socket_connect_settings`](../../src/socket.odin#L296) | Fill in socket defaults and validate the pairing configuration. |
+| [`socket_close`](../../src/socket.odin#L334) | Close the session and release pending messages and transport resources. |
+| [`socket_tick`](../../src/socket.odin#L372) | Advance timers, retry work and maintenance for an open socket. |
+| [`socket_receive_wire`](../../src/socket.odin#L441) | Receive the next network event under a temporary read deadline while synchronous waiters retain queued messages. |
+| [`socket_receive_inner`](../../src/socket.odin#L453) | Route incoming session events through provisioning or online processing. |
+| [`socket_login_provision_start`](../../src/socket.odin#L517) | Start the post-login prekey check and record the socket's own LID. |
+| [`socket_provision`](../../src/socket.odin#L555) | Dispatch the IQ reply for the current provisioning stage. |
+| [`socket_provision_count`](../../src/socket.odin#L570) | Handle the reported prekey count and upload keys or request activation. |
+| [`socket_provision_upload`](../../src/socket.odin#L621) | Record an accepted prekey upload and request activation. |
+| [`socket_handle_activation_response`](../../src/socket.odin#L648) | Handle the activation reply, restore messages and move the socket online. |
+| [`socket_request_activation`](../../src/socket.odin#L704) | Send the active-state IQ and wait for its provisioning reply. |
+| [`socket_provision_write`](../../src/socket.odin#L731) | Send a provisioning request under its write deadline. |
+| [`socket_next_iq_id`](../../src/socket.odin#L743) | Generate the next IQ ID from time and the socket sequence. |
+| [`socket_write`](../../src/socket.odin#L749) | Write encrypted stanza bytes under a bounded write deadline. |
+| [`socket_fail`](../../src/socket.odin#L769) | Close the socket and retain its terminal error. |
+| [`socket_read`](../../src/socket.odin#L783) | Return a queued message first or receive the next socket event. |
+| [`socket_control_node`](../../src/socket.odin#L796) | Handle control stanzas such as offline previews and key notifications. |
+| [`socket_poll`](../../src/socket.odin#L857) | Check for queued or network activity within a timeout. |
+| [`socket_network_poll`](../../src/socket.odin#L884) | Poll the transport file descriptor for readable network events. |
+| [`query_observer_set`](../../src/socket.odin#L923) | Install the process-wide IQ query observer. |
+| [`query_observe`](../../src/socket.odin#L927) | Report a query observation to the installed observer. |
+| [`socket_query`](../../src/socket.odin#L937) | Send an IQ and wait for the reply with the matching ID. |
+| [`socket_query_send`](../../src/socket.odin#L984) | Encode a query node and write it to the socket. |
+| [`socket_query_message_enqueue`](../../src/socket.odin#L1011) | Retain an unrelated incoming message while waiting for a query result. |
+| [`socket_query_response_copy`](../../src/socket.odin#L1025) | Make an owning copy of the response node. |
+| [`socket_query_response_receive`](../../src/socket.odin#L1054) | Read events until the matching IQ arrives or the deadline expires. |
+| [`socket_receive_while_waiting`](../../src/socket.odin#L1087) | Poll for one frame during a synchronous request and queue unrelated live messages. |
 
 <a id="file-src-state-store-odin"></a>
 

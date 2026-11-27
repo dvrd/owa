@@ -141,7 +141,7 @@ Frame_Transport_Error_Kind :: enum {
 
 Frame_Transport_Error :: struct {
 	kind:       Frame_Transport_Error_Kind,
-	websocket:  surf.WebSocket_Error,
+	websocket:  surf.WebSocket_Async_Error,
 	frame:      Frame_Error,
 	allocation: mem.Allocator_Error,
 }
@@ -151,7 +151,7 @@ Frame_Transport_Error :: struct {
 // above this layer. Optional routing-info/ED introduction headers are not used.
 // This state must stay at a stable address and be used serially.
 Frame_Transport :: struct {
-	connection:                      ^surf.WebSocket_Conn,
+	connection:                      ^Message_Connection,
 	max_payload:                     int,
 	allocator:                       mem.Allocator,
 	initialized, intro_sent, failed: bool,
@@ -169,7 +169,7 @@ Frame_Transport :: struct {
 
 frame_transport_init :: proc(
 	state: ^Frame_Transport,
-	conn: ^surf.WebSocket_Conn,
+	conn: ^Message_Connection,
 	max_payload: int = DEFAULT_TRANSPORT_MAX_PAYLOAD,
 ) -> Frame_Transport_Error {
 	if state == nil {
@@ -180,7 +180,7 @@ frame_transport_init :: proc(
 		return {kind = .Already_Initialized, frame = .None}
 	}
 
-	if conn == nil || conn.phase != .Open || conn.config.max_message_size <= 0 {
+	if conn == nil || conn.phase != .Open || conn.max_message_size <= 0 || conn.read == nil || conn.write == nil {
 		return {kind = .Invalid_Connection, frame = .None}
 	}
 
@@ -220,7 +220,7 @@ frame_transport_send :: proc(state: ^Frame_Transport, payload: []u8) -> Frame_Tr
 
 	wire_size := intro_size + FRAME_HEADER_SIZE + len(payload)
 
-	if wire_size > state.connection.config.max_message_size {
+	if wire_size > state.connection.max_message_size {
 		return {
 			kind = .WebSocket_Message_Oversized,
 			websocket = {kind = .Message_Oversized},
@@ -249,7 +249,7 @@ frame_transport_send :: proc(state: ^Frame_Transport, payload: []u8) -> Frame_Tr
 		return frame_transport_fail(state, {kind = .Frame_Codec_Failed, frame = frame_err})
 	}
 
-	if err := surf.websocket_write_message(state.connection, .Binary, wire); err.kind != .None {
+	if err := state.connection.write(state.connection.data, wire, state.connection.write_deadline); err.kind != .None {
 		return frame_transport_fail(
 			state,
 			{kind = .WebSocket_Write_Failed, websocket = err, frame = .None},
@@ -381,50 +381,33 @@ frame_transport_validate :: proc(state: ^Frame_Transport) -> Frame_Transport_Err
 }
 
 frame_transport_next_message :: proc(state: ^Frame_Transport) -> Frame_Transport_Error {
-	for {
-		opcode, size, err := surf.websocket_read_message(state.connection, state.ws_message[:])
-
-		if err.kind == .Destination_Undersized {
-			if opcode != .Binary {
-				return frame_transport_fail(
-					state,
-					{kind = .Unexpected_Message_Type, websocket = err, frame = .None},
-				)
-			}
-
-			if size < 0 || size > state.connection.config.max_message_size {
-				return frame_transport_fail(
-					state,
-					{kind = .WebSocket_Message_Oversized, websocket = err, frame = .None},
-				)
-			}
-
-			if allocation_err := resize(&state.ws_message, size); allocation_err != nil {
-				return frame_transport_fail(
-					state,
-					{kind = .Allocation_Failed, allocation = allocation_err, frame = .None},
-				)
-			}
-
-			continue
+	if len(state.ws_message) == 0 {
+		if e := resize(&state.ws_message, state.connection.max_message_size); e != nil {
+			return frame_transport_fail(state, {kind = .Allocation_Failed, allocation = e})
 		}
-
-		if err.kind != .None {
-			return frame_transport_read_fail(state, err)
-		}
-
-		if opcode != .Binary {
-			return frame_transport_fail(state, {kind = .Unexpected_Message_Type, frame = .None})
-		}
-
-		state.ws_at, state.ws_size = 0, size
-		return {frame = .None}
 	}
+
+	conn := state.connection
+	opcode, n, err := conn.read(conn.data, state.ws_message[:], conn.read_deadline)
+	if err.kind != .None {
+		return frame_transport_read_fail(state, err)
+	}
+
+	if opcode != .Binary {
+		return frame_transport_fail(state, {kind = .Unexpected_Message_Type})
+	}
+
+	if n < 0 || n > len(state.ws_message) {
+		return frame_transport_fail(state, {kind = .WebSocket_Message_Oversized})
+	}
+
+	state.ws_at, state.ws_size = 0, n
+	return {frame = .None}
 }
 
 frame_transport_read_fail :: proc(
 	state: ^Frame_Transport,
-	err: surf.WebSocket_Error,
+	err: surf.WebSocket_Async_Error,
 ) -> Frame_Transport_Error {
 	kind: Frame_Transport_Error_Kind = .WebSocket_Read_Failed
 	frame_err: Frame_Error = .None
@@ -435,7 +418,7 @@ frame_transport_read_fail :: proc(
 		if state.header_used < FRAME_HEADER_SIZE {
 			frame_err = .Header_Incomplete
 		}
-	} else if err.kind == .EOF {
+	} else if err.kind == .EOF || err.kind == .Peer_Close || err.kind == .Closed {
 		kind = .Peer_Closed
 	}
 

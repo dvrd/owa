@@ -46,20 +46,6 @@ jobs:
           ref: ${{ steps.pins.outputs.surf }}
           path: deps/surf
           persist-credentials: false
-      - name: Prepare locked packages
-        env:
-          WEBSOCKET: ${{ secrets.OWA_WEBSOCKET_B64 }}
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/shared"/{async,surf,websocket}
-          for dep in async surf; do
-            (cd "deps/$dep/src" && find . -type f \( -name '*.odin' -o -name '*.bin' \) -print0 |
-              tar -cf - --null -T -) | tar -xf - -C "$RUNNER_TEMP/shared/$dep"
-          done
-          cp deps/async/LICENSE "$RUNNER_TEMP/shared/async/"
-          for file in ascii.odin websocket.odin; do
-            printf '%s' "$WEBSOCKET" | base64 -d | tar -xzOf - "$file" > "$RUNNER_TEMP/shared/websocket/$file"
-          done
       - name: Build toolchain
         run: |
           sudo apt-get update -qq
@@ -70,7 +56,7 @@ jobs:
       - name: Verify suites and example
         working-directory: owa
         run: |
-          export ODIN="$GITHUB_WORKSPACE/compiler/odin" OWA_LOCKED_SHARED="$RUNNER_TEMP/shared"
+          export ODIN="$GITHUB_WORKSPACE/compiler/odin" OWA_LOCKED_REPOS="$GITHUB_WORKSPACE/deps"
           if ! task check:locked > "$RUNNER_TEMP/owa-tests.log" 2>&1; then
             sed -n '/^Testing tests\/[a-z_/]*$/p' "$RUNNER_TEMP/owa-tests.log"
             echo "Verification failed. Reproduce locally with task check:locked for full diagnostics."

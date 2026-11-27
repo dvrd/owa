@@ -1,5 +1,6 @@
 package whatsapp_test
 
+import wire_frames "../fixtures/message_transport"
 import "core:bytes"
 import "core:encoding/hex"
 import "core:sync"
@@ -171,18 +172,18 @@ media_retry_test_http :: proc(
 	return {status = 410}, {}
 }
 
-media_retry_test_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Stream_Error) {
+media_retry_test_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Async_Error) {
 	state := cast(^Media_Retry_Test_State)context.user_ptr
 	state.writes += 1
 
 	return len(src), {}
 }
 
-media_retry_test_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Stream_Error) {
+media_retry_test_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Async_Error) {
 	return 0, {kind = .EOF}
 }
 
-media_retry_test_close :: proc(data: rawptr) -> surf.WebSocket_Stream_Error {
+media_retry_test_close :: proc(data: rawptr, _: u16) -> surf.WebSocket_Async_Error {
 	return {}
 }
 
@@ -193,9 +194,8 @@ media_retry_test_socket :: proc(t: ^testing.T, socket: ^wa.Socket, auth: ^wa.Aut
 	socket.config.http_execute = media_retry_test_http
 	socket.websocket = {
 		phase = .Open,
-		allocator = context.allocator,
-		config = {host = "synthetic.invalid", max_message_size = 4096},
-		stream = {read = media_retry_test_read, write = media_retry_test_write, close = media_retry_test_close},
+		max_message_size = 4096,
+		read = wire_frames.reader(media_retry_test_read), write = wire_frames.writer(media_retry_test_write), close = media_retry_test_close,
 	}
 
 	socket.client = {
@@ -308,7 +308,7 @@ media_retry_preserves_caller_routing_metadata :: proc(t: ^testing.T) {
 	testing.expect_value(t, media.direct_path, original.direct_path)
 	testing.expect_value(t, raw_data(media.media_key), raw_data(original.media_key))
 	testing.expect_value(t, socket.query_depth, 0)
-	testing.expect_value(t, socket.read_deadline_scopes, 0)
+	testing.expect(t, socket.websocket.read_deadline == {})
 	testing.expect_value(t, len(socket.pending_media_retry), 0)
 	message.group = ""
 	message.participant = "321:4@s.whatsapp.net"

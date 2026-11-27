@@ -1,8 +1,9 @@
 package main
 
+import wire_frames "../../fixtures/message_transport"
 import wa "shared:whatsapp"
 import "shared:surf"
-import ws "shared:websocket"
+import ws "shared:async/websocket"
 import "core:bytes"
 import "core:crypto/hash"
 import "core:fmt"
@@ -28,7 +29,7 @@ Socket_Recovery :: struct {
 	input_size, input_at, output_size: int,
 	replay:                            bool,
 	tcp:                               net.TCP_Connection,
-	native_stream:                     surf.WebSocket_Stream,
+	native_stream:                     net.Connection,
 	tcp_enabled:                       bool,
 }
 
@@ -50,13 +51,17 @@ socket_recovery_close :: proc(peer: ^Socket_Recovery) {
 	free(peer)
 }
 
-socket_recovery_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Stream_Error) {
+socket_recovery_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Async_Error) {
 	peer := cast(^Socket_Recovery)data
 
 	if peer.tcp_enabled {
 		count, error := peer.native_stream.read(peer.native_stream.data, dst)
 		peer.input_at += count
-		return count, error
+		if error != nil {
+			return count, {kind = .IO_Failed}
+		}
+
+		return count, {}
 	}
 
 	count := min(len(dst), peer.input_size - peer.input_at, 3)
@@ -71,7 +76,7 @@ socket_recovery_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_St
 	return count, {}
 }
 
-socket_recovery_stream_close :: proc(_: rawptr) -> surf.WebSocket_Stream_Error {
+socket_recovery_stream_close :: proc(_: rawptr, _: u16) -> surf.WebSocket_Async_Error {
 	return {}
 }
 
@@ -125,7 +130,7 @@ socket_state_witness :: proc(peer: ^Socket_Recovery) -> [160]u8 {
 	return result
 }
 
-socket_recovery_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Stream_Error) {
+socket_recovery_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Async_Error) {
 	peer := cast(^Socket_Recovery)data
 
 	if !peer.replay && peer.output_size == 0 && peer.stage == "socket-after-commit-before-write" {
@@ -137,8 +142,8 @@ socket_recovery_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_S
 	if peer.tcp_enabled {
 		written, error := peer.native_stream.write(peer.native_stream.data, src)
 
-		if error.kind != .None {
-			return written, error
+		if error != nil {
+			return written, {kind = .IO_Failed}
 		}
 
 		count = written
@@ -201,14 +206,11 @@ socket_recovery_attach :: proc(f: ^Fixture, directory, stage: string, replay := 
 
 	peer.socket.websocket = {
 		phase = .Open,
-		allocator = context.allocator,
-		config = {host = "synthetic.invalid", max_message_size = 8192},
-		stream = {
-			data = peer,
-			read = socket_recovery_read,
-			write = socket_recovery_write,
-			close = socket_recovery_stream_close,
-		},
+		max_message_size = 8192,
+		data = peer,
+		read = wire_frames.reader(socket_recovery_read),
+		write = wire_frames.writer(socket_recovery_write),
+		close = socket_recovery_stream_close,
 	}
 
 	if socket_tcp_port != 0 {

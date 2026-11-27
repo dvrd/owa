@@ -67,6 +67,7 @@ publish :: proc() -> os.Error {
 			"-o:speed",
 			"-source-code-locations:filename",
 			"-vet",
+			OWA_VET_PACKAGES,
 			"-warnings-as-errors",
 			fmt.aprintf("-out:%s", obj),
 		},

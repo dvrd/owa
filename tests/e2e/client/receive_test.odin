@@ -1,12 +1,13 @@
 package whatsapp_test
 
+import wire_frames "../../fixtures/message_transport"
 import test_fixtures "../../fixtures/client"
 import "core:bytes"
 import "core:fmt"
 import "core:testing"
 import "core:time"
 import "shared:surf"
-import ws "shared:websocket"
+import ws "shared:async/websocket"
 import wa "shared:whatsapp"
 
 // These are ACKs of received stanzas, not read/view receipts, call acceptance or
@@ -36,12 +37,10 @@ ack_routing_input :: proc(f: ^test_fixtures.Negative_Ack_Fixture, stream: ^Statu
 	assert(websocket_error == .None)
 	stream.input.size = size
 	test_fixtures.send_id_wire_connect(&f.socket, &stream.output)
-	f.socket.websocket.stream = {
-		data  = stream,
-		read  = status_ack_read,
-		write = status_ack_write,
-		close = negative_ack_stream_close,
-	}
+	f.socket.websocket.data  = stream
+	f.socket.websocket.read  = wire_frames.reader(status_ack_read)
+	f.socket.websocket.write = wire_frames.writer(status_ack_write)
+	f.socket.websocket.close = negative_ack_stream_close
 
 	f.socket.session = {
 		phase  = .Login_Accepted,
@@ -210,18 +209,18 @@ Ack_Retry_Tick_Probe :: struct {
 	reads, writes: int,
 }
 
-ack_retry_tick_read :: proc(data: rawptr, _: []u8) -> (int, surf.WebSocket_Stream_Error) {
+ack_retry_tick_read :: proc(data: rawptr, _: []u8) -> (int, surf.WebSocket_Async_Error) {
 	probe := cast(^Ack_Retry_Tick_Probe)data
 	probe.reads += 1
 
 	return 0, {kind = .EOF}
 }
 
-ack_retry_tick_write :: proc(data: rawptr, _: []u8) -> (int, surf.WebSocket_Stream_Error) {
+ack_retry_tick_write :: proc(data: rawptr, _: []u8) -> (int, surf.WebSocket_Async_Error) {
 	probe := cast(^Ack_Retry_Tick_Probe)data
 	probe.writes += 1
 
-	return 0, {kind = .No_Progress}
+	return 0, {kind = .IO_Failed}
 }
 
 @(test)
@@ -267,9 +266,9 @@ mandatory_provisioning_retry_is_owned_until_online_and_outside_query :: proc(t: 
 		f.socket.session.next_ping = time.time_add(now, time.Hour)
 		f.socket.last_prune = now
 		probe: Ack_Retry_Tick_Probe
-		f.socket.websocket.stream.data = &probe
-		f.socket.websocket.stream.read = ack_retry_tick_read
-		f.socket.websocket.stream.write = ack_retry_tick_write
+		f.socket.websocket.data = &probe
+		f.socket.websocket.read = wire_frames.reader(ack_retry_tick_read)
+		f.socket.websocket.write = wire_frames.writer(ack_retry_tick_write)
 
 		for stage in 0 ..< 3 {
 			ack_routing_stage(&f.socket, stage)
@@ -347,7 +346,7 @@ Message_Ack_Durable_Writer :: struct {
 	fail_ack:     bool,
 }
 
-message_ack_durable_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Stream_Error) {
+message_ack_durable_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Async_Error) {
 	capture := cast(^Message_Ack_Durable_Writer)data
 	restored: wa.State_Store
 	defer wa.state_store_clear(&restored)
@@ -360,7 +359,7 @@ message_ack_durable_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebS
 	capture.observations += 1
 
 	if capture.fail_ack && f.socket.client.noise.write_counter == 2 {
-		return 0, {kind = .No_Progress}
+		return 0, {kind = .IO_Failed}
 	}
 
 	return test_fixtures.send_id_wire_write(&capture.wire, source)
@@ -509,8 +508,8 @@ message_ack_durable_inbox_precedes_wire_and_failed_ack_remains_recoverable :: pr
 		test_fixtures.send_id_wire_connect(&f.socket, &capture.wire)
 		defer wa.socket_close(&f.socket)
 
-		f.socket.websocket.stream.data = &capture
-		f.socket.websocket.stream.write = message_ack_durable_write
+		f.socket.websocket.data = &capture
+		f.socket.websocket.write = wire_frames.writer(message_ack_durable_write)
 		name, key_error := wa.socket_inbox_key(&f.socket, "", "222@s.whatsapp.net", "synthetic-ack-id")
 		assert(key_error.kind == .None)
 		defer delete(name)
@@ -568,7 +567,7 @@ Negative_Ack_Stream :: struct {
 	size, read_at, writes: int,
 }
 
-negative_ack_stream_read :: proc(data: rawptr, destination: []u8) -> (int, surf.WebSocket_Stream_Error) {
+negative_ack_stream_read :: proc(data: rawptr, destination: []u8) -> (int, surf.WebSocket_Async_Error) {
 	stream := cast(^Negative_Ack_Stream)data
 	n := min(len(destination), stream.size - stream.read_at, 3)
 
@@ -582,14 +581,14 @@ negative_ack_stream_read :: proc(data: rawptr, destination: []u8) -> (int, surf.
 	return n, {}
 }
 
-negative_ack_stream_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Stream_Error) {
+negative_ack_stream_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Async_Error) {
 	stream := cast(^Negative_Ack_Stream)data
 	stream.writes += 1
 
 	return len(source), {}
 }
 
-negative_ack_stream_close :: proc(data: rawptr) -> surf.WebSocket_Stream_Error {
+negative_ack_stream_close :: proc(data: rawptr, _: u16) -> surf.WebSocket_Async_Error {
 	return {}
 }
 
@@ -632,14 +631,11 @@ negative_ack_encrypted_stream :: proc(f: ^test_fixtures.Negative_Ack_Fixture, st
 	socket := &f.socket
 	socket.websocket = {
 		phase = .Open,
-		allocator = context.allocator,
-		config = {host = "synthetic.invalid", max_message_size = 4096},
-		stream = {
-			data = stream,
-			read = negative_ack_stream_read,
-			write = negative_ack_stream_write,
-			close = negative_ack_stream_close,
-		},
+		max_message_size = 4096,
+		data = stream,
+		read = wire_frames.reader(negative_ack_stream_read),
+		write = wire_frames.writer(negative_ack_stream_write),
+		close = negative_ack_stream_close,
 	}
 
 	socket.client = {
@@ -689,13 +685,13 @@ Status_Ack_Stream :: struct {
 	output: test_fixtures.Send_Id_Wire,
 }
 
-status_ack_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Stream_Error) {
+status_ack_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Async_Error) {
 	stream := cast(^Status_Ack_Stream)data
 
 	return negative_ack_stream_read(&stream.input, dst)
 }
 
-status_ack_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Stream_Error) {
+status_ack_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Async_Error) {
 	stream := cast(^Status_Ack_Stream)data
 
 	return test_fixtures.send_id_wire_write(&stream.output, src)
@@ -737,12 +733,10 @@ status_ack_encrypted_input :: proc(f: ^test_fixtures.Negative_Ack_Fixture, strea
 	assert(websocket_error == .None)
 	stream.input.size = frame_size
 	test_fixtures.send_id_wire_connect(&f.socket, &stream.output)
-	f.socket.websocket.stream = {
-		data  = stream,
-		read  = status_ack_read,
-		write = status_ack_write,
-		close = negative_ack_stream_close,
-	}
+	f.socket.websocket.data  = stream
+	f.socket.websocket.read  = wire_frames.reader(status_ack_read)
+	f.socket.websocket.write = wire_frames.writer(status_ack_write)
+	f.socket.websocket.close = negative_ack_stream_close
 
 	f.socket.session = {
 		phase  = .Login_Accepted,
