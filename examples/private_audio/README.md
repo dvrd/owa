@@ -10,7 +10,7 @@ Cuando ya conoces el ID exacto de una nota entrante, llama a `socket_fetch_priva
 
 | Solicitud al teléfono | Datos de la petición | Evidencia con un teléfono vinculado |
 | --- | --- | --- |
-| Página inicial | Chat, cantidad y modo inicial sin referencia | En la prueba comunicada expiró a los 60 segundos. La causa del silencio sigue abierta. |
+| Página inicial | Chat, cantidad y modo inicial sin referencia | En la prueba real devolvió `Query_Timeout` a los 60 segundos. En el mismo socket, la consulta anterior a la nota devolvió 50 mensajes. Sigue sin conocerse la causa del silencio del teléfono. |
 | Página anterior | Chat, cantidad, clave y hora de la referencia | Respondió con 50 mensajes. Incluyó la pregunta y la primera nota. La segunda era la referencia y quedó fuera. |
 | Mensaje por ID | Clave de la nota, sin hora ni cursor | Dos consultas aisladas (PN y LID) agotaron 60 segundos. En otra conexión, inmediatamente después de recibir una página anterior a la nota, la consulta por ID con PN recibió acuse, recibo y una respuesta cifrada. Owa descifró el control tipo 17, correlacionó la operación 4 y descargó el audio. Los bytes coincidieron con la copia independiente. |
 

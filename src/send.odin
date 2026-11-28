@@ -1574,9 +1574,12 @@ socket_send_primary_device_message :: proc(
 		{"privacy_sensitive", "1"},
 	}
 
-	attr_count := 4 if placeholder_resend else 5
-	if history {
+	attr_count := 5
+	if history || placeholder_resend {
 		attrs[4].value = "high_force"
+	}
+
+	if history {
 		attr_count = 6
 	}
 

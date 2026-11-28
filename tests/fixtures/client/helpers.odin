@@ -8,7 +8,6 @@ import "core:os"
 import "core:sync"
 import "core:testing"
 import "core:time"
-import "shared:async/http"
 import "shared:surf"
 import ws "shared:async/websocket"
 import wa "shared:whatsapp"
@@ -32,7 +31,7 @@ Download_State :: struct {
 }
 
 download_http :: proc(
-	request: http.Request,
+	request: surf.Request,
 	config: surf.Config,
 ) -> (
 	surf.Response,
@@ -58,7 +57,7 @@ Http_Marker :: struct {
 }
 
 http_marker_execute :: proc(
-	request: http.Request,
+	request: surf.Request,
 	config: surf.Config,
 ) -> (
 	surf.Response,
@@ -79,7 +78,7 @@ http_marker_execute :: proc(
 	return {status = 200, body = transmute([]u8)body}, {}
 }
 
-http_marker_request :: proc(marker: ^Http_Marker) -> http.Request {
+http_marker_request :: proc(marker: ^Http_Marker) -> surf.Request {
 	bytes := cast([^]u8)marker
 
 	return {method = .GET, url = "https://synthetic.invalid", body = bytes[:size_of(Http_Marker)]}
@@ -230,7 +229,7 @@ Send_Id_Wire :: struct {
 send_id_http_calls: int
 
 send_id_http :: proc(
-	request: http.Request,
+	request: surf.Request,
 	config: surf.Config,
 ) -> (
 	surf.Response,
@@ -260,7 +259,7 @@ send_id_wire_connect :: proc(socket: ^wa.Socket, wire: ^Send_Id_Wire) {
 	send_id_http_calls = 0
 }
 
-send_id_wire_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Async_Error) {
+send_id_wire_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Error) {
 	wire := cast(^Send_Id_Wire)data
 	assert(len(source) <= len(wire.data) - wire.used)
 	wire.used += copy(wire.data[wire.used:], source)
@@ -268,11 +267,11 @@ send_id_wire_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_A
 	return len(source), {}
 }
 
-send_id_wire_read :: proc(data: rawptr, destination: []u8) -> (int, surf.WebSocket_Async_Error) {
-	return 0, {kind = .EOF}
+send_id_wire_read :: proc(data: rawptr, destination: []u8) -> (int, surf.WebSocket_Error) {
+	return 0, {kind = .Peer_Closed}
 }
 
-send_id_wire_close :: proc(data: rawptr, _: u16) -> surf.WebSocket_Async_Error {
+send_id_wire_close :: proc(data: rawptr, _: u16) -> surf.WebSocket_Error {
 	return {}
 }
 

@@ -9,7 +9,6 @@ import "core:strconv"
 import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
-import "shared:async/http"
 import "shared:surf"
 
 // Registration, pairing and session establishment.
@@ -2563,7 +2562,7 @@ version_fetch_http :: proc(
 	surf.Response,
 	surf.HTTP_Error,
 ) {
-	headers := [2]http.Header {
+	headers := [2]surf.Header {
 		{name = "User-Agent", value = WA_WEB_USER_AGENT},
 		{name = "Sec-Fetch-Site", value = "none"},
 	}

@@ -10,7 +10,7 @@ message_connection_closes_the_owner_once :: proc(t: ^testing.T) {
 	conn := wa.Message_Connection {
 		phase = .Open,
 		data = &state,
-		close = proc(data: rawptr, code: u16) -> surf.WebSocket_Async_Error {
+		close = proc(data: rawptr, code: u16) -> surf.WebSocket_Error {
 			value := cast(^u16)data
 			assert(value^ == 0)
 			value^ = code

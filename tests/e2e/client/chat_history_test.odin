@@ -99,7 +99,7 @@ history_timeout_preserves_the_live_socket :: proc(t: ^testing.T) {
 	page, err := wa.socket_fetch_chat_history(
 		&peer.socket,
 		"222@s.whatsapp.net",
-		timeout = time.Millisecond,
+		timeout = 100 * time.Millisecond,
 	)
 	testing.expect_value(t, err.kind, .Query_Timeout)
 	testing.expect(
@@ -338,7 +338,7 @@ exact_key_recovers_synthetic_last_voice_after_processing :: proc(t: ^testing.T) 
 
 
 		case 2:
-			timeout = time.Millisecond
+			timeout = 100 * time.Millisecond
 			peer.lookup_reply = proc(p: ^Send_Peer, id: string) {send_peer_use_pipe(p)}
 		}
 
@@ -379,4 +379,22 @@ exact_key_recovers_synthetic_last_voice_after_processing :: proc(t: ^testing.T) 
 		n, download := wa.socket_download_media(&peer.socket, message, dst[:])
 		testing.expect(t, download.kind == .None && string(dst[:n]) == "OggS synthetic voice 2")
 	}
+}
+
+@(test)
+history_budget_includes_the_outbound_write :: proc(t: ^testing.T) {
+	peer := send_peer_new()
+	defer send_peer_destroy(peer)
+
+	peer.history_reply = proc(p: ^Send_Peer, id: string) {
+		assert(p.socket.history_deadline != {})
+		assert(p.socket.websocket.write_deadline == p.socket.history_deadline)
+		history_test_primary_reply(p, id)
+		time.sleep(max(time.Duration(0), time.diff(time.now(), p.socket.history_deadline)))
+	}
+
+	page, err := wa.socket_fetch_chat_history(&peer.socket, "222@s.whatsapp.net", timeout = 150 * time.Millisecond)
+	testing.expect_value(t, err.kind, .Query_Timeout)
+	testing.expect(t, page == nil && peer.socket.phase == .Online && peer.socket.history_deadline == {})
+	testing.expect(t, peer.last_size > 0)
 }

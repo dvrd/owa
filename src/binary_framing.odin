@@ -1,6 +1,7 @@
 package whatsapp
 
 import "core:mem"
+import "core:time"
 import "shared:surf"
 
 FRAME_HEADER_SIZE :: 3
@@ -141,7 +142,7 @@ Frame_Transport_Error_Kind :: enum {
 
 Frame_Transport_Error :: struct {
 	kind:       Frame_Transport_Error_Kind,
-	websocket:  surf.WebSocket_Async_Error,
+	websocket:  surf.WebSocket_Error,
 	frame:      Frame_Error,
 	allocation: mem.Allocator_Error,
 }
@@ -271,27 +272,56 @@ frame_transport_receive :: proc(
 	n: int,
 	error: Frame_Transport_Error,
 ) {
-	if err := frame_transport_validate(state); err.kind != .None {
+	_, err := frame_transport_prepare(state, {})
+	if err.kind != .None {
 		return 0, err
 	}
 
+	return frame_transport_deliver(state, dst)
+}
+
+// A caller's wait can end between WebSocket messages. Keep the partially
+// assembled envelope until the next read. Only a transport error ends it.
+@(private)
+frame_transport_prepare :: proc(state: ^Frame_Transport, deadline: time.Time) -> (bool, Frame_Transport_Error) {
+	if err := frame_transport_validate(state); err.kind != .None {
+		return false, err
+	}
+
 	if state.ready {
-		return frame_transport_deliver(state, dst)
+		return true, {frame = .None}
 	}
 
 	empty_messages := 0
 
 	for {
 		if state.ws_at == state.ws_size {
+			conn := state.connection
+			if deadline != {} && conn.poll != nil {
+				remaining := time.diff(time.now(), deadline)
+				if remaining <= 0 {
+					return false, {frame = .None}
+				}
+
+				ready, err := conn.poll(conn.data, remaining, nil)
+				if err.kind != .None {
+					return false, frame_transport_read_fail(state, err)
+				}
+
+				if !ready {
+					return false, {frame = .None}
+				}
+			}
+
 			if err := frame_transport_next_message(state); err.kind != .None {
-				return 0, err
+				return false, err
 			}
 
 			if state.ws_size == 0 {
 				empty_messages += 1
 
 				if empty_messages > MAX_EMPTY_WEBSOCKET_MESSAGES {
-					return 0, frame_transport_fail(state, {kind = .No_Progress, frame = .None})
+					return false, frame_transport_fail(state, {kind = .No_Progress, frame = .None})
 				}
 
 				continue
@@ -301,7 +331,7 @@ frame_transport_receive :: proc(
 		if state.header_used < FRAME_HEADER_SIZE {
 			complete, header_error := frame_transport_header_receive(state)
 			if header_error.kind != .None {
-				return 0, header_error
+				return false, header_error
 			}
 
 			if !complete {
@@ -318,7 +348,7 @@ frame_transport_receive :: proc(
 
 		if state.payload_used == state.payload_size {
 			state.ready = true
-			return frame_transport_deliver(state, dst)
+			return true, {frame = .None}
 		}
 	}
 }
@@ -407,7 +437,7 @@ frame_transport_next_message :: proc(state: ^Frame_Transport) -> Frame_Transport
 
 frame_transport_read_fail :: proc(
 	state: ^Frame_Transport,
-	err: surf.WebSocket_Async_Error,
+	err: surf.WebSocket_Error,
 ) -> Frame_Transport_Error {
 	kind: Frame_Transport_Error_Kind = .WebSocket_Read_Failed
 	frame_err: Frame_Error = .None
@@ -418,7 +448,7 @@ frame_transport_read_fail :: proc(
 		if state.header_used < FRAME_HEADER_SIZE {
 			frame_err = .Header_Incomplete
 		}
-	} else if err.kind == .EOF || err.kind == .Peer_Close || err.kind == .Closed {
+	} else if err.kind == .Peer_Closed || err.kind == .Closed {
 		kind = .Peer_Closed
 	}
 

@@ -15,7 +15,7 @@ import "core:time"
 
 socket_tcp_port: int
 
-socket_tcp_close :: proc(data: rawptr, _: u16) -> surf.WebSocket_Async_Error {
+socket_tcp_close :: proc(data: rawptr, _: u16) -> surf.WebSocket_Error {
 	peer := cast(^Socket_Recovery)data
 
 	if peer.native_stream.close(peer.native_stream.data) != nil {

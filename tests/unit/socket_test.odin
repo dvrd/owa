@@ -1,5 +1,6 @@
 package whatsapp_test
 
+import "shared:surf"
 import "core:sync"
 import "core:testing"
 import "core:time"
@@ -65,4 +66,24 @@ official_version_explicit_payload_is_preserved_by_socket_settings :: proc(t: ^te
 
 	testing.expect_value(t, error.kind, .None)
 	testing.expect_value(t, settings.payload.version, explicit)
+}
+
+@(test)
+socket_rejects_unsupported_tls_options :: proc(t: ^testing.T) {
+	credentials: surf.Client_Credentials
+	cache: surf.TLS_Session_Cache
+	roots: surf.Trust_Roots
+	configs := []wa.Socket_Config{
+		{tls = {client_credentials = &credentials}},
+		{tls = {session_cache = &cache}},
+	}
+
+	for config in configs {
+		_, err := wa.socket_connect_settings(config)
+		testing.expect_value(t, err.kind, .Invalid_Config)
+	}
+
+	settings, err := wa.socket_connect_settings({tls = {roots = &roots}})
+	testing.expect_value(t, err.kind, .None)
+	testing.expect(t, settings.tls.roots == &roots)
 }

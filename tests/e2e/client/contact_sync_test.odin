@@ -3,7 +3,6 @@ package whatsapp_test
 import test_fixtures "../../fixtures/client"
 import "core:bytes"
 import "core:testing"
-import "shared:async/http"
 import "shared:surf"
 import wa "shared:whatsapp"
 
@@ -297,7 +296,7 @@ Contact_Download_Test :: struct {
 	store: ^wa.State_Store,
 }
 
-contact_download_during_update :: proc(request: http.Request, config: surf.Config) -> (surf.Response, surf.HTTP_Error) {
+contact_download_during_update :: proc(request: surf.Request, config: surf.Config) -> (surf.Response, surf.HTTP_Error) {
 	state := cast(^Contact_Download_Test)context.user_ptr
 	assert(wa.state_store_set(state.store, .Contact_Profile, "888@lid", transmute([]u8)string("Live name" if state.download.calls > 0 else "Initial")).kind == .None)
 	context.user_ptr = &state.download

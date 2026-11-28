@@ -1177,6 +1177,17 @@ download_contact_media :: proc(socket: ^Socket, message: Media_Message) -> ([]u8
 		timeout = socket.config.query_timeout,
 	}
 
+	if socket.history_deadline != {} {
+		remaining := time.diff(time.now(), socket.history_deadline)
+		if remaining <= 0 {
+			return nil, {kind = .Query_Timeout}
+		}
+
+		if config.timeout == 0 || remaining < config.timeout {
+			config.timeout = remaining
+		}
+	}
+
 	response: surf.Response
 	fetch_error: Media_Error
 	if socket.config.http_execute != nil {
@@ -1201,6 +1212,11 @@ download_contact_media :: proc(socket: ^Socket, message: Media_Message) -> ([]u8
 		}
 
 		response, fetch_error = job.response, job.media_error
+	}
+
+	if socket.history_deadline != {} && time.now()._nsec >= socket.history_deadline._nsec {
+		surf.response_destroy(&response)
+		return nil, {kind = .Query_Timeout}
 	}
 
 	if fetch_error.kind != .None {

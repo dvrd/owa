@@ -96,6 +96,12 @@ worker_wake_preserves_pending_large_websocket_message :: proc(t: ^testing.T) {
 	testing.expect_value(t, read.kind, .None)
 	testing.expect_value(t, opcode, .Binary)
 	testing.expect(t, bytes.equal(dst[:n], expected[:]))
+
+	// The peer is waiting for Close. Teardown must finish this outstanding read
+	// before freeing its buffer and callback state.
+	ready, polled = conn.poll(conn.data, 0, nil)
+	testing.expect_value(t, polled.kind, .None)
+	testing.expect(t, !ready)
 	testing.expect_value(t, wa.message_connection_close(&conn).kind, .None)
 	thread.join(worker)
 	second, reopened := wa.media_http_pool_open({}, pool.transport)

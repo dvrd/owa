@@ -7,10 +7,15 @@ vars:
 
 tasks:
   check:
-    desc: Run all local Odin tests with vet and allocation checks
+    desc: Run all Odin tests against the locked dependencies
     aliases: [default, test]
     cmds:
       - '{{.CI}} check {{.CLI_ARGS}}'
+
+  check:local:
+    desc: Test against explicitly selected or locally installed development dependencies
+    cmds:
+      - '{{.CI}} local {{.CLI_ARGS}}'
 
   check:locked:
     desc: Install frozen dependencies and verify the suites and private audio example

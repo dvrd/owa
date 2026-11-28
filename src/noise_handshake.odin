@@ -44,6 +44,7 @@ Client_Error_Kind :: enum {
 	DH_Failed,
 	Noise_Failed,
 	Certificate_Rejected,
+	// Deprecated. Inspect transport.websocket.kind for Timeout. Reserved for enum compatibility.
 	Deadline_Failed,
 	Payload_Oversized,
 	Destination_Undersized,
@@ -57,8 +58,8 @@ Client_Error :: struct {
 	protobuf:    Protobuf_Error,
 	noise:       Noise_Error,
 	certificate: Certificate_Error,
-	websocket:   surf.WebSocket_Async_Error,
-	stream:      surf.WebSocket_Async_Error,
+	websocket:   surf.WebSocket_Error,
+	stream:      surf.WebSocket_Error,
 	allocation:  mem.Allocator_Error,
 }
 

@@ -51,7 +51,7 @@ socket_recovery_close :: proc(peer: ^Socket_Recovery) {
 	free(peer)
 }
 
-socket_recovery_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Async_Error) {
+socket_recovery_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Error) {
 	peer := cast(^Socket_Recovery)data
 
 	if peer.tcp_enabled {
@@ -67,7 +67,7 @@ socket_recovery_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_As
 	count := min(len(dst), peer.input_size - peer.input_at, 3)
 
 	if count == 0 {
-		return 0, {kind = .EOF}
+		return 0, {kind = .Peer_Closed}
 	}
 
 	copy(dst[:count], peer.input[peer.input_at:][:count])
@@ -76,7 +76,7 @@ socket_recovery_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_As
 	return count, {}
 }
 
-socket_recovery_stream_close :: proc(_: rawptr, _: u16) -> surf.WebSocket_Async_Error {
+socket_recovery_stream_close :: proc(_: rawptr, _: u16) -> surf.WebSocket_Error {
 	return {}
 }
 
@@ -130,7 +130,7 @@ socket_state_witness :: proc(peer: ^Socket_Recovery) -> [160]u8 {
 	return result
 }
 
-socket_recovery_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Async_Error) {
+socket_recovery_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Error) {
 	peer := cast(^Socket_Recovery)data
 
 	if !peer.replay && peer.output_size == 0 && peer.stage == "socket-after-commit-before-write" {

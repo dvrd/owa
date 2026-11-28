@@ -43,6 +43,7 @@ Socket_Error_Kind :: enum {
 	Poll_Failed,
 	Queue_Full,
 	Device_Failed,
+	// Deprecated. Query timeouts use Query_Timeout. Reserved for enum compatibility.
 	Deadline_Failed,
 	// A tracked outgoing message was rejected; explicit caller retry/cancel only.
 	Message_Rejected,
@@ -55,8 +56,8 @@ Socket_Error_Kind :: enum {
 
 Socket_Error :: struct {
 	kind:       Socket_Error_Kind,
-	websocket:  surf.WebSocket_Async_Error,
-	stream:     surf.WebSocket_Async_Error,
+	websocket:  surf.WebSocket_Error,
+	stream:     surf.WebSocket_Error,
 	session:    Session_Error,
 	prekey:     Prekey_Error,
 	state:      State_Error,
@@ -74,6 +75,7 @@ Socket_Config :: struct {
 	sync_contacts:                      bool, // Refresh the address book after login and server updates in socket_tick.
 	host, target, origin:               string,
 	port:                               int,
+	// The released WebSocket transport supports roots only. Other TLS options return Invalid_Config.
 	tls:                                surf.TLS_Config,
 	http_execute:                       Media_HTTP_Execute,
 	// Nil verifies the signed Noise chain, static-key binding and validity times.
@@ -139,6 +141,7 @@ socket_message_destroy :: proc(message: ^Socket_Message) {
 // a fresh Socket with the SAME Auth_State, Prekey_Store and State_Store.
 Socket :: struct {
 	media_pool:                  ^Media_HTTP_Pool,
+	history_deadline:            time.Time,
 	history_request:             ^Pending_Chat_History,
 	message_lookup:              ^Pending_Message_Lookup,
 	contact_refresh_due:         bool,
@@ -242,13 +245,20 @@ socket_client_init :: proc(socket: ^Socket, settings: Socket_Config) -> Client_E
 	)
 }
 
-socket_websocket_dial :: proc(socket: ^Socket, settings: Socket_Config) -> Socket_Error {
-	err := message_connection_open(&socket.websocket, {
+socket_websocket_settings :: proc(settings: Socket_Config) -> Message_Connection_Config {
+	return {
 		host = settings.host, port = settings.port, target = settings.target, origin = settings.origin,
-		secure = true, roots = settings.tls.roots, max_message_size = MAX_BINARY_NODE_PAYLOAD + 32,
+		secure = true, tls = settings.tls, max_message_size = MAX_BINARY_NODE_PAYLOAD + 32,
 		max_queued_bytes = MAX_BINARY_NODE_PAYLOAD + 32,
+		// session_tick sends encrypted WhatsApp keepalives. On this endpoint,
+		// transport pings can surface an empty Pong as binary application data.
+		ping_interval = surf.WEBSOCKET_PING_OFF,
 		frame_timeout = 15 * time.Second, message_timeout = 15 * time.Second,
-	})
+	}
+}
+
+socket_websocket_dial :: proc(socket: ^Socket, settings: Socket_Config) -> Socket_Error {
+	err := message_connection_open(&socket.websocket, socket_websocket_settings(settings))
 
 	if err.kind != .None {
 		return socket_fail(socket, {kind = .Websocket_Failed, websocket = err})
@@ -294,7 +304,8 @@ socket_connect_validate :: proc(
 }
 
 socket_connect_settings :: proc(config: Socket_Config) -> (Socket_Config, Socket_Error) {
-	if !pairing_qr_format_valid(config.qr_write_format_bits) {
+	if config.tls.client_credentials != nil || config.tls.session_cache != nil ||
+	   !pairing_qr_format_valid(config.qr_write_format_bits) {
 		return {}, {kind = .Invalid_Config}
 	}
 
@@ -444,8 +455,18 @@ socket_receive_wire :: proc(socket: ^Socket, deadline: time.Time = {}) -> (Socke
 	}
 
 	previous := socket.websocket.read_deadline
-	socket.websocket.read_deadline = deadline if deadline != {} else time.time_add(time.now(), 15 * time.Second)
+	socket.websocket.read_deadline = socket_limit_deadline(socket, deadline if deadline != {} else time.time_add(time.now(), 15 * time.Second))
 	defer socket.websocket.read_deadline = previous
+
+	if deadline != {} || socket.history_deadline != {} {
+		ready, frame_err := frame_transport_prepare(&socket.client.frames, socket.websocket.read_deadline)
+		if !ready && frame_err.kind == .None {
+			return {}, {kind = .Query_Timeout}
+		}
+
+		// A terminal frame error is retained by the reader. The normal session
+		// read below reports it and performs Noise and socket cleanup.
+	}
 
 	return socket_receive_inner(socket)
 }
@@ -746,6 +767,15 @@ socket_next_iq_id :: proc(socket: ^Socket, dst: []u8) -> string {
 	return fmt.bprintf(dst, "odin-%d-%d", time.to_unix_nanoseconds(time.now()), socket.sequence)
 }
 
+@(private)
+socket_limit_deadline :: proc(socket: ^Socket, deadline: time.Time) -> time.Time {
+	if socket.history_deadline != {} && socket.history_deadline._nsec < deadline._nsec {
+		return socket.history_deadline
+	}
+
+	return deadline
+}
+
 socket_write :: proc(socket: ^Socket, encoded: []u8) -> Socket_Error {
 	timeout := socket.config.query_timeout
 	if timeout == 0 {
@@ -753,8 +783,12 @@ socket_write :: proc(socket: ^Socket, encoded: []u8) -> Socket_Error {
 	}
 
 	previous := socket.websocket.write_deadline
-	socket.websocket.write_deadline = time.time_add(time.now(), timeout)
+	socket.websocket.write_deadline = socket_limit_deadline(socket, time.time_add(time.now(), timeout))
 	defer socket.websocket.write_deadline = previous
+
+	if socket.history_deadline != {} && time.now()._nsec >= socket.history_deadline._nsec {
+		return {kind = .Query_Timeout}
+	}
 
 	if err := client_write(&socket.client, encoded); err.kind != .None {
 		return socket_fail(
@@ -1057,11 +1091,11 @@ socket_query_response_receive :: proc(
 	Binary_Document,
 	Socket_Error,
 ) {
-	deadline := time.time_add(time.now(), socket.config.query_timeout)
+	deadline := socket_limit_deadline(socket, time.time_add(time.now(), socket.config.query_timeout))
 
 	for {
 		event, e := socket_receive_while_waiting(socket, deadline)
-		if e.kind == .Query_Timeout && socket.phase != .Failed {
+		if e.kind == .Query_Timeout && socket.phase != .Failed && deadline != socket.history_deadline {
 			return {}, socket_fail(socket, e)
 		}
 

@@ -138,7 +138,7 @@ run_tests :: proc() -> (output: string, err: os.Error) {
 
 	self := os.get_executable_path(context.allocator) or_return
 	child, start_err := os.process_start(
-		{command = {self, "check"}, stdout = writer, stderr = writer},
+		{command = {self, "local"}, stdout = writer, stderr = writer},
 	)
 	os.close(writer)
 	if start_err != nil {
@@ -212,7 +212,7 @@ report :: proc(output: string) -> os.Error {
 	return nil
 }
 
-check :: proc() -> os.Error {
+check :: proc(args: []string = nil) -> os.Error {
 	compiler := os.get_env("ODIN", context.allocator)
 	if compiler == "" {
 		compiler = "odin"
@@ -269,6 +269,10 @@ check :: proc() -> os.Error {
 	root := os.get_working_directory(context.allocator) or_return
 	os.symlink(fmt.aprintf("%s/src", root), fmt.aprintf("%s/whatsapp", shared)) or_return
 	os.set_env("WEBTOOLS_SHARED", shared) or_return
+	if len(args) > 0 {
+		return test_command("check", args)
+	}
+
 	output := run_tests() or_return
 	run(
 		{
@@ -292,9 +296,11 @@ dispatch :: proc(args: []string) -> os.Error {
 	}
 
 	switch args[0] {
-	case "locked":
-		return check()
-	case "check", "test", "protocol":
+	case "locked", "check":
+		return check(args[1:])
+	case "local":
+		return test_command("check", args[1:])
+	case "test", "protocol":
 		return test_command(args[0], args[1:])
 	case "exec-suite":
 		return exec_suite(args[1:])

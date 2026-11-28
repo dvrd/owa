@@ -7,7 +7,6 @@ import "core:os"
 import "core:slice"
 import "core:sys/posix"
 import "core:time"
-import "shared:async/http"
 import "shared:surf"
 import ws "shared:async/websocket"
 import wa "shared:whatsapp"
@@ -46,6 +45,7 @@ Send_Peer :: struct {
 	upload_requests, upload_status:                int,
 	pipe:                                          [2]posix.FD,
 	pipe_pending:                                  bool,
+	terminal_read_error:                           surf.WebSocket_Error_Kind,
 }
 
 send_peer_private :: proc(start: int) -> [32]u8 {
@@ -122,7 +122,7 @@ send_peer_server_frame :: proc(dst: []u8, payload: []u8) -> int {
 	return at + len(payload)
 }
 
-send_peer_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Async_Error) {
+send_peer_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Error) {
 	peer := cast(^Send_Peer)data
 
 	if peer.pipe_pending {
@@ -135,7 +135,7 @@ send_peer_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Async_Er
 	n := min(len(dst), len(peer.input) - peer.read_at)
 
 	if n == 0 {
-		return 0, {kind = .EOF}
+		return 0, {kind = .Peer_Closed if peer.terminal_read_error == .None else peer.terminal_read_error}
 	}
 
 	copy(dst, peer.input[peer.read_at:][:n])
@@ -144,7 +144,7 @@ send_peer_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Async_Er
 	return n, {}
 }
 
-send_peer_close :: proc(data: rawptr, _: u16) -> surf.WebSocket_Async_Error {
+send_peer_close :: proc(data: rawptr, _: u16) -> surf.WebSocket_Error {
 	return {}
 }
 
@@ -377,7 +377,13 @@ send_peer_message :: proc(peer: ^Send_Peer, node: wa.Binary_Node, raw: []u8) {
 		enc, e := wa.device_unique_child(node, "enc")
 		cipher, ok := enc.content.([]u8)
 		peer.durable = found && bytes.equal(stored, raw)
-		if !ok || e.kind != .None || !peer.durable || to != "111@s.whatsapp.net" || priority != ("" if peer.lookup_reply != nil else ("high_force" if peer.history_reply != nil else "high")) { peer.failed = true; return }
+		expected_priority := "high_force" if peer.lookup_reply != nil || peer.history_reply != nil else "high"
+		_, sensitive := wa.node_attr(node, "privacy_sensitive")
+		if !ok || e.kind != .None || !peer.durable || to != "111@s.whatsapp.net" ||
+		   priority != expected_priority || sensitive != (peer.history_reply != nil) {
+			peer.failed = true
+			return
+		}
 
 		plaintext: [512]u8
 		n, _, err := wa.signal_session_decrypt_prekey(&peer.pairwise[0], plaintext[:], cipher, peer.local[0], peer.store.identity)
@@ -486,7 +492,7 @@ send_peer_message :: proc(peer: ^Send_Peer, node: wa.Binary_Node, raw: []u8) {
 	}
 }
 
-send_peer_write :: proc(data: rawptr, wire: []u8) -> (int, surf.WebSocket_Async_Error) {
+send_peer_write :: proc(data: rawptr, wire: []u8) -> (int, surf.WebSocket_Error) {
 	peer := cast(^Send_Peer)data
 	header, at, frame_error := ws.frame_header_decode(wire, true)
 
@@ -556,7 +562,7 @@ send_peer_write :: proc(data: rawptr, wire: []u8) -> (int, surf.WebSocket_Async_
 // Stands in for the CDN: records the uploaded ciphertext and returns the
 // upload descriptor. context.user_ptr carries the peer.
 send_peer_http :: proc(
-	request: http.Request,
+	request: surf.Request,
 	config: surf.Config,
 ) -> (
 	surf.Response,
@@ -693,7 +699,7 @@ send_peer_announce :: proc(peer: ^Send_Peer) {
 	posix.write(peer.pipe[1], raw_data(byte[:]), 1)
 }
 
-send_peer_pipe_poll :: proc(data: rawptr, timeout: time.Duration, wakeup: ^os.File) -> (bool, surf.WebSocket_Async_Error) {
+send_peer_pipe_poll :: proc(data: rawptr, timeout: time.Duration, wakeup: ^os.File) -> (bool, surf.WebSocket_Error) {
 	peer := cast(^Send_Peer)data
 	return wa.message_poll_fd(peer.pipe[0], timeout, wakeup)
 }

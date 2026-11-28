@@ -4,16 +4,16 @@
     {
       "name": "async",
       "source": "https://github.com/dvrd/async.git",
-      "tag": "v0.4.0",
-      "commit": "5052c582ac9d03f2e92fd96a50868f15a24cc447",
-      "hash": "58932e02587d7592ad453163b3966df726fec074f78f05b1a496afb852ddac70"
+      "tag": "v0.5.0",
+      "commit": "8580fd745c2b2dcb25deee13e1077e0c19a9fcf8",
+      "hash": "50c6e40d3c3f0aec85fd91a3f5be003162b24e9a990ca014a5827cd907eaf951"
     },
     {
       "name": "surf",
       "source": "https://github.com/dvrd/surf.git",
-      "tag": "v0.3.0",
-      "commit": "4570cf9477e52f97fd6ae93e914ce9d7c24c77b7",
-      "hash": "fd0057099d1b62c2ad3a3288a679631ca07bec4af8038309a9bb72769e85e978"
+      "tag": "v0.4.1",
+      "commit": "a4ce8b9272543f51858bcb10a10df322709118dc",
+      "hash": "fa0b168f62c5fbdb029c5ae54f605e931673406a2814f95bf0ae992f15a65e82"
     }
   ]
 }

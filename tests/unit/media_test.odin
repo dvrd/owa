@@ -7,7 +7,6 @@ import "core:sync"
 import "core:testing"
 import "core:time"
 import test_fixtures "../fixtures/client"
-import "shared:async/http"
 import "shared:surf"
 import wa "shared:whatsapp"
 
@@ -20,7 +19,7 @@ Media_Deadline_Test :: struct {
 }
 
 media_deadline_test_execute :: proc(
-	request: http.Request,
+	request: surf.Request,
 	config: surf.Config,
 ) -> (
 	surf.Response,
@@ -159,7 +158,7 @@ Media_Retry_Test_State :: struct {
 }
 
 media_retry_test_http :: proc(
-	request: http.Request,
+	request: surf.Request,
 	config: surf.Config,
 ) -> (
 	surf.Response,
@@ -172,18 +171,18 @@ media_retry_test_http :: proc(
 	return {status = 410}, {}
 }
 
-media_retry_test_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Async_Error) {
+media_retry_test_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Error) {
 	state := cast(^Media_Retry_Test_State)context.user_ptr
 	state.writes += 1
 
 	return len(src), {}
 }
 
-media_retry_test_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Async_Error) {
-	return 0, {kind = .EOF}
+media_retry_test_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Error) {
+	return 0, {kind = .Peer_Closed}
 }
 
-media_retry_test_close :: proc(data: rawptr, _: u16) -> surf.WebSocket_Async_Error {
+media_retry_test_close :: proc(data: rawptr, _: u16) -> surf.WebSocket_Error {
 	return {}
 }
 

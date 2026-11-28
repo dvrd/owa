@@ -381,6 +381,7 @@ decode_chat_history_chunk :: proc(
 }
 
 // Without an explicit cursor, use the newest local reference or request initial reverse history.
+// The timeout covers the request write, waiting for the phone and fetching external chunks.
 // Returns one page of private messages. Destroy each with socket_message_destroy
 // and delete the array. History never enters the live inbox or triggers a reply.
 socket_fetch_chat_history :: proc(
@@ -470,6 +471,10 @@ socket_fetch_history_page :: proc(
 		return nil, {kind = .Invalid_Config}
 	}
 
+	deadline := time.time_add(time.now(), timeout)
+	socket.history_deadline = deadline
+	defer socket.history_deadline = {}
+
 	buf: [512]u8
 	cursor := before
 	if use_local_cursor && cursor == (Chat_History_Cursor{}) {
@@ -523,7 +528,6 @@ socket_fetch_history_page :: proc(
 		return nil, err
 	}
 
-	deadline := time.time_add(time.now(), timeout)
 	self := string(socket.auth.account.jid[:socket.auth.account.jid_size])
 	messages: [dynamic]^Socket_Message
 	success := false
@@ -581,6 +585,10 @@ socket_fetch_history_page :: proc(
 		}
 	}
 
+	if time.now()._nsec >= deadline._nsec {
+		return nil, {kind = .Query_Timeout}
+	}
+
 	success = true
 	return messages, {}
 }
@@ -593,7 +601,7 @@ Pending_Message_Lookup :: struct {
 
 // Ask our own primary for an incoming private message by its original key.
 // A correlated response without that message returns nil and success.
-// The caller owns the message. A timeout does not establish availability.
+// The caller owns the message. The timeout covers sending and waiting for the response.
 socket_fetch_private_message_by_id :: proc(
 	socket: ^Socket,
 	chat, id: string,
@@ -615,6 +623,10 @@ socket_fetch_private_message_by_id :: proc(
 	if !device_user_jid_valid(chat, false) || !socket_inbox_id_valid(id) || timeout <= 0 {
 		return nil, {kind = .Invalid_Config}
 	}
+
+	deadline := time.time_add(time.now(), timeout)
+	socket.history_deadline = deadline
+	defer socket.history_deadline = {}
 
 	// Inputs can borrow store records invalidated by the outbound Signal commit.
 	chat_copy, ce := strings.clone(chat)
@@ -690,11 +702,14 @@ socket_fetch_private_message_by_id :: proc(
 		return nil, err
 	}
 
-	deadline := time.time_add(time.now(), timeout)
 	for !request.done {
 		if _, err := socket_receive_while_waiting(socket, deadline); err.kind != .None {
 			return nil, err
 		}
+	}
+
+	if time.now()._nsec >= deadline._nsec {
+		return nil, {kind = .Query_Timeout}
 	}
 
 	message := request.message

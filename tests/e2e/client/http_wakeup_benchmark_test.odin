@@ -4,7 +4,6 @@ import "core:fmt"
 import "core:slice"
 import "core:testing"
 import "core:time"
-import "shared:async/http"
 import "shared:surf"
 import wa "shared:whatsapp"
 
@@ -14,7 +13,7 @@ Wakeup_Sample :: struct {
 	finished: time.Tick,
 }
 
-wakeup_execute :: proc(request: http.Request, _: surf.Config) -> (surf.Response, surf.HTTP_Error) {
+wakeup_execute :: proc(request: surf.Request, _: surf.Config) -> (surf.Response, surf.HTTP_Error) {
 	sample := cast(^Wakeup_Sample)raw_data(request.body)
 	time.sleep(sample.delay)
 	sample.finished = time.tick_now()
@@ -38,7 +37,7 @@ measure_quiet_socket_http_wakeup :: proc(t: ^testing.T) {
 			delay = time.Duration(delays[index]) * time.Millisecond,
 		}
 
-		request := http.Request {
+		request := surf.Request {
 			method = .GET,
 			url    = "https://synthetic.invalid",
 			body   = (cast([^]u8)&sample)[:size_of(sample)],

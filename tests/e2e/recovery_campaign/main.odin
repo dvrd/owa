@@ -157,11 +157,11 @@ child_write_stage :: proc(directory, stage: string) {
 	fmt.println("CONTROL_READY")
 }
 
-wire_read :: proc(_: rawptr, _: []u8) -> (int, surf.WebSocket_Async_Error) {
-	return 0, {kind = .EOF}
+wire_read :: proc(_: rawptr, _: []u8) -> (int, surf.WebSocket_Error) {
+	return 0, {kind = .Peer_Closed}
 }
 
-wire_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Async_Error) {
+wire_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Error) {
 	wire := cast(^Wire)data
 	assert(len(source) <= len(wire.data) - wire.used)
 	wire.used += copy(wire.data[wire.used:], source)
@@ -169,7 +169,7 @@ wire_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Async_Err
 	return len(source), {}
 }
 
-wire_close :: proc(_: rawptr, _: u16) -> surf.WebSocket_Async_Error {
+wire_close :: proc(_: rawptr, _: u16) -> surf.WebSocket_Error {
 	return {}
 }
 

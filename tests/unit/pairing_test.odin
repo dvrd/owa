@@ -7,7 +7,6 @@ import "core:strings"
 import "core:testing"
 import "core:time"
 import test_fixtures "../fixtures/client"
-import "shared:async/http"
 import "shared:surf"
 import wa "shared:whatsapp"
 
@@ -938,7 +937,7 @@ Version_Test_Fetch :: struct {
 	calls:         int,
 	body:          string,
 	status:        int,
-	failure:       http.Error_Kind,
+	failure:       surf.HTTP_Error_Kind,
 	url:           string,
 	max_body_size: int,
 }
@@ -985,7 +984,7 @@ whatsapp_version_discovery_uses_official_worker_or_pinned_default :: proc(t: ^te
 	for sample in ([?]struct {
 			body:     string,
 			status:   int,
-			failure:  http.Error_Kind,
+			failure:  surf.HTTP_Error_Kind,
 			expected: wa.Version_Error_Kind,
 		} {
 			{`{"client_revision":1}`, 503, .None, .HTTP_Status},

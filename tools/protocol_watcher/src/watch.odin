@@ -6,7 +6,6 @@ import j "core:encoding/json"
 import "core:strings"
 import p "core:sys/posix"
 import "core:time"
-import "shared:async/http"
 import "shared:surf"
 
 when ODIN_OS == .Darwin {
@@ -46,10 +45,10 @@ transport :: proc(
 	}
 
 	response, error := surf.execute(
-		http.Request {
+		surf.Request {
 			method = .GET,
 			url = url,
-			headers = []http.Header{{"User-Agent", "webtools-whatsapp-protocol-watch"}},
+			headers = []surf.Header{{"User-Agent", "webtools-whatsapp-protocol-watch"}},
 		},
 		config,
 	)
@@ -97,10 +96,10 @@ linear_transport :: proc(data: rawptr, query: string, variables: Value) -> (valu
 	}
 
 	response, error := surf.execute(
-		http.Request {
+		surf.Request {
 			method = .POST,
 			url = endpoint,
-			headers = []http.Header{{"Authorization", key}, {"Content-Type", "application/json"}},
+			headers = []surf.Header{{"Authorization", key}, {"Content-Type", "application/json"}},
 			body = transmute([]u8)encode(object({"query", text(query)}, {"variables", variables})),
 		},
 		surf.Config {

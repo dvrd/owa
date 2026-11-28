@@ -1,7 +1,9 @@
 package whatsapp
 
 import "base:runtime"
+import "core:fmt"
 import "core:os"
+import "core:strings"
 import "core:sync"
 import "core:sys/posix"
 import "core:time"
@@ -26,23 +28,23 @@ Message_Connection :: struct {
 		dst: []u8,
 		deadline: time.Time,
 	) -> (
-		async.WS_Message_Kind,
+		surf.WebSocket_Message_Kind,
 		int,
-		surf.WebSocket_Async_Error,
+		surf.WebSocket_Error,
 	),
 	write:                         proc(
 		data: rawptr,
 		payload: []u8,
 		deadline: time.Time,
-	) -> surf.WebSocket_Async_Error,
-	close:                         proc(data: rawptr, code: u16) -> surf.WebSocket_Async_Error,
+	) -> surf.WebSocket_Error,
+	close:                         proc(data: rawptr, code: u16) -> surf.WebSocket_Error,
 	poll:                          proc(
 		data: rawptr,
 		timeout: time.Duration,
 		wakeup: ^os.File,
 	) -> (
 		bool,
-		surf.WebSocket_Async_Error,
+		surf.WebSocket_Error,
 	),
 }
 
@@ -57,7 +59,7 @@ transport_runtime_acquire :: proc(
 	existing: ^Transport_Runtime = nil,
 ) -> (
 	^Transport_Runtime,
-	surf.WebSocket_Async_Error,
+	surf.WebSocket_Error,
 ) {
 	if existing != nil {
 		existing.owners += 1
@@ -96,24 +98,34 @@ transport_runtime_release :: proc(owner: ^Transport_Runtime) {
 
 Surf_Connection :: struct {
 	transport:      ^Transport_Runtime,
-	finished:       sync.Sema,
-	session:        surf.WebSocket_Async,
+	client:         surf.Client,
+	handle:         surf.WebSocket_Handle,
 	input:          []u8,
 	reader, writer: ^os.File,
-	read, write:    surf.WebSocket_Async_Op,
+	read, write:    surf.WebSocket_Op,
 	write_done:     sync.Sema,
 	reading:        bool,
 	read_done:      sync.Sema,
 }
 
+Message_Connection_Config :: struct {
+	host, target:  string,
+	port:          int,
+	secure:        bool,
+	tls:           surf.TLS_Config,
+	using options: surf.WebSocket_Options,
+}
+
 message_connection_open :: proc(
 	conn: ^Message_Connection,
-	config: surf.WebSocket_Async_Config,
-) -> surf.WebSocket_Async_Error {
+	config: Message_Connection_Config,
+) -> surf.WebSocket_Error {
 	if conn == nil ||
 	   conn.phase != .Uninitialized ||
 	   config.max_message_size <= 0 ||
-	   config.max_message_size > async.WS_MAX_MESSAGE_BYTES {
+	   config.max_message_size > async.WS_MAX_MESSAGE_BYTES ||
+	   config.host == "" || strings.contains_any(config.host, "/?#@") ||
+	   config.port < 0 || config.port > 65535 || (config.target != "" && config.target[0] != '/') {
 		return {kind = .Invalid_Config}
 	}
 
@@ -154,10 +166,17 @@ message_connection_open :: proc(
 	}
 
 	state.transport = transport
-	state.session.user = state
-	// All asynchronous allocations must outlive the thread and context that dialed.
-	context.allocator = allocator
-	settings := config
+	secure := config.secure || config.tls.roots != nil
+	scheme := "wss" if secure else "ws"
+	port := config.port
+	if port == 0 {
+		port = 443 if secure else 80
+	}
+
+	url := fmt.aprintf("%s://%s:%d%s", scheme, config.host, port, config.target)
+	defer delete(url)
+
+	settings := config.options
 	if settings.max_frame_payload == 0 {
 		settings.max_frame_payload = settings.max_message_size
 	}
@@ -166,27 +185,29 @@ message_connection_open :: proc(
 		settings.max_queued_bytes = settings.max_message_size
 	}
 
-	if e := surf.websocket_async_bind(
-		&state.session,
-		&transport.runtime,
-		settings,
-		surf_message_finished,
-	); e.kind != .None {
-		return e
+	client_config := surf.Client_Config {
+		http       = {allow_http = !secure, tls = config.tls},
+		capacities = {
+			requests = 1, origins = 1, connections_per_origin = 1,
+			response_chunks = 1, upload_chunks = 1, websockets = 1,
+		},
+	}
+
+	e := surf.client_init(&state.client, &transport.runtime, client_config, allocator)
+	if e.kind != .None {
+		return message_submit_error(e)
+	}
+
+	defer if conn.phase != .Open {
+		message_client_destroy(&state.client)
 	}
 
 	done: sync.Sema
-	op := surf.WebSocket_Async_Op {
-		callback  = message_op_complete,
-		user_data = &done,
-	}
+	op := surf.WebSocket_Op{callback = message_op_complete, user_data = &done}
 
-	if e := surf.websocket_async_upgrade(&state.session, &op); e.kind != .None {
-		return e
-	}
-
-	if async.spawn(&transport.runtime, &state.session.task).kind != .None {
-		return {kind = .IO_Failed}
+	state.handle, e = surf.client_websocket_open(&state.client, url, settings, &op)
+	if e.kind != .None {
+		return message_submit_error(e)
 	}
 
 	sync.sema_wait(&done)
@@ -208,14 +229,14 @@ message_connection_open :: proc(
 	return {}
 }
 
-message_op_complete :: proc(op: ^surf.WebSocket_Async_Op) {
+message_op_complete :: proc(op: ^surf.WebSocket_Op) {
 	sync.sema_post(cast(^sync.Sema)op.user_data)
 }
 
 message_connection_close :: proc(
 	conn: ^Message_Connection,
 	code: u16 = 1000,
-) -> surf.WebSocket_Async_Error {
+) -> surf.WebSocket_Error {
 	if conn == nil || conn.phase == .Closed || conn.phase == .Uninitialized {
 		return {}
 	}
@@ -229,30 +250,41 @@ message_connection_close :: proc(
 	return {}
 }
 
-surf_message_finished :: proc(session_ptr: rawptr) {
-	session := cast(^surf.WebSocket_Async)session_ptr
-	state := cast(^Surf_Connection)session.user
-	sync.sema_post(&state.finished)
+message_client_destroy :: proc(client: ^surf.Client) {
+	surf.client_close(client)
+	for !surf.client_quiescent(client) {
+		time.sleep(time.Millisecond)
+	}
+
+	surf.client_destroy(client)
 }
 
-surf_message_close :: proc(data: rawptr, code: u16) -> surf.WebSocket_Async_Error {
+message_submit_error :: proc(error: surf.Client_Error) -> surf.WebSocket_Error {
+	#partial switch error.kind {
+	case .None: return {}
+	case .Invalid_Config: return {kind = .Invalid_Config}
+	case .Allocation_Failed: return {kind = .Allocation_Failed, allocation = error.allocation}
+	case .Closed, .Invalid_Handle: return {kind = .Closed}
+	case: return {kind = .IO_Failed, network = error.network}
+	}
+}
+
+surf_message_close :: proc(data: rawptr, code: u16) -> surf.WebSocket_Error {
 	state := cast(^Surf_Connection)data
 	done: sync.Sema
-	op := surf.WebSocket_Async_Op {
+	op := surf.WebSocket_Op {
 		callback  = message_op_complete,
 		user_data = &done,
 	}
 
-	err := surf.websocket_async_close(&state.session, &op, code)
+	err := message_submit_error(surf.client_websocket_close(&state.client, state.handle, &op, code))
 	if err.kind == .None {
 		sync.sema_wait(&done)
 		err = op.error
-	} else {
-		async.cancel(&state.transport.runtime, &state.session.task)
 	}
 
-	// Surf invokes on_done after all read, write and close callbacks.
-	sync.sema_wait(&state.finished)
+	surf.client_websocket_release(&state.client, state.handle)
+	message_client_destroy(&state.client)
 	transport_runtime_release(state.transport)
 	os.close(state.reader)
 	os.close(state.writer)
@@ -265,7 +297,7 @@ surf_message_write :: proc(
 	data: rawptr,
 	payload: []u8,
 	deadline: time.Time,
-) -> surf.WebSocket_Async_Error {
+) -> surf.WebSocket_Error {
 	state := cast(^Surf_Connection)data
 	done := &state.write_done
 	op := &state.write
@@ -278,7 +310,7 @@ surf_message_write :: proc(
 		return {kind = .Timeout}
 	}
 
-	if err := surf.websocket_async_write(&state.session, op, .Binary, payload); err.kind != .None {
+	if err := message_submit_error(surf.client_websocket_write(&state.client, state.handle, op, .Binary, payload)); err.kind != .None {
 		return err
 	}
 
@@ -286,7 +318,7 @@ surf_message_write :: proc(
 		sync.sema_wait(done)
 	} else if remaining := time.diff(time.now(), deadline);
 	   remaining <= 0 || !sync.sema_wait_with_timeout(done, remaining) {
-		surf.websocket_async_cancel(&state.session, op)
+		surf.client_websocket_cancel(&state.client, state.handle, op)
 		sync.sema_wait(done)
 		return {kind = .Timeout}
 	}
@@ -294,7 +326,7 @@ surf_message_write :: proc(
 	return op.error
 }
 
-surf_message_arrived :: proc(op: ^surf.WebSocket_Async_Op) {
+surf_message_arrived :: proc(op: ^surf.WebSocket_Op) {
 	state := cast(^Surf_Connection)op.user_data
 	sync.sema_post(&state.read_done)
 	// Exactly one byte per pending read. The owner drains it before rearming.
@@ -314,7 +346,7 @@ surf_message_poll :: proc(
 	wakeup: ^os.File,
 ) -> (
 	bool,
-	surf.WebSocket_Async_Error,
+	surf.WebSocket_Error,
 ) {
 	state := cast(^Surf_Connection)data
 	if !state.reading {
@@ -323,7 +355,7 @@ surf_message_poll :: proc(
 			user_data = state,
 		}
 
-		if e := surf.websocket_async_read(&state.session, &state.read, state.input);
+		if e := message_submit_error(surf.client_websocket_read(&state.client, state.handle, &state.read, state.input));
 		   e.kind != .None {
 			return false, e
 		}
@@ -340,7 +372,7 @@ message_poll_fd :: proc(
 	wakeup: ^os.File,
 ) -> (
 	bool,
-	surf.WebSocket_Async_Error,
+	surf.WebSocket_Error,
 ) {
 	fds := [2]posix.pollfd{{fd = fd, events = {.IN}}, {fd = -1, events = {.IN}}}
 
@@ -376,9 +408,9 @@ surf_message_read :: proc(
 	dst: []u8,
 	deadline: time.Time,
 ) -> (
-	async.WS_Message_Kind,
+	surf.WebSocket_Message_Kind,
 	int,
-	surf.WebSocket_Async_Error,
+	surf.WebSocket_Error,
 ) {
 	state := cast(^Surf_Connection)data
 	timeout: time.Duration = -1
@@ -404,13 +436,13 @@ surf_message_read :: proc(
 	state.reading = false
 	op := &state.read
 	if op.error.kind != .None {
-		return op.opcode, 0, op.error
+		return op.message, 0, op.error
 	}
 
 	if op.n > len(dst) {
-		return op.opcode, op.n, {kind = .Destination_Undersized}
+		return op.message, op.n, {kind = .Destination_Undersized}
 	}
 
 	copy(dst, state.input[:op.n])
-	return op.opcode, op.n, {}
+	return op.message, op.n, {}
 }

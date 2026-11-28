@@ -209,14 +209,14 @@ Ack_Retry_Tick_Probe :: struct {
 	reads, writes: int,
 }
 
-ack_retry_tick_read :: proc(data: rawptr, _: []u8) -> (int, surf.WebSocket_Async_Error) {
+ack_retry_tick_read :: proc(data: rawptr, _: []u8) -> (int, surf.WebSocket_Error) {
 	probe := cast(^Ack_Retry_Tick_Probe)data
 	probe.reads += 1
 
-	return 0, {kind = .EOF}
+	return 0, {kind = .Peer_Closed}
 }
 
-ack_retry_tick_write :: proc(data: rawptr, _: []u8) -> (int, surf.WebSocket_Async_Error) {
+ack_retry_tick_write :: proc(data: rawptr, _: []u8) -> (int, surf.WebSocket_Error) {
 	probe := cast(^Ack_Retry_Tick_Probe)data
 	probe.writes += 1
 
@@ -346,7 +346,7 @@ Message_Ack_Durable_Writer :: struct {
 	fail_ack:     bool,
 }
 
-message_ack_durable_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Async_Error) {
+message_ack_durable_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Error) {
 	capture := cast(^Message_Ack_Durable_Writer)data
 	restored: wa.State_Store
 	defer wa.state_store_clear(&restored)
@@ -567,12 +567,12 @@ Negative_Ack_Stream :: struct {
 	size, read_at, writes: int,
 }
 
-negative_ack_stream_read :: proc(data: rawptr, destination: []u8) -> (int, surf.WebSocket_Async_Error) {
+negative_ack_stream_read :: proc(data: rawptr, destination: []u8) -> (int, surf.WebSocket_Error) {
 	stream := cast(^Negative_Ack_Stream)data
 	n := min(len(destination), stream.size - stream.read_at, 3)
 
 	if n == 0 {
-		return 0, {kind = .EOF}
+		return 0, {kind = .Peer_Closed}
 	}
 
 	copy(destination[:n], stream.input[stream.read_at:][:n])
@@ -581,14 +581,14 @@ negative_ack_stream_read :: proc(data: rawptr, destination: []u8) -> (int, surf.
 	return n, {}
 }
 
-negative_ack_stream_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Async_Error) {
+negative_ack_stream_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Error) {
 	stream := cast(^Negative_Ack_Stream)data
 	stream.writes += 1
 
 	return len(source), {}
 }
 
-negative_ack_stream_close :: proc(data: rawptr, _: u16) -> surf.WebSocket_Async_Error {
+negative_ack_stream_close :: proc(data: rawptr, _: u16) -> surf.WebSocket_Error {
 	return {}
 }
 
@@ -685,13 +685,13 @@ Status_Ack_Stream :: struct {
 	output: test_fixtures.Send_Id_Wire,
 }
 
-status_ack_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Async_Error) {
+status_ack_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Error) {
 	stream := cast(^Status_Ack_Stream)data
 
 	return negative_ack_stream_read(&stream.input, dst)
 }
 
-status_ack_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Async_Error) {
+status_ack_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Error) {
 	stream := cast(^Status_Ack_Stream)data
 
 	return test_fixtures.send_id_wire_write(&stream.output, src)

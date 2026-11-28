@@ -1107,7 +1107,7 @@ status_ack_malformed_envelopes_fail_without_output_or_store_changes :: proc(t: ^
 	}
 }
 
-status_ack_failed_write :: proc(_: rawptr, _: []u8) -> (int, surf.WebSocket_Async_Error) {
+status_ack_failed_write :: proc(_: rawptr, _: []u8) -> (int, surf.WebSocket_Error) {
 	return 0, {kind = .IO_Failed}
 }
 
@@ -1303,7 +1303,7 @@ unsupported_encryption_rejects_mixed_children_before_any_ratchet_mutation :: pro
 	}
 }
 
-unsupported_enc_write_fail :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Async_Error) {
+unsupported_enc_write_fail :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Error) {
 	return 0, {kind = .IO_Failed}
 }
 

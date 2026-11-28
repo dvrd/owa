@@ -1,6 +1,8 @@
 package whatsapp_test
 
 import "core:testing"
+import "core:time"
+import "shared:surf"
 import test_fixtures "../fixtures/client"
 import wa "shared:whatsapp"
 
@@ -124,4 +126,29 @@ contact_add_patch_round_trips_through_authenticated_sync :: proc(t: ^testing.T) 
 	_, short := wa.encode_contact_add_patch(dst[:], &store, jid, "Test", key_id, cursor[:])
 	testing.expect_value(t, short.kind, .Invalid_Config)
 	testing.expect_value(t, wa.socket_add_contact(nil, "123@g.us", "Test").kind, .Invalid_Config)
+}
+
+@(test)
+external_history_chunk_uses_remaining_query_budget :: proc(t: ^testing.T) {
+	socket: wa.Socket
+	socket.config.query_timeout = time.Minute
+	socket.config.http_execute = proc(_: surf.Request, config: surf.Config) -> (surf.Response, surf.HTTP_Error) {
+		assert(config.timeout > 0 && config.timeout <= time.Second)
+		return {status = 503}, {}
+	}
+
+	digest: [32]u8
+	source := wa.Media_Message{
+		kind = .History, direct_path = "/fixture", media_key = digest[:],
+		file_sha256 = digest[:], file_enc_sha256 = digest[:], has_file_length = true,
+	}
+
+	socket.history_deadline = time.time_add(time.now(), time.Second)
+	_, e := wa.download_contact_media(&socket, source)
+	testing.expect_value(t, e.kind, .Media_Failed)
+	testing.expect_value(t, e.media.kind, .HTTP_Status)
+
+	socket.history_deadline = time.time_add(time.now(), -time.Second)
+	_, expired := wa.download_contact_media(&socket, source)
+	testing.expect_value(t, expired.kind, .Query_Timeout)
 }

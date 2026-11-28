@@ -95,6 +95,10 @@ send_image_failed_write_keeps_the_durable_outbound_message :: proc(t: ^testing.T
 	defer delete(id)
 
 	testing.expect_value(t, error.kind, wa.Socket_Error_Kind.Session_Failed)
+	testing.expect_value(t, error.session.client.transport.kind, .WebSocket_Write_Failed)
+	testing.expect_value(t, error.session.client.transport.websocket.kind, .IO_Failed)
+	testing.expect_value(t, peer.socket.phase, .Failed)
+	testing.expect_value(t, peer.socket.client.noise.write_key, [32]u8{})
 	testing.expect(t, len(id) > 0)
 	testing.expect(t, peer.durable)
 	stored, found := wa.state_store_get(&peer.store, .Outbound_Message, id)

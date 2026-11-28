@@ -1499,7 +1499,7 @@ MAX_MEDIA_URL_SIZE :: 4096
 // Nil selects the native authenticated HTTP client. An explicit executor is
 // trusted application code and must uphold the supplied TLS/bounds settings.
 Media_HTTP_Execute :: #type proc(
-	request: http.Request,
+	request: surf.Request,
 	config: surf.Config,
 ) -> (
 	surf.Response,
@@ -1507,7 +1507,7 @@ Media_HTTP_Execute :: #type proc(
 )
 
 media_http_native :: proc(
-	request: http.Request,
+	request: surf.Request,
 	config: surf.Config,
 ) -> (
 	surf.Response,
@@ -2062,7 +2062,7 @@ media_upload_exchange :: proc(
 			method = .POST,
 			url = url,
 			body = encrypted,
-			headers = []http.Header {
+			headers = []surf.Header {
 				{"Content-Type", "application/octet-stream"},
 				{"Origin", "https://web.whatsapp.com"},
 			},
@@ -2161,7 +2161,7 @@ fetch_media_ciphertext :: proc(
 		{
 			method = .GET,
 			url = url,
-			headers = []http.Header{{"Origin", "https://web.whatsapp.com"}},
+			headers = []surf.Header{{"Origin", "https://web.whatsapp.com"}},
 		},
 		settings,
 	)
@@ -2675,7 +2675,7 @@ Socket_HTTP_Job :: struct {
 	},
 	done, cancel:           bool,
 	completion:             ^os.File,
-	request:                http.Request,
+	request:                surf.Request,
 	config:                 surf.Config,
 	execute:                Media_HTTP_Execute,
 	response:               surf.Response,
@@ -2700,7 +2700,7 @@ socket_http_current_job: ^Socket_HTTP_Job
 // Caller destroys a successful Response with surf.response_destroy.
 socket_http_execute :: proc(
 	socket: ^Socket,
-	request: http.Request,
+	request: surf.Request,
 	config: surf.Config,
 	execute: Media_HTTP_Execute = nil,
 ) -> (
@@ -2925,7 +2925,7 @@ socket_http_worker :: proc(data: rawptr) {
 }
 
 socket_http_worker_execute :: proc(
-	request: http.Request,
+	request: surf.Request,
 	config: surf.Config,
 ) -> (
 	surf.Response,
@@ -2989,7 +2989,15 @@ socket_http_run :: proc(socket: ^Socket, job: ^Socket_HTTP_Job) -> Socket_Error 
 			return e
 		}
 
-		ready, poll_error := socket_network_poll_with_wakeup(socket, 100 * time.Millisecond, wakeup)
+		wait := 100 * time.Millisecond
+		if socket.history_deadline != {} {
+			wait = min(wait, time.diff(time.now(), socket.history_deadline))
+			if wait <= 0 {
+				return {kind = .Query_Timeout}
+			}
+		}
+
+		ready, poll_error := socket_network_poll_with_wakeup(socket, wait, wakeup)
 		if poll_error.kind != .None {
 			return poll_error
 		}

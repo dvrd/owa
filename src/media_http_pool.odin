@@ -3,7 +3,6 @@ package whatsapp
 import "base:runtime"
 import "core:sync"
 import "core:time"
-import "shared:async"
 import "shared:async/http"
 import "shared:surf"
 
@@ -80,7 +79,7 @@ media_http_pool_error :: proc(error: surf.Client_Error) -> surf.HTTP_Error {
 
 media_http_pool_download :: proc(
 	pool: ^Media_HTTP_Pool,
-	request: http.Request,
+	request: surf.Request,
 	limit: int,
 	timeout: time.Duration,
 	cancel: ^bool,
@@ -89,7 +88,7 @@ media_http_pool_download :: proc(
 		return {}, {kind = .Invalid_Config}
 	}
 
-	deadline := async.deadline_after(&pool.transport.runtime, timeout)
+	deadline := time.tick_add(time.tick_now(), timeout)
 	handle, submit := surf.client_submit_stream(
 		&pool.client, request, {max_decoded_bytes = u64(limit)}, deadline,
 	)
@@ -132,7 +131,7 @@ media_http_pool_download :: proc(
 		}
 
 		if response.status != 0 && !ended {
-			chunk: async.Owned_Chunk
+			chunk: surf.Body_Chunk
 			state, e := surf.client_stream_next(&pool.client, handle, &chunk)
 			if e.kind != .None {
 				failure = media_http_pool_error(e)
@@ -141,7 +140,7 @@ media_http_pool_download :: proc(
 
 			if state == .Chunk {
 				_, ae := append(&response.body_storage, ..chunk.data)
-				async.owned_destroy(&chunk)
+				surf.body_chunk_release(&chunk)
 				if ae != nil {
 					failure = {kind = .Allocation_Failed, allocation = ae}
 

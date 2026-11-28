@@ -5,6 +5,7 @@ import "core:crypto"
 import "core:crypto/x25519"
 import "core:encoding/hex"
 import "core:testing"
+import "core:time"
 import "shared:surf"
 import ws "shared:async/websocket"
 import wa "shared:whatsapp"
@@ -22,20 +23,20 @@ Socket_Cert_Test :: struct {
 	reject:                          bool,
 }
 
-socket_cert_test_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Async_Error) {
+socket_cert_test_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Error) {
 	state := cast(^Socket_Cert_Test)data
 	n := min(len(dst), len(state.input) - state.read_at, 5)
 	copy(dst[:n], state.input[state.read_at:][:n])
 	state.read_at += n
 
 	if n == 0 {
-		return 0, {kind = .EOF}
+		return 0, {kind = .Peer_Closed}
 	}
 
 	return n, {}
 }
 
-socket_cert_test_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Async_Error) {
+socket_cert_test_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Error) {
 	state := cast(^Socket_Cert_Test)data
 	n := min(len(src), len(state.output) - state.written)
 	copy(state.output[state.written:][:n], src[:n])
@@ -44,7 +45,7 @@ socket_cert_test_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_
 	return n, {}
 }
 
-socket_cert_test_close :: proc(data: rawptr, _: u16) -> surf.WebSocket_Async_Error {
+socket_cert_test_close :: proc(data: rawptr, _: u16) -> surf.WebSocket_Error {
 	state := cast(^Socket_Cert_Test)data
 	state.closed += 1
 
@@ -178,4 +179,48 @@ socket_certificate_handshake_uses_custom_verifier_result :: proc(t: ^testing.T) 
 @(test)
 socket_certificate_nil_default_rejects_synthetic_issuer_only_chain :: proc(t: ^testing.T) {
 	socket_cert_test_case(t, nil, .Missing_Leaf)
+}
+
+@(test)
+query_deadline_preserves_partial_noise_envelopes :: proc(t: ^testing.T) {
+	for split in ([2]int{2, 7}) {
+		for disconnect in ([2]bool{false, true}) {
+			peer := send_peer_new()
+			defer send_peer_destroy(peer)
+
+			send_peer_enqueue(peer, {tag = "iq", attrs = {{"type", "result"}, {"id", "synthetic"}}})
+			assert(!peer.failed && peer.input[1] < 126)
+			wire: [128]u8
+			size := copy(wire[:], peer.input[2:])
+			clear(&peer.input)
+			frame: [132]u8
+			n := send_peer_server_frame(frame[:], wire[:split])
+			append(&peer.input, ..frame[:n])
+			send_peer_use_pipe(peer)
+			send_peer_announce(peer)
+
+			_, expired := wa.socket_receive_wire(&peer.socket, time.time_add(time.now(), 50 * time.Millisecond))
+			testing.expect_value(t, expired.kind, .Query_Timeout)
+			testing.expect_value(t, peer.socket.phase, .Online)
+			testing.expect_value(t, peer.socket.client.frames.header_used, min(split, 3))
+			testing.expect_value(t, peer.socket.client.frames.payload_used, max(0, split - 3))
+
+			if !disconnect {
+				n = send_peer_server_frame(frame[:], wire[split:size])
+				append(&peer.input, ..frame[:n])
+			}
+
+			send_peer_announce(peer)
+			event, err := wa.socket_receive_wire(&peer.socket, time.time_add(time.now(), time.Second))
+			if disconnect {
+				testing.expect_value(t, err.kind, .Session_Failed)
+				testing.expect_value(t, err.session.client.transport.kind, .Truncated_Envelope)
+				testing.expect_value(t, peer.socket.phase, .Failed)
+			} else {
+				testing.expect_value(t, err.kind, .None)
+				testing.expect_value(t, event.node.tag, "iq")
+				testing.expect_value(t, peer.socket.phase, .Online)
+			}
+		}
+	}
 }

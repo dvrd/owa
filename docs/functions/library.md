@@ -4,9 +4,9 @@
 
 641 entries across 21 source files. Select a function to open its declaration.
 
-Owa runs Surf’s asynchronous WebSocket session behind its synchronous socket API. Surf resolves the hostname, verifies TLS, upgrades the connection and reassembles WebSocket messages. Owa owns the WhatsApp frame envelope, Noise handshake, certificate pin and transport encryption. One pending read can survive a poll timeout or an HTTP worker wakeup. WhatsApp queries retain their original deadline across unrelated messages.
+Owa runs a WebSocket handle on a Surf client behind its synchronous socket API. Surf resolves the hostname, verifies TLS, upgrades the connection and reassembles WebSocket messages. Owa owns the WhatsApp frame envelope, Noise handshake, certificate pin and transport encryption. One pending read can survive a poll timeout or an HTTP worker wakeup. History queries retain their original deadline across unrelated messages. If that deadline expires between pieces of a WhatsApp envelope, owa returns `Query_Timeout` and resumes the envelope on the next read. A peer disconnect during the same envelope still fails the session. The socket uses WhatsApp’s encrypted keepalive IQs.
 
-Use `Socket_Config.tls.roots` to supply a borrowed `^async.Root_Pool`. The default uses platform trust. Keep explicit roots alive through `socket_close`. Set `pool_media_downloads = true` before connecting to reuse a Surf HTTP client on the socket’s async runtime for online media downloads. Each descriptor sets its own ciphertext limit and owa verifies the ciphertext hash, MAC and plaintext hash. Provisioning downloads and custom executors keep their existing paths.
+Use `Socket_Config.tls.roots` to supply a borrowed `^surf.Trust_Roots`. The default uses platform trust. The socket returns `Invalid_Config` for client credentials or a TLS session cache on this API. Custom HTTP executors receive a `surf.Request`. Keep explicit roots alive through `socket_close`. Set `pool_media_downloads = true` before connecting to reuse a Surf HTTP client on the socket’s async runtime for online media downloads. Each descriptor sets its own ciphertext limit and owa verifies the ciphertext hash, MAC and plaintext hash. Provisioning downloads and custom executors keep their existing paths.
 
 | Source file | Functions |
 |---|---:|

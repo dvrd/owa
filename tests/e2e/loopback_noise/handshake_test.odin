@@ -9,6 +9,7 @@ import "core:net"
 import "core:testing"
 import "core:thread"
 import "core:time"
+import "shared:surf"
 import ws "shared:async/websocket"
 import wa "shared:whatsapp"
 
@@ -42,10 +43,25 @@ fixture_client :: proc(client: ^wa.Client, connection: ^wa.Message_Connection) {
 
 fixture_run :: proc(port: int, mode: string) {
 	connection: wa.Message_Connection
-	assert(wa.message_connection_open(&connection, {
-		host = "127.0.0.1", port = port, target = "/synthetic",
-		max_message_size = 1024, handshake_timeout = time.Second,
-	}).kind == .None)
+	config := wa.socket_websocket_settings({host = "127.0.0.1", port = port, target = "/synthetic"})
+	assert(config.secure && config.ping_interval == surf.WEBSOCKET_PING_OFF)
+	config.secure = false
+	config.max_message_size = 1024
+	config.handshake_timeout = time.Second
+	opened := wa.message_connection_open(&connection, config)
+	if mode == "refused" || mode == "upgrade-eof" {
+		if mode == "refused" {
+			assert(opened.kind == .Refused && opened.status == 403)
+		} else {
+			assert(opened.kind != .None)
+		}
+
+		assert(connection.phase == .Uninitialized && connection.transport == nil)
+		assert(wa.message_connection_close(&connection).kind == .None)
+		return
+	}
+
+	assert(opened.kind == .None)
 	defer wa.message_connection_close(&connection)
 
 	client: wa.Client
@@ -156,6 +172,15 @@ serve_noise_transcript :: proc(server: ^Noise_Server) {
 	headers := peer.read_headers(socket, buffer[:])
 	key := peer.header_value(headers, "Sec-WebSocket-Key")
 	assert(key != "")
+	if server.mode == "upgrade-eof" {
+		return
+	}
+
+	if server.mode == "refused" {
+		peer.send_all(socket, transmute([]u8)string("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n"))
+		return
+	}
+
 	accept := ws.upgrade_accept_encoded(key)
 	response := fmt.tprintf(
 		"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n",
@@ -188,9 +213,13 @@ serve_noise_transcript :: proc(server: ^Noise_Server) {
 
 	expect_client_frame(socket, 2, noise_envelope(FINISH))
 	data = noise_envelope(FROM_SERVER)
-	frame[1] = u8(len(data))
-	copy(frame[2:], transmute([]u8)data)
-	peer.send_all(socket, frame[:2 + len(data)])
+	// Pause the binary message at a partial WA header. A real RFC 6455
+	// Pong stays in Surf, and a server Ping still receives its required Pong.
+	peer.send_all(socket, []u8{0x02, 2, data[0], data[1], 0x8a, 0, 0x89, 1, 'q'})
+	expect_client_frame(socket, 10, "q")
+	frame[0], frame[1] = 0x80, u8(len(data) - 2)
+	copy(frame[2:], transmute([]u8)data[2:])
+	peer.send_all(socket, frame[:len(data)])
 	expect_client_frame(socket, 2, noise_envelope(FROM_CLIENT))
 	peer.send_all(socket, []u8{0x88, 2, 3, 0xe8})
 
@@ -199,7 +228,7 @@ serve_noise_transcript :: proc(server: ^Noise_Server) {
 
 @(test)
 noise_handshake_over_local_websocket :: proc(t: ^testing.T) {
-	for mode in ([]string{"normal", "eof", "timeout", "normal"}) {
+	for mode in ([]string{"refused", "upgrade-eof", "normal", "eof", "timeout", "normal"}) {
 		listener, port := peer.listen()
 		defer net.close(listener)
 
