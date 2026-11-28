@@ -2,7 +2,7 @@
 
 [Catalog index](README.md) · [Name changes](renames.md)
 
-551 entries across 51 source files. Select a function to open its declaration.
+551 entries across 53 source files. Select a function to open its declaration.
 
 | Source file | Functions |
 |---|---:|
@@ -13,7 +13,9 @@
 | [tests/binary_node_test.odin](#file-tests-binary-node-test-odin) | 1 |
 | [tests/binary_tokens_test.odin](#file-tests-binary-tokens-test-odin) | 1 |
 | [tests/chat_history_test.odin](#file-tests-chat-history-test-odin) | 3 |
-| [tests/connection_test.odin](#file-tests-connection-test-odin) | 16 |
+| [tests/unit/binary_framing_test.odin](#file-tests-unit-binary-framing-test-odin) | 1 |
+| [tests/unit/noise_certificate_test.odin](#file-tests-unit-noise-certificate-test-odin) | 14 |
+| [tests/unit/noise_handshake_test.odin](#file-tests-unit-noise-handshake-test-odin) | 1 |
 | [tests/contact_sync_test.odin](#file-tests-contact-sync-test-odin) | 3 |
 | [tests/contacts_test.odin](#file-tests-contacts-test-odin) | 2 |
 | [tests/e2e/child_process/child_process.odin](#file-tests-e2e-child-process-child-process-odin) | 5 |
@@ -141,28 +143,42 @@
 | [`history_pages_match_request_and_chat_and_preserve_original_messages`](../../tests/chat_history_test.odin#L36) | Check request correlation, address aliases, message ownership, directions and duplicate suppression. |
 | [`private_chat_history_cursor_survives_older_deliveries_and_accepts_legacy_sent_messages`](../../tests/chat_history_test.odin#L100) | Check that delayed arrivals preserve the newest cursor and that a legacy sent record can locate a page. |
 
-<a id="file-tests-connection-test-odin"></a>
+<a id="file-tests-unit-binary-framing-test-odin"></a>
 
-## tests/connection_test.odin
+## tests/unit/binary_framing_test.odin
 
 | Function | Behavior |
 |---|---|
-| [`policy_test_options`](../../tests/connection_test.odin#L28) | Build valid initial certificate options for a synthetic chain. |
-| [`policy_test_bytes`](../../tests/connection_test.odin#L37) | Write a length-delimited field into the test certificate. |
-| [`policy_test_scalar`](../../tests/connection_test.odin#L44) | Write an integer field into the test certificate. |
-| [`policy_test_details`](../../tests/connection_test.odin#L50) | Encode test certificate details with the configured omissions and sizes. |
-| [`policy_test_certificate`](../../tests/connection_test.odin#L86) | Wrap signed test details and signature as a certificate. |
-| [`policy_test_chain`](../../tests/connection_test.odin#L100) | Encode the test leaf and intermediate into a chain. |
-| [`policy_test_fixture`](../../tests/connection_test.odin#L117) | Generate deterministic keys and sign a synthetic server chain. |
-| [`policy_test_verify`](../../tests/connection_test.odin#L162) | Verify the fixture at the requested time using its test root. |
-| [`certificate_policy_valid_synthetic_chain_does_not_replace_pinned_root`](../../tests/connection_test.odin#L170) | Check that a valid test-root signature cannot replace the pinned WhatsApp root. |
-| [`certificate_policy_checks_both_raw_signatures_and_server_static`](../../tests/connection_test.odin#L187) | Independently alter each signature and the handshake key and verify rejection. |
-| [`certificate_policy_enforces_presence_lengths_and_issuer_linkage`](../../tests/connection_test.odin#L233) | Vary missing fields, key lengths and issuer serial linkage. |
-| [`certificate_policy_checks_exact_time_boundaries_without_epoch_overflow`](../../tests/connection_test.odin#L267) | Exercise the exact validity endpoints and out-of-range timestamps. |
-| [`certificate_policy_malformed_or_incomplete_chain_fails_closed`](../../tests/connection_test.odin#L302) | Feed malformed or incomplete certificate chains and check their errors. |
-| [`certificate_policy_genuine_public_chain_matches_pinned_signal_root`](../../tests/connection_test.odin#L351) | Verify a recorded public chain against the pinned root at its capture time. |
-| [`frame_reader_reassembles_split_frames_and_bounds_its_storage`](../../tests/connection_test.odin#L367) | Feed partial frames and verify reassembly and bounded reader capacity. |
-| [`noise_credentials_are_random_nonzero_and_accepted_by_client_init`](../../tests/connection_test.odin#L395) | Generate distinct nonzero Noise credentials and use them to initialize a client. |
+| [`frame_reader_reassembles_split_frames_and_bounds_its_storage`](../../tests/unit/binary_framing_test.odin#L7) | Feed partial frames and verify reassembly and bounded reader capacity. |
+
+<a id="file-tests-unit-noise-certificate-test-odin"></a>
+
+## tests/unit/noise_certificate_test.odin
+
+| Function | Behavior |
+|---|---|
+| [`policy_test_options`](../../tests/unit/noise_certificate_test.odin#L27) | Build valid initial certificate options for a synthetic chain. |
+| [`policy_test_bytes`](../../tests/unit/noise_certificate_test.odin#L36) | Write a length-delimited field into the test certificate. |
+| [`policy_test_scalar`](../../tests/unit/noise_certificate_test.odin#L43) | Write an integer field into the test certificate. |
+| [`policy_test_details`](../../tests/unit/noise_certificate_test.odin#L49) | Encode test certificate details with the configured omissions and sizes. |
+| [`policy_test_certificate`](../../tests/unit/noise_certificate_test.odin#L85) | Wrap signed test details and signature as a certificate. |
+| [`policy_test_chain`](../../tests/unit/noise_certificate_test.odin#L99) | Encode the test leaf and intermediate into a chain. |
+| [`policy_test_fixture`](../../tests/unit/noise_certificate_test.odin#L116) | Generate deterministic keys and sign a synthetic server chain. |
+| [`policy_test_verify`](../../tests/unit/noise_certificate_test.odin#L161) | Verify the fixture at the requested time using its test root. |
+| [`certificate_policy_valid_synthetic_chain_does_not_replace_pinned_root`](../../tests/unit/noise_certificate_test.odin#L169) | Check that a valid test-root signature cannot replace the pinned WhatsApp root. |
+| [`certificate_policy_checks_both_raw_signatures_and_server_static`](../../tests/unit/noise_certificate_test.odin#L186) | Independently alter each signature and the handshake key and verify rejection. |
+| [`certificate_policy_enforces_presence_lengths_and_issuer_linkage`](../../tests/unit/noise_certificate_test.odin#L232) | Vary missing fields, key lengths and issuer serial linkage. |
+| [`certificate_policy_checks_exact_time_boundaries_without_epoch_overflow`](../../tests/unit/noise_certificate_test.odin#L266) | Exercise the exact validity endpoints and out-of-range timestamps. |
+| [`certificate_policy_malformed_or_incomplete_chain_fails_closed`](../../tests/unit/noise_certificate_test.odin#L302) | Feed malformed or incomplete certificate chains and check their errors. |
+| [`certificate_policy_genuine_public_chain_matches_pinned_signal_root`](../../tests/unit/noise_certificate_test.odin#L352) | Verify a recorded public chain against the pinned root at its capture time. |
+
+<a id="file-tests-unit-noise-handshake-test-odin"></a>
+
+## tests/unit/noise_handshake_test.odin
+
+| Function | Behavior |
+|---|---|
+| [`noise_credentials_are_random_nonzero_and_accepted_by_client_init`](../../tests/unit/noise_handshake_test.odin#L8) | Generate distinct nonzero Noise credentials and use them to initialize a client. |
 
 <a id="file-tests-contact-sync-test-odin"></a>
 

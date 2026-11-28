@@ -35,12 +35,15 @@ State_Record_Kind :: enum u8 {
 	Contact_Sync_State,
 	Pending_Profile_History,
 	Chat_History_Cursor,
+	Private_Audio,
 }
+
 State_Record :: struct {
 	kind: State_Record_Kind,
 	name: string,
 	data: []u8,
 }
+
 State_Store :: struct {
 	initialized:                bool,
 	requires_reload:            bool,
@@ -49,6 +52,7 @@ State_Store :: struct {
 	revision, durable_revision: u64,
 	allocator:                  mem.Allocator,
 }
+
 State_Error_Kind :: enum {
 	None,
 	Invalid_State,
@@ -66,6 +70,7 @@ State_Error_Kind :: enum {
 	Rename_Failed,
 	Directory_Flush_Failed,
 }
+
 State_Error :: struct {
 	kind:       State_Error_Kind,
 	io:         os.Error,
@@ -98,6 +103,7 @@ state_store_init :: proc(
 
 	return {}
 }
+
 state_store_clear :: proc(store: ^State_Store) {
 	if store == nil {
 		return
@@ -262,6 +268,7 @@ state_store_find_upsert_index :: proc(
 
 		total += 1 + 2 + 4 + len(record.name) + len(record.data)
 	}
+
 	if index < 0 && len(store.records) == MAX_STATE_RECORDS {
 		return -1, {kind = .Limit_Exceeded}
 	}
@@ -364,8 +371,8 @@ state_store_clone :: proc(
 	if allocation != nil {
 		return {kind = .Allocation_Failed, allocation = allocation}
 	}
-
 	defer delete(seen)
+
 	encoded_size := STATE_STORE_HEADER_SIZE + 32
 
 	for record in source.records {
@@ -501,8 +508,8 @@ state_store_decode_records :: proc(store: ^State_Store, source: []u8, count: int
 	if allocation != nil {
 		return {kind = .Allocation_Failed, allocation = allocation}
 	}
-
 	defer delete(seen)
+
 	position, end := STATE_STORE_HEADER_SIZE, len(source) - 32
 
 	for _ in 0 ..< count {
@@ -563,23 +570,29 @@ state_store_decode :: proc(
 	if store == nil {
 		return {kind = .Invalid_State}
 	}
+
 	revision, count, error := state_store_decode_header(source, identity)
 	if error.kind != .None {
 		return error
 	}
+
 	next: State_Store
 	defer state_store_clear(&next)
+
 	if init_error := state_store_init(&next, identity, allocator); init_error.kind != .None {
 		return init_error
 	}
+
 	if record_error := state_store_decode_records(&next, source, count);
 	   record_error.kind != .None {
 		return record_error
 	}
+
 	next.revision = revision
 	state_store_clear(store)
 	store^ = next
 	next = {}
+
 	return {}
 }
 
@@ -587,6 +600,7 @@ state_store_save :: proc(store: ^State_Store, path: string, create_only := false
 	if store != nil && store.requires_reload {
 		return {kind = .Directory_Flush_Failed}
 	}
+
 	size, measured := state_store_encode(nil, store)
 
 	if measured.kind != .Destination_Undersized {
@@ -598,7 +612,6 @@ state_store_save :: proc(store: ^State_Store, path: string, create_only := false
 	if allocation_err != nil {
 		return {kind = .Allocation_Failed, allocation = allocation_err}
 	}
-
 	defer {
 		crypto.zero_explicit(raw_data(buffer), len(buffer))
 		delete(buffer)
@@ -647,6 +660,7 @@ state_store_load :: proc(store: ^State_Store, path: string, identity: [32]u8) ->
 	}
 
 	defer os.close(file)
+
 	size, stat_err := os.file_size(file)
 
 	if stat_err != nil {
@@ -662,7 +676,6 @@ state_store_load :: proc(store: ^State_Store, path: string, identity: [32]u8) ->
 	if alloc_err != nil {
 		return {kind = .Allocation_Failed, allocation = alloc_err}
 	}
-
 	defer {
 		crypto.zero_explicit(raw_data(buffer), len(buffer))
 		delete(buffer)
@@ -681,11 +694,14 @@ state_store_load :: proc(store: ^State_Store, path: string, identity: [32]u8) ->
 		if open_error != nil {
 			return {kind = .Directory_Flush_Failed, io = open_error}
 		}
+
 		defer os.close(parent)
+
 		if flush_error := os.flush(parent); flush_error != nil {
 			return {kind = .Directory_Flush_Failed, io = flush_error}
 		}
 	}
+
 	if err := state_store_decode(store, buffer[:used], identity); err.kind != .None {
 		return err
 	}
@@ -696,7 +712,7 @@ state_store_load :: proc(store: ^State_Store, path: string, identity: [32]u8) ->
 }
 
 state_record_valid :: proc(kind: State_Record_Kind, name: string, data: []u8) -> bool {
-	if cast(u8)kind > cast(u8)State_Record_Kind.Chat_History_Cursor ||
+	if cast(u8)kind > cast(u8)State_Record_Kind.Private_Audio ||
 	   len(name) == 0 ||
 	   len(name) > 512 ||
 	   len(data) > MAX_STATE_RECORD_SIZE {
@@ -710,6 +726,10 @@ state_record_valid :: proc(kind: State_Record_Kind, name: string, data: []u8) ->
 	}
 
 	#partial switch kind {
+	case .Private_Audio:
+		split := bytes.index_byte(transmute([]u8)name, '|')
+		return split > 0 && device_user_jid_valid(name[:split], false) &&
+		       socket_inbox_id_valid(name[split+1:]) && len(data) > 8 && len(data) <= MAX_CAPTURED_AUDIO_RECORD
 	case .Chat_History_Cursor:
 		_, valid := decode_chat_history_cursor(data)
 		return valid && device_user_jid_valid(name, false)
@@ -731,11 +751,14 @@ state_record_valid :: proc(kind: State_Record_Kind, name: string, data: []u8) ->
 		   (kind == .Contact_Index_MAC && len(name) != 64) {
 			return false
 		}
+
 		for c in name {
 			if !is_digit(c) && (c < 'a' || c > 'f') {
 				return false
 			}
 		}
+
+
 	case .Contact_Sync_State:
 		switch name {
 		case "contacts-key-id":
@@ -753,6 +776,7 @@ state_record_valid :: proc(kind: State_Record_Kind, name: string, data: []u8) ->
 
 	return true
 }
+
 Durable_Write_Step :: enum {
 	None,
 	Write,
@@ -778,7 +802,9 @@ replace_file_durably :: proc(
 	crypto.rand_bytes(random[:])
 	tmp := fmt.aprintf("%s.tmp-%016x", path, transmute(u64)random)
 	defer delete(tmp)
+
 	file, open_err := os.open(tmp, {.Write, .Create, .Excl}, {.Read_User, .Write_User})
+
 	if open_err != nil {
 		return .Write, open_err
 	}
@@ -819,12 +845,14 @@ replace_file_durably :: proc(
 		if err := os.link(tmp, path); err != nil {
 			return .Rename, err
 		}
+
 		if err := os.remove(tmp); err != nil {
 			return .Directory, err
 		}
 	} else if err := os.rename(tmp, path); err != nil {
 		return .Rename, err
 	}
+
 	renamed = true
 	parent, parent_err := os.open(filepath.dir(path))
 	if parent_err != nil {
@@ -832,6 +860,7 @@ replace_file_durably :: proc(
 	}
 
 	defer os.close(parent)
+
 	if err := os.flush(parent); err != nil {
 		return .Directory, err
 	}
@@ -879,11 +908,14 @@ state_store_export_v0_2 :: proc(
 	if source == nil || !source.initialized || source.revision != source.durable_revision {
 		return 0, {kind = .Invalid_State}
 	}
+
 	exported: State_Store
 	defer state_store_clear(&exported)
+
 	if e := state_store_clone(&exported, source); e.kind != .None {
 		return 0, e
 	}
+
 	for record in source.records {
 		#partial switch record.kind {
 		case .Contact_Sync_State:
@@ -899,25 +931,32 @@ state_store_export_v0_2 :: proc(
 			case:
 				return 0, {kind = .Invalid_Record}
 			}
+
 			if e := state_store_delete(&exported, record.kind, record.name); e.kind != .None {
 				return 0, e
 			}
+
 			if legacy_name != "" {
 				if e := state_store_set(&exported, record.kind, legacy_name, record.data);
 				   e.kind != .None {
 					return 0, e
 				}
 			}
-		case .Chat_History_Cursor:
+
+
+		case .Chat_History_Cursor, .Private_Audio:
 			if e := state_store_delete(&exported, record.kind, record.name); e.kind != .None {
 				return 0, e
 			}
+
+
 		case .Pending_Profile_History:
 			// Older clients cannot import deferred profile names. The original
 			// snapshot retains the references and all previously imported names.
 			if e := state_store_delete(&exported, record.kind, record.name); e.kind != .None {
 				return 0, e
 			}
+
 			deferred_profiles += 1
 		case .Processed_Message:
 			if processed_history_receipt(record.data) {
@@ -927,9 +966,11 @@ state_store_export_v0_2 :: proc(
 				}
 			}
 		}
-		if record.kind > .Chat_History_Cursor {
+
+		if record.kind > .Private_Audio {
 			return 0, {kind = .Invalid_Record}
 		}
 	}
+
 	return deferred_profiles, state_store_save(&exported, path, create_only = true)
 }

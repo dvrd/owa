@@ -34,8 +34,11 @@ integrated_observation :: proc(root, path, before, after: string) -> w.Value {
 	source := j.clone_value(w.items(w.get(w.default_manifest(), "sources"))[0])
 	w.put(&source, "paths", w.array(w.text(path)))
 	manifest := w.object({"schema", w.number(1)}, {"sources", w.array(source)})
+
 	fixture := Observe_Bytes{transmute([]u8)before, transmute([]u8)after, w.str(w.get(source, "reference_commit"))}
+
 	value, failure := w.observe(manifest, w.Observation{fetch = observe_get, data = &fixture, root = root})
+
 	assert(failure == nil)
 
 	return w.items(w.get(w.items(w.get(value, "sources"))[0], "files"))[0]
@@ -44,6 +47,7 @@ integrated_observation :: proc(root, path, before, after: string) -> w.Value {
 integration_case :: proc(t: ^testing.T, mode: int) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	root, error := os.make_directory_temp("", "owa-integration-*", context.allocator)
 	assert(error == nil)
@@ -51,18 +55,21 @@ integration_case :: proc(t: ^testing.T, mode: int) {
 
 	for name in ([]string {
 			"socket.odin",
-			"connection.odin",
+			"noise_handshake.odin",
 			"binary_node.odin",
 			"auth.odin",
 			"pairing.odin",
 		}) {assert(os.write_entire_file(w.join(root, name), "package whatsapp\n") == nil)}
+
 	before, after := "const x=1; // old\n", "const x = 1; // new\n"
 	path := "src/Socket/socket.ts"
 
 	if mode == 1 {
 		before = "const x=1;\n"
 		after = "const x=2;\n"
-	}; if mode == 3 {
+	}
+
+	if mode == 3 {
 		after = before
 	}
 
@@ -160,6 +167,7 @@ integration_unchanged_no_assessment :: proc(t: ^testing.T) {
 integration_completed_watcher_returns_without_signal :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	result, failure := w.watch_capture(test_fixtures.shell_argv("printf '%s\\n' '{\"status\":\"NO_MONITORED_DRIFT\"}'"))
 	testing.expect(t, failure == nil && w.str(w.get(result, "status")) == "NO_MONITORED_DRIFT")
@@ -176,10 +184,12 @@ contract_scan :: proc(data: rawptr, state, approved_contract: string) -> (w.Valu
 integration_ci_only_explicit_contract :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	root, error := os.make_directory_temp("", "owa-integration-*", context.allocator)
 	assert(error == nil)
 	defer os.remove_all(root)
+
 	seen := make([dynamic]string)
 	_, failure := w.ci_prepare(w.join(root, "state"), w.join(root, "out1"), "", contract_scan, &seen)
 	testing.expect(t, failure == nil)
@@ -200,6 +210,7 @@ integration_ci_only_explicit_contract :: proc(t: ^testing.T) {
 integration_source_reference_presence_is_strict :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	source := w.object(
 		{"name", w.text("baileys")},
@@ -221,10 +232,12 @@ integration_source_reference_presence_is_strict :: proc(t: ^testing.T) {
 integration_watch_runner_forwards_contract_without_execution :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	root, error := os.make_directory_temp("", "owa-integration-*", context.allocator)
 	assert(error == nil)
 	defer os.remove_all(root)
+
 	args := test_fixtures.schedule_options_for_test(root)
 	fd, failure := w.locked_state(args.state_dir)
 	assert(failure == nil)
@@ -239,6 +252,7 @@ integration_watch_runner_forwards_contract_without_execution :: proc(t: ^testing
 	)
 	assert(os.write_entire_file(args.executable, script) == nil)
 	assert(p.chmod(strings.clone_to_cstring(args.executable), {.IRUSR, .IWUSR, .IXUSR}) == {})
+
 	_, failure = w.watch_run(args)
 	testing.expect(t, failure == nil && !os.exists(marker))
 }
@@ -255,7 +269,10 @@ serve :: proc(peer: ^Peer) {
 
 	if error != .None {
 		return
-	}; defer net.close(connection)
+	}
+
+	defer net.close(connection)
+
 	_ = net.set_option(connection, .Receive_Timeout, 2 * time.Second)
 	_ = net.set_option(connection, .Send_Timeout, 2 * time.Second)
 	peer.n, _ = net.recv_tcp(connection, peer.request[:])
@@ -267,21 +284,29 @@ serve :: proc(peer: ^Peer) {
 
 		if write_error != .None || n <= 0 {
 			break
-		}; offset += n
+		}
+
+		offset += n
 	}
 }
 
 fetch_peer :: proc(t: ^testing.T, response: string) -> ([]u8, bool, w.Failure) {
 	peer := Peer {
 		response = response,
-	}; listener, error := net.listen_tcp({net.IP4_Loopback, 0}); assert(error == nil)
+	}
+
+	listener, error := net.listen_tcp({net.IP4_Loopback, 0})
+
+	assert(error == nil)
 	peer.listener = listener
 	_ = net.set_option(listener, .Receive_Timeout, 3 * time.Second)
 	defer net.close(listener)
+
 	endpoint, bound := net.bound_endpoint(listener)
 	assert(bound == .None)
 	worker := thread.create_and_start_with_poly_data(&peer, serve)
 	defer thread.destroy(worker)
+
 	network := w.Network {
 		allow_loopback = true,
 	}
@@ -300,6 +325,7 @@ fetch_peer :: proc(t: ^testing.T, response: string) -> ([]u8, bool, w.Failure) {
 watch_redirect_never_followed :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	_, _, failure := fetch_peer(
 		t,
@@ -311,6 +337,7 @@ watch_redirect_never_followed :: proc(t: ^testing.T) {
 transport_bounds_missing_http_and_redacted_auth :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	bytes, present, failure := fetch_peer(t, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
 	testing.expect(t, failure == nil && present && string(bytes) == "ok")
@@ -322,7 +349,9 @@ transport_bounds_missing_http_and_redacted_auth :: proc(t: ^testing.T) {
 	testing.expect(t, failure == w.Failure("UPSTREAM_OVERSIZED"))
 	network := w.Network {
 		linear_key = "private-secret\r\ninjected",
-	}; _, failure = w.linear_transport(&network, "query", w.object())
+	}
+
+	_, failure = w.linear_transport(&network, "query", w.object())
 	testing.expect(t, failure == w.Failure("LINEAR_CREDENTIAL_MISSING"))
 }
 
@@ -330,6 +359,7 @@ transport_bounds_missing_http_and_redacted_auth :: proc(t: ^testing.T) {
 linear_owned_http_redacts_and_refuses_redirect :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 
 	for mode in 0 ..< 5 {
@@ -363,6 +393,7 @@ linear_owned_http_redacts_and_refuses_redirect :: proc(t: ^testing.T) {
 		}
 
 		listener, error := net.listen_tcp({net.IP4_Loopback, 0})
+
 		assert(error == nil)
 		peer.listener = listener
 		endpoint, bound := net.bound_endpoint(listener)
@@ -372,7 +403,9 @@ linear_owned_http_redacts_and_refuses_redirect :: proc(t: ^testing.T) {
 			linear_key     = "synthetic-loopback-only",
 			linear_url     = fmt.aprintf("http://127.0.0.1:%d/graphql", endpoint.port),
 			allow_loopback = true,
-		}; value, failure := w.linear_transport(&network, "query Synthetic", w.object())
+		}
+
+		value, failure := w.linear_transport(&network, "query Synthetic", w.object())
 		thread.join(worker)
 		thread.destroy(worker)
 		net.close(listener)

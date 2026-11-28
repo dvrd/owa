@@ -33,6 +33,7 @@ fixture_file :: proc(directory, name: string) -> []u8 {
 run_to_exit :: proc(args: ..string) {
 	process := child.start(..args)
 	defer child.close(&process)
+
 	child.wait(&process)
 }
 
@@ -51,6 +52,7 @@ socket_peer_handoff :: proc(
 		encoded, err := hex.encode(digest[:])
 		assert(err == nil)
 		defer delete(encoded)
+
 		testing.expect_value(
 			t,
 			handoff,
@@ -62,6 +64,7 @@ socket_peer_handoff :: proc(
 			),
 		)
 	}
+
 	if ack {
 		line := child.read_line(peer)
 		header, _, value := strings.partition(line, "=")
@@ -77,12 +80,14 @@ exercise_socket_stage :: proc(t: ^testing.T, directory, stage: string, replay: b
 	mode := "replay" if replay else "stage"
 	peer := child.start("tcp-peer", directory, fmt.tprintf("%s:%s", mode, stage))
 	defer child.close(&peer)
+
 	line := child.read_line(&peer)
 	header, _, port := strings.partition(line, "=")
 	n, valid := strconv.parse_int(port)
 	assert(header == "ENCRYPTED_TCP_PEER_READY port" && valid && n > 0 && n < 65536)
 	writer := child.start("verify" if replay else "stage", directory, stage, port)
 	defer child.close(&writer)
+
 	received := stage != "socket-before-send" && stage != "socket-after-commit-before-write"
 	ack := !replay && (stage == "socket-after-positive-ack" || stage == "socket-after-ack-journal")
 	if replay {
@@ -98,10 +103,12 @@ exercise_socket_stage :: proc(t: ^testing.T, directory, stage: string, replay: b
 			fmt.tprintf("ENCRYPTED_BOUNDARY_READY %s", stage),
 		)
 	}
+
 	socket_peer_handoff(t, &peer, directory, replay, received, ack)
 	if !replay {
 		child.kill_at_boundary(&writer)
 	}
+
 	testing.expect_value(
 		t,
 		child.read_line(&peer),
@@ -130,16 +137,20 @@ encrypted_state_survives_crash_boundaries :: proc(t: ^testing.T) {
 		"socket-after-positive-ack",
 		"socket-after-ack-journal",
 	}
+
 	for stage in stages {
 		directory := make_owned_directory()
 		defer delete(directory)
+
 		defer os.remove_all(directory)
+
 		socket := strings.has_prefix(stage, "socket-")
 		if socket {
 			exercise_socket_stage(t, directory, stage, false)
 		} else {
 			writer := child.start("stage", directory, stage)
 			defer child.close(&writer)
+
 			testing.expect_value(
 				t,
 				child.read_line(&writer),
@@ -147,6 +158,7 @@ encrypted_state_survives_crash_boundaries :: proc(t: ^testing.T) {
 			)
 			child.kill_at_boundary(&writer)
 		}
+
 		state := fixture_file(directory, "state.bin")
 		has_prekeys := os.exists(fmt.tprintf("%s/prekeys.bin", directory))
 		prekeys := fixture_file(directory, "prekeys.bin") if has_prekeys else nil
@@ -155,6 +167,7 @@ encrypted_state_survives_crash_boundaries :: proc(t: ^testing.T) {
 		} else {
 			run_to_exit("verify", directory, stage)
 		}
+
 		testing.expect(t, bytes.equal(state, fixture_file(directory, "state.bin")))
 		if has_prekeys {
 			testing.expect(t, bytes.equal(prekeys, fixture_file(directory, "prekeys.bin")))
@@ -166,7 +179,9 @@ encrypted_state_survives_crash_boundaries :: proc(t: ^testing.T) {
 failed_write_and_corrupt_snapshots_preserve_sessions :: proc(t: ^testing.T) {
 	directory := make_owned_directory()
 	defer delete(directory)
+
 	defer os.remove_all(directory)
+
 	run_to_exit("prepare", directory, "control")
 	state := fixture_file(directory, "state.bin")
 	run_to_exit("limited-write", directory, "file-limit")
@@ -174,7 +189,9 @@ failed_write_and_corrupt_snapshots_preserve_sessions :: proc(t: ^testing.T) {
 	files, err := os.read_directory_by_path(directory, -1, context.allocator)
 	assert(err == nil)
 	defer os.file_info_slice_delete(files, context.allocator)
+
 	for f in files {testing.expect(t, !strings.has_prefix(f.name, "state.bin.tmp-"))}
+
 	run_to_exit("verify", directory, "file-limit")
 	corrupt := fixture_file(directory, "state.bin")
 	corrupt[len(corrupt) - 1] ~= 1
@@ -200,7 +217,9 @@ read_sessions_written_by_prior_revision :: proc(t: ^testing.T) {
 	prekeys := #load("testdata/fa2734f60b60cc9770809bb1be873cea60fe3c12/prekeys.fixture")
 	directory := make_owned_directory()
 	defer delete(directory)
+
 	defer os.remove_all(directory)
+
 	assert(
 		os.write_entire_file(
 			fmt.tprintf("%s/state.bin", directory),

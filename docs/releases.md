@@ -13,3 +13,13 @@ The release PR title determines the bump:
 | Any other title, including `fix:`, `docs:` and `ci:` | `v0.2.1` |
 
 If publication fails, rerun **Release owa** in GitHub Actions. It resumes from the last published version and processes outstanding merges in order. The protocol watcher keeps its own checksum-based tags.
+
+## Checking the release inputs
+
+The Taskfile invokes the Odin program in `tools/ci`. To run the tools directly, build once with `odin build tools/ci -out:/tmp/owa-ci` and invoke the binary from the repository root. For example, `/tmp/owa-ci test --package tests/unit` runs the library suite and `/tmp/owa-ci locked` runs the release checks.
+
+The default `task check` and the pre-push hook use the same locked runner. Use `task check:local -- --shared /path/to/shared` to test a development checkout.
+
+Run `task check:locked` with the compiler revision in `ODIN_VERSION` and Git access to the Surf and async repositories. The runner fetches the locked tags, reads the exact commits, verifies the package digests, runs the suites and compiles the private audio example. To work offline, set `OWA_LOCKED_REPOS` to the directory containing the two Git clones or `OWA_LOCKED_SHARED` to an installed package mirror. Vet runs on owa, Surf, and owa’s tools, examples and tests. The released async sources have vet diagnostics with owa’s pinned compiler. The release lock pairs Surf v0.4.1 with async v0.4.0, the revision pinned by Surf.
+
+The GitHub Actions job `owa locked tests` targets pull requests to develop and main. It checks out the exact commits and supplies a read-only deploy key for async in `OWA_ASYNC_DEPLOY_KEY`. The WebSocket codec used by the fixtures ships in async.

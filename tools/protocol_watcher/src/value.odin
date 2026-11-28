@@ -35,15 +35,19 @@ Pair :: struct {
 text :: proc(s: string) -> Value {
 	return j.String(s)
 }
+
 number :: proc(n: i64) -> Value {
 	return j.Integer(n)
 }
+
 boolean :: proc(b: bool) -> Value {
 	return j.Boolean(b)
 }
+
 null :: proc() -> Value {
 	return j.Null(nil)
 }
+
 object :: proc(pairs: ..Pair) -> Value {
 	result := make(j.Object, 64)
 
@@ -53,11 +57,13 @@ object :: proc(pairs: ..Pair) -> Value {
 
 	return result
 }
+
 array :: proc(values: ..Value) -> Value {
 	result := make(j.Array)
 	append(&result, ..values)
 	return result
 }
+
 string_array :: proc(values: []string) -> Value {
 	result := make(j.Array)
 
@@ -67,6 +73,7 @@ string_array :: proc(values: []string) -> Value {
 
 	return result
 }
+
 get :: proc(value: Value, key: string) -> Value {
 	if obj, ok := value.(j.Object); ok {
 		if found, present := obj[key]; present {
@@ -76,46 +83,63 @@ get :: proc(value: Value, key: string) -> Value {
 
 	return null()
 }
+
 put :: proc(value: ^Value, key: string, next: Value) {
 	if obj, ok := value^.(j.Object); ok {
 		obj[key] = next
 		value^ = obj
 	}
 }
+
 str :: proc(value: Value) -> string {
 	if s, ok := value.(j.String); ok {
 		return string(s)
-	}; return ""
+	}
+
+	return ""
 }
+
 integer :: proc(value: Value) -> (i64, bool) {
 	if n, ok := value.(j.Integer); ok {
 		return i64(n), true
-	}; return 0, false
+	}
+
+	return 0, false
 }
+
 json_boolean_equals :: proc(value: Value, expected := true) -> bool {
 	if b, ok := value.(j.Boolean); ok {
 		return bool(b) == expected
-	}; return false
+	}
+
+	return false
 }
+
 items :: proc(value: Value) -> j.Array {
 	if a, ok := value.(j.Array); ok {
 		return a
-	}; return nil
+	}
+
+	return nil
 }
+
 keys :: proc(value: Value) -> []string {
 	obj, ok := value.(j.Object)
 	if !ok {
 		return nil
 	}
+
 	// Callers can hold an older copy of a JSON object while adding fields.
 	// Collect the keys visited by the iterator, which can exceed the length in that copy.
 	result := make([dynamic]string, 0, len(obj))
 	for key in obj {
 		append(&result, key)
 	}
+
 	slice.sort(result[:])
 	return result[:]
 }
+
 has_exact_object_fields :: proc(value: Value, wanted: []string) -> bool {
 	actual := keys(value)
 
@@ -131,6 +155,7 @@ has_exact_object_fields :: proc(value: Value, wanted: []string) -> bool {
 
 	return true
 }
+
 hex_valid :: proc(s: string, n: int) -> bool {
 	if len(s) != n {
 		return false
@@ -138,6 +163,7 @@ hex_valid :: proc(s: string, n: int) -> bool {
 
 	return strings.trim_left(s, LOWER_HEX_DIGITS) == ""
 }
+
 path_valid :: proc(path: string) -> bool {
 	if len(path) == 0 || len(path) > 200 {
 		return false
@@ -155,11 +181,13 @@ path_valid :: proc(path: string) -> bool {
 
 	return true
 }
+
 sha256 :: proc(data: []u8) -> string {
 	digest: [32]u8
 	hash.hash_bytes_to_buffer(.SHA256, data, digest[:])
 	return string(hex.encode(digest[:]))
 }
+
 digest :: proc(data: []u8, present: bool) -> Value {
 	return object(
 		{"present", boolean(present)},
@@ -167,6 +195,7 @@ digest :: proc(data: []u8, present: bool) -> Value {
 		{"sha256", text(sha256(data)) if present && len(data) <= MAX_BYTES else null()},
 	)
 }
+
 quote :: proc(builder: ^strings.Builder, s: string) {
 	strings.write_byte(builder, '"')
 
@@ -202,6 +231,7 @@ quote :: proc(builder: ^strings.Builder, s: string) {
 
 	strings.write_byte(builder, '"')
 }
+
 encode_value :: proc(builder: ^strings.Builder, value: Value, spaced: bool, depth: int) -> bool {
 	if depth > 64 {
 		return false
@@ -222,14 +252,18 @@ encode_value :: proc(builder: ^strings.Builder, value: Value, spaced: bool, dept
 	case j.Float:
 		if math.is_nan(f64(v)) || math.is_inf(f64(v)) {
 			return false
-		}; fmt.sbprintf(builder, "%v", f64(v))
+		}
+
+		fmt.sbprintf(builder, "%v", f64(v))
 	case j.Array:
 		strings.write_byte(builder, '[')
 
 		for item, i in v {
 			if i > 0 {
 				strings.write_string(builder, comma)
-			}; if !encode_value(builder, item, spaced, depth + 1) {
+			}
+
+			if !encode_value(builder, item, spaced, depth + 1) {
 				return false
 			}
 		}
@@ -241,7 +275,9 @@ encode_value :: proc(builder: ^strings.Builder, value: Value, spaced: bool, dept
 		for key, i in keys(value) {
 			if i > 0 {
 				strings.write_string(builder, comma)
-			}; quote(builder, key); strings.write_string(builder, colon)
+			}
+
+			quote(builder, key); strings.write_string(builder, colon)
 			if !encode_value(builder, v[key], spaced, depth + 1) {
 				return false
 			}
@@ -254,6 +290,7 @@ encode_value :: proc(builder: ^strings.Builder, value: Value, spaced: bool, dept
 
 	return true
 }
+
 encode :: proc(value: Value, spaced := false) -> string {
 	builder: strings.Builder
 
@@ -263,9 +300,11 @@ encode :: proc(value: Value, spaced := false) -> string {
 
 	return strings.to_string(builder)
 }
+
 equal :: proc(a, b: Value) -> bool {
 	return encode(a) == encode(b)
 }
+
 decode :: proc(data: []u8, maximum := MAX_REPORT) -> (Value, string) {
 	if len(data) > maximum || !utf8.valid_string(string(data)) || !j.is_valid(data, .JSON, true) {
 		return null(), "JSON_INVALID"
@@ -304,7 +343,9 @@ decode :: proc(data: []u8, maximum := MAX_REPORT) -> (Value, string) {
 		if token.kind == .Close_Brace || token.kind == .Close_Bracket {
 			if previous == .Comma {
 				return null(), "JSON_INVALID"
-			}; depth -= 1
+			}
+
+			depth -= 1
 		}
 
 		previous = token.kind
@@ -320,6 +361,7 @@ decode :: proc(data: []u8, maximum := MAX_REPORT) -> (Value, string) {
 
 	return value, ""
 }
+
 read_file :: proc(path: string, maximum := MAX_BYTES) -> ([]u8, string) {
 	info, error := os.lstat(path, context.allocator)
 
@@ -331,7 +373,10 @@ read_file :: proc(path: string, maximum := MAX_BYTES) -> ([]u8, string) {
 
 	if open_error != nil {
 		return nil, "LOCAL_FILE_INVALID"
-	}; defer os.close(file)
+	}
+
+	defer os.close(file)
+
 	data := make([]u8, int(info.size) + 1)
 	used := 0
 
@@ -341,7 +386,9 @@ read_file :: proc(path: string, maximum := MAX_BYTES) -> ([]u8, string) {
 
 		if n == 0 {
 			break
-		}; if e != nil {
+		}
+
+		if e != nil {
 			return nil, "LOCAL_FILE_INVALID"
 		}
 	}
@@ -352,11 +399,13 @@ read_file :: proc(path: string, maximum := MAX_BYTES) -> ([]u8, string) {
 
 	return data[:used], ""
 }
+
 replace :: proc(s, from, to: string) -> string {
 	value, _ := strings.replace_all(s, from, to)
 
 	return value
 }
+
 has_required_and_allowed_fields :: proc(value: Value, required, optional: []string) -> bool {
 	if _, ok := value.(j.Object); !ok {
 		return false
@@ -382,9 +431,11 @@ has_required_and_allowed_fields :: proc(value: Value, required, optional: []stri
 join :: proc(a, b: string) -> string {
 	return fmt.aprintf("%s/%s", strings.trim_suffix(a, "/"), b)
 }
+
 Failure :: union {
 	string,
 }
+
 text_limit :: proc(value: Value, minimum, maximum: int) -> bool {
 	s, ok := value.(j.String)
 
@@ -396,6 +447,7 @@ text_limit :: proc(value: Value, minimum, maximum: int) -> bool {
 
 	return length >= minimum && length <= maximum
 }
+
 is_project_actions_run_url :: proc(run: string) -> bool {
 	prefix := "https://github.com/dvrd/owa/actions/runs/"
 
@@ -405,6 +457,7 @@ is_project_actions_run_url :: proc(run: string) -> bool {
 
 	return strings.trim_left(run[len(prefix):], DECIMAL_DIGITS) == ""
 }
+
 stable_uuid :: proc(seed: string) -> string {
 	bytes := (transmute([]u8)sha256(transmute([]u8)seed))[:32]
 	bytes[12] = '4'
@@ -421,9 +474,11 @@ stable_uuid :: proc(seed: string) -> string {
 		string(bytes[20:]),
 	)
 }
+
 stable_id :: proc(namespace: string, values: Value) -> string {
 	return stable_uuid(fmt.aprintf("%s/%s/%s", PROJECT, namespace, encode(values)))
 }
+
 change_identity :: proc(repo, path: string, reference, current: Value) -> string {
 	value := array(
 		text(repo),
@@ -440,6 +495,7 @@ change_identity :: proc(repo, path: string, reference, current: Value) -> string
 coverage_object :: proc() -> Value {
 	return make(j.Object, MAX_REPORT / 64)
 }
+
 parse_tokens :: proc(tokens: []j.Token, index: ^int, depth: int) -> (Value, bool) {
 	if depth > 64 || index^ >= len(tokens) {
 		return null(), false
@@ -470,16 +526,21 @@ parse_tokens :: proc(tokens: []j.Token, index: ^int, depth: int) -> (Value, bool
 
 			if !ok {
 				return null(), false
-			}; append(&values, value)
+			}
+
+			append(&values, value)
 			if index^ < len(tokens) && tokens[index^].kind == .Comma {
 				index^ += 1
 			} else {
 				break
 			}
 		}
+
 		if index^ >= len(tokens) || tokens[index^].kind != .Close_Bracket {
 			return null(), false
-		}; index^ += 1; return values, true
+		}
+
+		index^ += 1; return values, true
 	case .Open_Brace:
 		values := make(j.Object, 64)
 		for index^ < len(tokens) && tokens[index^].kind != .Close_Brace {
@@ -495,7 +556,9 @@ parse_tokens :: proc(tokens: []j.Token, index: ^int, depth: int) -> (Value, bool
 
 			if index^ >= len(tokens) || tokens[index^].kind != .Colon {
 				return null(), false
-			}; index^ += 1
+			}
+
+			index^ += 1
 			value, ok := parse_tokens(tokens, index, depth + 1)
 
 			if !ok {
@@ -506,20 +569,26 @@ parse_tokens :: proc(tokens: []j.Token, index: ^int, depth: int) -> (Value, bool
 
 			if name in values {
 				return null(), false
-			}; values[name] = value
+			}
+
+			values[name] = value
 			if index^ < len(tokens) && tokens[index^].kind == .Comma {
 				index^ += 1
 			} else {
 				break
 			}
 		}
+
 		if index^ >= len(tokens) || tokens[index^].kind != .Close_Brace {
 			return null(), false
-		}; index^ += 1; return values, true
+		}
+
+		index^ += 1; return values, true
 	case:
 		return null(), false
 	}
 }
+
 unicode_prefix :: proc(s: string, count: int) -> string {
 	end := utf8.rune_offset(s, count)
 	return s[:end] if end >= 0 else s

@@ -1,0 +1,64 @@
+name: Locked Odin tests
+on:
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: owa locked tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Check source access
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "Private dependencies require an owner-reviewed branch in this repository."
+          exit 1
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          path: owa
+          persist-credentials: false
+      - id: pins
+        working-directory: owa
+        run: |
+          echo "odin=$(cat ODIN_VERSION)" >> "$GITHUB_OUTPUT"
+          jq -r '.packages[] | "\(.name)=\(.commit)"' .krs/packages.json >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: dvrd/Odin
+          ref: ${{ steps.pins.outputs.odin }}
+          path: compiler
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: dvrd/async
+          ref: ${{ steps.pins.outputs.async }}
+          ssh-key: ${{ secrets.OWA_ASYNC_DEPLOY_KEY }}
+          path: deps/async
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: dvrd/surf
+          ref: ${{ steps.pins.outputs.surf }}
+          path: deps/surf
+          persist-credentials: false
+      - name: Build toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y llvm-18-dev clang-18
+          LLVM_CONFIG=llvm-config-18 make -C compiler release
+          go install github.com/go-task/task/v3/cmd/task@v3.53.1
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Verify suites and example
+        working-directory: owa
+        run: |
+          export ODIN="$GITHUB_WORKSPACE/compiler/odin" OWA_LOCKED_REPOS="$GITHUB_WORKSPACE/deps"
+          if ! task check:locked > "$RUNNER_TEMP/owa-tests.log" 2>&1; then
+            sed -n '/^Testing tests\/[a-z_/]*$/p' "$RUNNER_TEMP/owa-tests.log"
+            echo "Verification failed. Reproduce locally with task check:locked for full diagnostics."
+            exit 1
+          fi

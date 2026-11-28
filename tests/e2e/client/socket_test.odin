@@ -1,11 +1,13 @@
 package whatsapp_test
 
+import wire_frames "../../fixtures/message_transport"
 import "core:crypto"
 import "core:crypto/x25519"
 import "core:encoding/hex"
 import "core:testing"
-import surf "shared:surf"
-import ws "shared:websocket"
+import "core:time"
+import "shared:surf"
+import ws "shared:async/websocket"
 import wa "shared:whatsapp"
 
 // Fixed handshake transcript with an intermediate certificate and no leaf.
@@ -21,20 +23,20 @@ Socket_Cert_Test :: struct {
 	reject:                          bool,
 }
 
-socket_cert_test_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Stream_Error) {
+socket_cert_test_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Error) {
 	state := cast(^Socket_Cert_Test)data
 	n := min(len(dst), len(state.input) - state.read_at, 5)
 	copy(dst[:n], state.input[state.read_at:][:n])
 	state.read_at += n
 
 	if n == 0 {
-		return 0, {kind = .EOF}
+		return 0, {kind = .Peer_Closed}
 	}
 
 	return n, {}
 }
 
-socket_cert_test_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Stream_Error) {
+socket_cert_test_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Error) {
 	state := cast(^Socket_Cert_Test)data
 	n := min(len(src), len(state.output) - state.written)
 	copy(state.output[state.written:][:n], src[:n])
@@ -43,7 +45,7 @@ socket_cert_test_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_
 	return n, {}
 }
 
-socket_cert_test_close :: proc(data: rawptr) -> surf.WebSocket_Stream_Error {
+socket_cert_test_close :: proc(data: rawptr, _: u16) -> surf.WebSocket_Error {
 	state := cast(^Socket_Cert_Test)data
 	state.closed += 1
 
@@ -71,21 +73,21 @@ socket_cert_test_init :: proc(
 	for &byte, index in auth.credentials.noise_private {
 		byte = u8(index + 65)
 	}
+
 	socket.auth = auth
 	socket.websocket = {
 		phase = .Open,
-		allocator = context.allocator,
-		config = {host = "synthetic.invalid", max_message_size = 1024},
-		stream = {
-			data = state,
-			read = socket_cert_test_read,
-			write = socket_cert_test_write,
-			close = socket_cert_test_close,
-		},
+		max_message_size = 1024,
+		data = state,
+		read = wire_frames.reader(socket_cert_test_read),
+		write = wire_frames.writer(socket_cert_test_write),
+		close = socket_cert_test_close,
 	}
+
 	settings := wa.Socket_Config {
 		verify_certificate = verify,
 	}
+
 	// This initialized-transport boundary also runs after socket_connect dials.
 	testing.expect_value(state.t, wa.socket_client_init(socket, settings).kind, .None)
 	// Only test entropy is replaced, before I/O, to match the independent responder.
@@ -93,6 +95,7 @@ socket_cert_test_init :: proc(
 	for &byte, index in socket.client.ephemeral_private {
 		byte = u8(index + 1)
 	}
+
 	x25519.scalarmult_basepoint(socket.client.ephemeral_public[:], socket.client.ephemeral_private[:])
 	testing.expect_value(state.t, wa.noise_init(&socket.client.noise, socket.client.ephemeral_public), .None)
 }
@@ -119,6 +122,7 @@ socket_cert_test_case :: proc(t: ^testing.T, verify: wa.Certificate_Verifier, ex
 	hello, decode_error := hex.decode(transmute([]u8)string(SOCKET_CERT_TEST_HELLO))
 	assert(decode_error == nil)
 	defer delete(hello)
+
 	input, output: [1024]u8
 	// One unmasked binary WebSocket message containing one WhatsApp envelope.
 	assert(len(hello) + 3 < 126)
@@ -134,6 +138,7 @@ socket_cert_test_case :: proc(t: ^testing.T, verify: wa.Certificate_Verifier, ex
 	previous := context.user_ptr
 	context.user_ptr = &state
 	defer context.user_ptr = previous
+
 	socket: wa.Socket
 	auth: wa.Auth_State
 
@@ -174,4 +179,48 @@ socket_certificate_handshake_uses_custom_verifier_result :: proc(t: ^testing.T) 
 @(test)
 socket_certificate_nil_default_rejects_synthetic_issuer_only_chain :: proc(t: ^testing.T) {
 	socket_cert_test_case(t, nil, .Missing_Leaf)
+}
+
+@(test)
+query_deadline_preserves_partial_noise_envelopes :: proc(t: ^testing.T) {
+	for split in ([2]int{2, 7}) {
+		for disconnect in ([2]bool{false, true}) {
+			peer := send_peer_new()
+			defer send_peer_destroy(peer)
+
+			send_peer_enqueue(peer, {tag = "iq", attrs = {{"type", "result"}, {"id", "synthetic"}}})
+			assert(!peer.failed && peer.input[1] < 126)
+			wire: [128]u8
+			size := copy(wire[:], peer.input[2:])
+			clear(&peer.input)
+			frame: [132]u8
+			n := send_peer_server_frame(frame[:], wire[:split])
+			append(&peer.input, ..frame[:n])
+			send_peer_use_pipe(peer)
+			send_peer_announce(peer)
+
+			_, expired := wa.socket_receive_wire(&peer.socket, time.time_add(time.now(), 50 * time.Millisecond))
+			testing.expect_value(t, expired.kind, .Query_Timeout)
+			testing.expect_value(t, peer.socket.phase, .Online)
+			testing.expect_value(t, peer.socket.client.frames.header_used, min(split, 3))
+			testing.expect_value(t, peer.socket.client.frames.payload_used, max(0, split - 3))
+
+			if !disconnect {
+				n = send_peer_server_frame(frame[:], wire[split:size])
+				append(&peer.input, ..frame[:n])
+			}
+
+			send_peer_announce(peer)
+			event, err := wa.socket_receive_wire(&peer.socket, time.time_add(time.now(), time.Second))
+			if disconnect {
+				testing.expect_value(t, err.kind, .Session_Failed)
+				testing.expect_value(t, err.session.client.transport.kind, .Truncated_Envelope)
+				testing.expect_value(t, peer.socket.phase, .Failed)
+			} else {
+				testing.expect_value(t, err.kind, .None)
+				testing.expect_value(t, event.node.tag, "iq")
+				testing.expect_value(t, peer.socket.phase, .Online)
+			}
+		}
+	}
 }

@@ -35,6 +35,8 @@ stage_run :: proc(directory, stage: string) {
 		if stage == "receiver-after-commit" {
 			assert(wa.state_store_save(&f.store, f.path).kind == .None)
 		}
+
+
 	case "sender-before-commit", "sender-after-commit", "receiver-after-message-commit":
 		fixture_established(f)
 		fixture_encrypt(f)
@@ -47,6 +49,7 @@ stage_run :: proc(directory, stage: string) {
 			fixture_decrypt(f)
 			assert(wa.state_store_save(&f.store, f.path).kind == .None)
 		}
+
 
 	case:
 		assert(false)
@@ -72,10 +75,12 @@ verify_prekey :: proc(f: ^Fixture, committed: bool) {
 	session_get(&f.store, "device-b", &f.pair.b)
 	before := session_bytes(&f.pair.b)
 	defer delete(before)
+
 	wire, found := wa.state_store_get(&f.store, .Outbound_Message, INITIAL_ID)
 	assert(found)
 	local := fixture_local(96, 200, false)
 	local.prekey_private = {}
+
 	plaintext: [1024]u8
 	_, consumed, error := wa.signal_session_decrypt_prekey(
 		&f.pair.b,
@@ -87,6 +92,7 @@ verify_prekey :: proc(f: ^Fixture, committed: bool) {
 	assert(error.kind == .Replay && consumed == 0)
 	after := session_bytes(&f.pair.b)
 	defer delete(after)
+
 	assert(bytes.equal(before, after))
 }
 
@@ -113,11 +119,13 @@ verify_sender :: proc(f: ^Fixture, committed, received: bool) {
 	assert(processed)
 	before := session_bytes(&f.pair.b)
 	defer delete(before)
+
 	plaintext: [1024]u8
 	_, error := wa.signal_session_decrypt(&f.pair.b, plaintext[:], wire, wa.signal_curve_public(fixture_private(0)))
 	assert(error.kind == .Replay)
 	after := session_bytes(&f.pair.b)
 	defer delete(after)
+
 	assert(bytes.equal(before, after))
 }
 
@@ -129,6 +137,7 @@ verify_run :: proc(directory, stage: string) {
 
 	f := fixture_open(directory, false)
 	defer fixture_close(f)
+
 	before, io_error := os.read_entire_file(f.path, context.allocator)
 	assert(io_error == nil)
 	defer delete(before)
@@ -151,6 +160,7 @@ verify_run :: proc(directory, stage: string) {
 	after, after_error := os.read_entire_file(f.path, context.allocator)
 	assert(after_error == nil)
 	defer delete(after)
+
 	assert(bytes.equal(before, after))
 	fmt.println("ENCRYPTED_REOPEN_PASS stable_intent_id=true recipient_delivery=false")
 }
@@ -158,10 +168,12 @@ verify_run :: proc(directory, stage: string) {
 limited_write :: proc(directory: string) {
 	f := fixture_open(directory, false)
 	defer fixture_close(f)
+
 	fixture_load_pair(f)
 	before, io_error := os.read_entire_file(f.path, context.allocator)
 	assert(io_error == nil)
 	defer delete(before)
+
 	durable := f.store.durable_revision
 	fixture_encrypt(f)
 	error := wa.state_store_save(&f.store, f.path)
@@ -171,6 +183,7 @@ limited_write :: proc(directory: string) {
 	after, after_error := os.read_entire_file(f.path, context.allocator)
 	assert(after_error == nil)
 	defer delete(after)
+
 	assert(bytes.equal(before, after))
 	fmt.printf(
 		"ENCRYPTED_WRITE_LIMIT_PASS error=Write_Failed errno=EFBIG original_unchanged=true core_io=%v\n",
@@ -181,19 +194,23 @@ limited_write :: proc(directory: string) {
 corrupt_load :: proc(directory, kind: string) {
 	f := fixture_open(directory, false)
 	defer fixture_close(f)
+
 	fixture_load_pair(f)
 	size, measured := wa.state_store_encode(nil, &f.store)
 	assert(measured.kind == .Destination_Undersized)
 	before := make([]u8, size)
 	defer delete(before)
+
 	_, encoded := wa.state_store_encode(before, &f.store)
 	assert(encoded.kind == .None)
 	path := fmt.aprintf("%s/%s.bin", directory, kind)
 	defer delete(path)
+
 	error := wa.state_store_load(&f.store, path, fixture_identity())
 	assert(error.kind == .Checksum_Mismatch || error.kind == .Invalid_Format)
 	after := make([]u8, size)
 	defer delete(after)
+
 	_, encoded = wa.state_store_encode(after, &f.store)
 	assert(encoded.kind == .None && bytes.equal(before, after))
 	session_get(&f.store, "device-a", &f.pair.a)
@@ -209,6 +226,7 @@ run_recovery_child :: proc "contextless" () {
 	if len(os.args) < 2 || os.args[1] != "--recovery-fixture" {
 		return
 	}
+
 	args := os.args[2:]
 	assert(len(args) == 3 || len(args) == 4)
 
@@ -234,11 +252,13 @@ run_recovery_child :: proc "contextless" () {
 	case "prepare":
 		f := fixture_open(directory, true)
 		defer fixture_close(f)
+
 		fixture_established(f)
 		fmt.println("ENCRYPTED_BASELINE_READY")
 	case "limited-write":
 		assert(posix.signal(posix.Signal(posix.SIGXFSZ), auto_cast posix.SIG_IGN) != auto_cast posix.SIG_ERR)
 		assert(posix.setrlimit(.FSIZE, &posix.rlimit{512, 512}) == {})
+
 		limited_write(directory)
 	case "corrupt-load":
 		assert(argument == "corrupt" || argument == "truncated")
@@ -246,5 +266,6 @@ run_recovery_child :: proc "contextless" () {
 	case:
 		assert(false)
 	}
+
 	os.exit(0)
 }

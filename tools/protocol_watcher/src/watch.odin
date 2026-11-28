@@ -1,31 +1,29 @@
 package protocol_watch
 
 import "core:slice"
-import "core:crypto/x509"
 import "core:c"
 import j "core:encoding/json"
 import "core:strings"
 import p "core:sys/posix"
 import "core:time"
-import http "shared:async/http"
-import surf "shared:surf"
+import "shared:surf"
 
 when ODIN_OS == .Darwin {
 	foreign import libc "system:System"
 } else {
 	foreign import libc "system:c"
 }
+
 foreign libc {
 	@(link_name = "flock")
 	native_flock :: proc(fd: p.FD, operation: c.int) -> c.int ---
 }
+
 Fetch :: proc(data: rawptr, url: string, timeout: time.Duration) -> (bytes: []u8, present: bool, failure: Failure)
 Network :: struct {
 	linear_key, linear_url: string,
 	allow_loopback:         bool,
 }
-// A non-nil, empty root list selects the platform certificate store in core:crypto/tls.
-platform_roots: [1]^x509.Certificate
 
 transport :: proc(
 	data: rawptr,
@@ -37,39 +35,47 @@ transport :: proc(
 	failure: Failure,
 ) {
 	config := surf.Config {
-		tls = {root_cas = platform_roots[:0]},
 		max_body_size = MAX_BYTES,
 		timeout       = timeout,
 		max_redirects = 0,
 	}
+
 	if data != nil {
 		config.allow_http = (cast(^Network)data).allow_loopback
 	}
+
 	response, error := surf.execute(
-		http.Request {
+		surf.Request {
 			method = .GET,
 			url = url,
-			headers = []http.Header{{"User-Agent", "webtools-whatsapp-protocol-watch"}},
+			headers = []surf.Header{{"User-Agent", "webtools-whatsapp-protocol-watch"}},
 		},
 		config,
 	)
 	if error.kind != .None {
 		if error.kind == .Body_Oversized {
 			return nil, false, "UPSTREAM_OVERSIZED"
-		}; return nil, false, "UPSTREAM_FETCH_FAILED"
+		}
+
+		return nil, false, "UPSTREAM_FETCH_FAILED"
 	}
 	defer surf.response_destroy(&response)
+
 	if response.status >= 300 && response.status < 400 {
 		return nil, false, "UPSTREAM_REDIRECT"
 	}
+
 	if response.status == 404 {
 		return nil, false, nil
 	}
+
 	if response.status < 200 || response.status >= 300 {
 		return nil, false, "UPSTREAM_HTTP_FAILED"
 	}
+
 	return slice.clone(response.body), true, nil
 }
+
 linear_transport :: proc(data: rawptr, query: string, variables: Value) -> (value: Value, failure: Failure) {
 	network := cast(^Network)data
 
@@ -90,14 +96,14 @@ linear_transport :: proc(data: rawptr, query: string, variables: Value) -> (valu
 	}
 
 	response, error := surf.execute(
-		http.Request {
+		surf.Request {
 			method = .POST,
 			url = endpoint,
-			headers = []http.Header{{"Authorization", key}, {"Content-Type", "application/json"}},
+			headers = []surf.Header{{"Authorization", key}, {"Content-Type", "application/json"}},
 			body = transmute([]u8)encode(object({"query", text(query)}, {"variables", variables})),
 		},
 		surf.Config {
-			tls = {root_cas = platform_roots[:0]},			max_body_size = MAX_REPORT,
+			max_body_size = MAX_REPORT,
 			timeout = 20 * time.Second,
 			max_redirects = 0,
 			allow_http = network.allow_loopback,
@@ -106,7 +112,9 @@ linear_transport :: proc(data: rawptr, query: string, variables: Value) -> (valu
 
 	if error.kind != .None {
 		return null(), "LINEAR_REQUEST_FAILED"
-	}; defer surf.response_destroy(&response)
+	}
+	defer surf.response_destroy(&response)
+
 	if response.status < 200 || response.status >= 300 {
 		return null(), "LINEAR_REQUEST_FAILED"
 	}
@@ -129,8 +137,11 @@ linear_transport :: proc(data: rawptr, query: string, variables: Value) -> (valu
 
 	if _, valid := get(decoded, "data").(j.Object); !valid {
 		return null(), "LINEAR_REQUEST_FAILED"
-	}; return get(decoded, "data"), nil
+	}
+
+	return get(decoded, "data"), nil
 }
+
 file_digest :: proc(bytes: []u8, present: bool) -> Value {
 	return object(
 		{"present", boolean(present)},
@@ -138,6 +149,7 @@ file_digest :: proc(bytes: []u8, present: bool) -> Value {
 		{"sha256", text(sha256(bytes)) if present else null()},
 	)
 }
+
 version_decode :: proc(bytes: []u8) -> (value: Value, failure: Failure) {
 	decoded, error := decode(bytes)
 	version := get(decoded, "version")
@@ -157,6 +169,7 @@ version_decode :: proc(bytes: []u8) -> (value: Value, failure: Failure) {
 
 	return version, nil
 }
+
 Observation :: struct {
 	fetch:                   Fetch,
 	data:                    rawptr,
@@ -164,6 +177,7 @@ Observation :: struct {
 	budget:                  time.Duration,
 	root, approved_contract: string,
 }
+
 bounded_get :: proc(config: ^Observation, url: string) -> ([]u8, bool, Failure) {
 	remaining := config.budget - time.tick_diff(config.started, time.tick_now())
 
@@ -173,14 +187,19 @@ bounded_get :: proc(config: ^Observation, url: string) -> ([]u8, bool, Failure) 
 
 	return config.fetch(config.data, url, min(10 * time.Second, remaining))
 }
+
 observe :: proc(manifest: Value, config: Observation) -> (observed: Value, failure: Failure) {
 	settings := config
 
 	if settings.fetch == nil {
 		settings.fetch = transport
-	}; if settings.budget == 0 {
+	}
+
+	if settings.budget == 0 {
 		settings.budget = 180 * time.Second
-	}; if settings.started == {} {
+	}
+
+	if settings.started == {} {
 		settings.started = time.tick_now()
 	}
 
@@ -200,7 +219,9 @@ observe :: proc(manifest: Value, config: Observation) -> (observed: Value, failu
 
 		if !present {
 			return null(), "UPSTREAM_HEAD_MISSING"
-		}; head_value, parse_error := decode(head_bytes); head := str(get(head_value, "sha"))
+		}
+
+		head_value, parse_error := decode(head_bytes); head := str(get(head_value, "sha"))
 		if parse_error != "" || !hex_valid(head, 40) {
 			return null(), "UPSTREAM_HEAD_INVALID"
 		}
@@ -282,6 +303,7 @@ observe :: proc(manifest: Value, config: Observation) -> (observed: Value, failu
 
 	return
 }
+
 compare :: proc(observed: Value, previous: Value = nil) -> Value {
 	historical, changes := make(j.Array), make(j.Array)
 	old := object()
@@ -303,7 +325,9 @@ compare :: proc(observed: Value, previous: Value = nil) -> Value {
 
 			if json_boolean_equals(get(file, "changed_from_reference")) {
 				append(&historical, key)
-			}; if !first && !equal(get(prior, str(get(file, "path"))), get(file, "current")) {
+			}
+
+			if !first && !equal(get(prior, str(get(file, "path"))), get(file, "current")) {
 				append(&changes, key)
 			}
 		}
@@ -318,6 +342,7 @@ compare :: proc(observed: Value, previous: Value = nil) -> Value {
 		{"runtime_version_changed", boolean(false)},
 	)
 }
+
 is_private_state_file :: proc(info: p.stat_t) -> bool {
 	return(
 		p.S_ISREG(info.st_mode) &&
@@ -327,13 +352,17 @@ is_private_state_file :: proc(info: p.stat_t) -> bool {
 		info.st_size <= MAX_REPORT \
 	)
 }
+
 private_file :: proc(path: string) -> Failure {
 	info: p.stat_t
 
 	if p.lstat(strings.clone_to_cstring(path), &info) != {} || !is_private_state_file(info) {
 		return "STATE_FILE_UNSAFE"
-	}; return nil
+	}
+
+	return nil
 }
+
 locked_state :: proc(path: string) -> (fd: p.FD, failure: Failure) {
 	fd = -1
 
@@ -343,6 +372,7 @@ locked_state :: proc(path: string) -> (fd: p.FD, failure: Failure) {
 
 	name := strings.clone_to_cstring(path)
 	_ = p.mkdir(name, {.IRUSR, .IWUSR, .IXUSR})
+
 	info: p.stat_t
 	if p.lstat(name, &info) != {} ||
 	   !p.S_ISDIR(info.st_mode) ||
@@ -366,8 +396,11 @@ locked_state :: proc(path: string) -> (fd: p.FD, failure: Failure) {
 	if native_flock(fd, 2 | 4) != 0 {
 		p.close(fd)
 		return -1, "ALREADY_RUNNING"
-	}; return
+	}
+
+	return
 }
+
 atomic_bytes :: proc(path: string, data: []u8) -> Failure {
 	if len(data) > MAX_REPORT {
 		return "REPORT_TOO_LARGE"
@@ -405,7 +438,9 @@ atomic_bytes :: proc(path: string, data: []u8) -> Failure {
 
 		if n <= 0 {
 			return "LOCAL_STATE_FAILED"
-		}; offset += int(n)
+		}
+
+		offset += int(n)
 	}
 
 	if p.fsync(fd) != {} || p.rename(name, strings.clone_to_cstring(path)) != 0 {
@@ -416,18 +451,27 @@ atomic_bytes :: proc(path: string, data: []u8) -> Failure {
 
 	if directory_fd < 0 {
 		return "LOCAL_STATE_FAILED"
-	}; defer p.close(directory_fd)
+	}
+
+	defer p.close(directory_fd)
+
 	if p.fsync(directory_fd) != {} {
 		return "LOCAL_STATE_FAILED"
-	}; return nil
+	}
+
+	return nil
 }
+
 atomic_json :: proc(path: string, value: Value) -> Failure {
 	data := encode(value)
 
 	if data == "" {
 		return "JSON_INVALID"
-	}; return atomic_bytes(path, transmute([]u8)concatenate_strings(data, "\n"))
+	}
+
+	return atomic_bytes(path, transmute([]u8)concatenate_strings(data, "\n"))
 }
+
 check_unlocked :: proc(manifest: Value, state: string, config: Observation) -> (result: Value, failure: Failure) {
 	previous := null()
 	previous_path := join(state, "observed.json")
@@ -439,7 +483,9 @@ check_unlocked :: proc(manifest: Value, state: string, config: Observation) -> (
 
 		if read_error != "" {
 			return null(), "STATE_OR_SOURCE_INVALID"
-		}; parse_error: string; previous, parse_error = decode(bytes); if parse_error != "" {
+		}
+
+		parse_error: string; previous, parse_error = decode(bytes); if parse_error != "" {
 			return null(), "STATE_OR_SOURCE_INVALID"
 		}
 	}
@@ -458,9 +504,11 @@ check_unlocked :: proc(manifest: Value, state: string, config: Observation) -> (
 		),
 	) or_return; return
 }
+
 check_upstream_changes :: proc(manifest: Value, state: string, config: Observation) -> (result: Value, failure: Failure) {
 	fd := locked_state(state) or_return
 	defer p.close(fd)
+
 	result, failure = check_unlocked(manifest, state, config)
 
 	if failure != nil {

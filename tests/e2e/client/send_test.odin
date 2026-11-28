@@ -8,10 +8,12 @@ import wa "shared:whatsapp"
 send_id_successful_pending_replay_preserves_exact_inner_packet :: proc(t: ^testing.T) {
 	fixture := test_fixtures.send_id_fixture()
 	defer test_fixtures.send_id_fixture_destroy(fixture)
+
 	wire: test_fixtures.Send_Id_Wire
 	socket := &fixture.socket
 	test_fixtures.send_id_wire_connect(socket, &wire)
 	defer wa.frame_transport_clear(&socket.client.frames)
+
 	revision := fixture.store.revision
 	id, error := wa.socket_send_group(
 		socket,
@@ -20,6 +22,7 @@ send_id_successful_pending_replay_preserves_exact_inner_packet :: proc(t: ^testi
 		message_id = "stable-id",
 	)
 	defer delete(id)
+
 	testing.expect_value(t, error.kind, .None)
 	testing.expect_value(t, id, "stable-id")
 	testing.expect_value(t, fixture.store.revision, revision)
@@ -32,6 +35,7 @@ send_id_successful_pending_replay_preserves_exact_inner_packet :: proc(t: ^testi
 send_id_targeted_retry_bypasses_pending_replay_without_changing_intent :: proc(t: ^testing.T) {
 	fixture := test_fixtures.send_id_fixture()
 	defer test_fixtures.send_id_fixture_destroy(fixture)
+
 	id, handled, error := wa.socket_group_existing_send(
 		&fixture.socket,
 		"123@g.us",
@@ -41,6 +45,7 @@ send_id_targeted_retry_bypasses_pending_replay_without_changing_intent :: proc(t
 		transmute([]u8)string("original content"),
 	)
 	defer delete(id)
+
 	testing.expect(t, !handled)
 	testing.expect_value(t, error.kind, .None)
 	_, conflict, conflict_error := wa.socket_group_existing_send(

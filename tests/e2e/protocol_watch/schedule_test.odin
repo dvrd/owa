@@ -14,6 +14,7 @@ import "core:time"
 schedule_real_child_stdin_schema :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	script := w.concatenate_strings(
 		"value=$(cat); test \"$value\" = 'public report' || exit 8; printf '%s\\n' '",
@@ -28,6 +29,7 @@ schedule_real_child_stdin_schema :: proc(t: ^testing.T) {
 schedule_nonreading_stdin_deadline :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	start := time.tick_now()
 	_, failure := w.agent_run(test_fixtures.shell_argv("sleep 30"), transmute([]u8)strings.repeat("x", 256 * 1024), 1)
@@ -39,6 +41,7 @@ schedule_nonreading_stdin_deadline :: proc(t: ^testing.T) {
 schedule_stderr_never_returned :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	_, failure := w.agent_run(
 		test_fixtures.shell_argv("cat >/dev/null; printf private-secret-token >&2; exit 1"),
@@ -51,6 +54,7 @@ schedule_stderr_never_returned :: proc(t: ^testing.T) {
 schedule_oversized_stdout_killed :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	_, failure := w.agent_run(test_fixtures.shell_argv("cat >/dev/null; head -c 70000 /dev/zero"), nil, 3)
 	testing.expect(t, failure == w.Failure("AGENT_OUTPUT_LIMIT"))
@@ -73,8 +77,11 @@ watcher_argv :: proc(state: string, report: w.Value, write: bool, code: int, sum
 
 	if write {
 		script = "printf '%s\\n' \"$2\" > \"$1/new.json\"; chmod 600 \"$1/new.json\"; mv \"$1/new.json\" \"$1/report.json\"; "
-	}; script = w.concatenate_strings(script, "printf '%s\\n' \"$3\"; exit ", fmt.aprint(code))
+	}
+
+	script = w.concatenate_strings(script, "printf '%s\\n' \"$3\"; exit ", fmt.aprint(code))
 	values := []string{"/bin/sh", "-c", script, "sh", state, w.encode(report), w.encode(without)}
+
 	out := make([]string, len(values))
 	copy(out, values)
 
@@ -85,10 +92,12 @@ watcher_argv :: proc(state: string, report: w.Value, write: bool, code: int, sum
 schedule_fresh_report_and_summary_match :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	root, error := os.make_directory_temp("", "owa-schedule-*", context.allocator)
 	assert(error == nil)
 	defer os.remove_all(root)
+
 	args := test_fixtures.schedule_options_for_test(root)
 	fd, failure := w.locked_state(args.state_dir)
 	assert(failure == nil)
@@ -104,6 +113,7 @@ schedule_fresh_report_and_summary_match :: proc(t: ^testing.T) {
 	_, failure = w.watch_run(args, watcher_argv(args.state_dir, report, false, 0))
 	testing.expect(t, failure == w.Failure("WATCH_REPORT_STALE"))
 	summary := w.object({"status", w.text("NO_MONITORED_DRIFT")}, {"compatibility_approved", w.boolean(false)})
+
 	w.put(&report, "compatibility_approved", w.boolean(true))
 	_, failure = w.watch_run(args, watcher_argv(args.state_dir, report, true, 0, summary))
 	testing.expect(t, failure == w.Failure("WATCH_REPORT_MISMATCH"))
@@ -113,15 +123,18 @@ schedule_fresh_report_and_summary_match :: proc(t: ^testing.T) {
 schedule_failed_watcher_preserves_report :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	root, error := os.make_directory_temp("", "owa-schedule-*", context.allocator)
 	assert(error == nil)
 	defer os.remove_all(root)
+
 	args := test_fixtures.schedule_options_for_test(root)
 	fd, failure := w.locked_state(args.state_dir)
 	assert(failure == nil)
 	p.close(fd)
 	report := w.object({"status", w.text("NO_MONITORED_DRIFT")}, {"observation", w.object()})
+
 	path := w.join(args.state_dir, "report.json")
 	assert(w.atomic_json(path, report) == nil)
 	before, _ := os.read_entire_file(path, context.allocator)
@@ -135,6 +148,7 @@ schedule_failed_watcher_preserves_report :: proc(t: ^testing.T) {
 schedule_stalled_watcher_hard_killed :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	started := time.tick_now()
 	_, failure := w.watch_capture(test_fixtures.shell_argv("trap '' TERM; sleep 30"), 50 * time.Millisecond)
@@ -146,15 +160,18 @@ schedule_stalled_watcher_hard_killed :: proc(t: ^testing.T) {
 schedule_exit_three_only_review_required :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	root, error := os.make_directory_temp("", "owa-schedule-*", context.allocator)
 	assert(error == nil)
 	defer os.remove_all(root)
+
 	args := test_fixtures.schedule_options_for_test(root)
 	fd, failure := w.locked_state(args.state_dir)
 	assert(failure == nil)
 	p.close(fd)
 	report := w.object({"status", w.text("REVIEW_REQUIRED")}, {"observation", w.object()})
+
 	result: w.Value
 	result, failure = w.watch_run(args, watcher_argv(args.state_dir, report, true, 3))
 	testing.expect(t, failure == nil && w.str(w.get(result, "status")) == "REVIEW_REQUIRED")
@@ -166,8 +183,10 @@ schedule_exit_three_only_review_required :: proc(t: ^testing.T) {
 schedule_sanitizes_environment :: proc(t: ^testing.T) {
 	arena := test_fixtures.setup_arena()
 	defer mem.dynamic_arena_destroy(&arena)
+
 	context.allocator = mem.dynamic_arena_allocator(&arena)
 	for entry in w.agent_environment() {testing.expect(t, !strings.has_prefix(entry, "LINEAR_API=") && !strings.has_prefix(entry, "AWS_SECRET_ACCESS_KEY="))}
+
 	script := w.concatenate_strings(
 		"test -z \"$LINEAR_API\" && test -z \"$AWS_SECRET_ACCESS_KEY\" || exit 9; cat >/dev/null; printf '%s\\n' '",
 		w.encode(test_fixtures.valid_agent_result()),

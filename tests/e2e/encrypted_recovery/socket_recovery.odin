@@ -1,8 +1,9 @@
 package main
 
+import wire_frames "../../fixtures/message_transport"
 import wa "shared:whatsapp"
-import surf "shared:surf"
-import ws "shared:websocket"
+import "shared:surf"
+import ws "shared:async/websocket"
 import "core:bytes"
 import "core:crypto/hash"
 import "core:fmt"
@@ -28,13 +29,14 @@ Socket_Recovery :: struct {
 	input_size, input_at, output_size: int,
 	replay:                            bool,
 	tcp:                               net.TCP_Connection,
-	native_stream:                     surf.WebSocket_Stream,
+	native_stream:                     net.Connection,
 	tcp_enabled:                       bool,
 }
 
 socket_body :: proc() -> []u8 {
 	buffer: [256]u8
 	size, error := wa.text_message_encode(buffer[:], {kind = .Conversation, text = SOCKET_TEXT})
+
 	assert(error == .None)
 	body := make([]u8, size)
 	copy(body, buffer[:size])
@@ -49,19 +51,23 @@ socket_recovery_close :: proc(peer: ^Socket_Recovery) {
 	free(peer)
 }
 
-socket_recovery_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Stream_Error) {
+socket_recovery_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_Error) {
 	peer := cast(^Socket_Recovery)data
 
 	if peer.tcp_enabled {
 		count, error := peer.native_stream.read(peer.native_stream.data, dst)
 		peer.input_at += count
-		return count, error
+		if error != nil {
+			return count, {kind = .IO_Failed}
+		}
+
+		return count, {}
 	}
 
 	count := min(len(dst), peer.input_size - peer.input_at, 3)
 
 	if count == 0 {
-		return 0, {kind = .EOF}
+		return 0, {kind = .Peer_Closed}
 	}
 
 	copy(dst[:count], peer.input[peer.input_at:][:count])
@@ -70,14 +76,16 @@ socket_recovery_read :: proc(data: rawptr, dst: []u8) -> (int, surf.WebSocket_St
 	return count, {}
 }
 
-socket_recovery_stream_close :: proc(_: rawptr) -> surf.WebSocket_Stream_Error {
+socket_recovery_stream_close :: proc(_: rawptr, _: u16) -> surf.WebSocket_Error {
 	return {}
 }
 
 socket_owned_write :: proc(directory, name: string, data: []u8) {
 	path := fmt.aprintf("%s/%s", directory, name)
 	defer delete(path)
+
 	file, opened := os.open(path, {.Write, .Create, .Excl}, {.Read_User, .Write_User})
+
 	assert(opened == nil)
 	count, written := os.write(file, data)
 	assert(written == nil && count == len(data))
@@ -93,11 +101,14 @@ socket_state_witness :: proc(peer: ^Socket_Recovery) -> [160]u8 {
 	address, addressed := wa.socket_signal_address(&peer.socket, SOCKET_B)
 	assert(addressed.kind == .None)
 	defer delete(address)
+
 	canonical, canonical_error := wa.socket_signal_address(&peer.socket, SOCKET_A)
 	assert(canonical_error.kind == .None)
 	defer delete(canonical)
+
 	key_name := fmt.aprintf("%s|%s", SOCKET_GROUP, canonical)
 	defer delete(key_name)
+
 	session, have_session := wa.state_store_get(&peer.f.store, .Session, address)
 	group, have_group := wa.state_store_get(&peer.f.store, .Sender_Key, key_name)
 	members, have_members := wa.state_store_get(&peer.f.store, .Sender_Key_Membership, key_name)
@@ -107,6 +118,7 @@ socket_state_witness :: proc(peer: ^Socket_Recovery) -> [160]u8 {
 	prekeys, io_error := os.read_entire_file(peer.prekey_path, context.allocator)
 	assert(io_error == nil)
 	defer delete(prekeys)
+
 	result: [160]u8
 
 	for value, index in ([]([]u8){session, group, members, content, prekeys}) {
@@ -118,7 +130,7 @@ socket_state_witness :: proc(peer: ^Socket_Recovery) -> [160]u8 {
 	return result
 }
 
-socket_recovery_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Stream_Error) {
+socket_recovery_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_Error) {
 	peer := cast(^Socket_Recovery)data
 
 	if !peer.replay && peer.output_size == 0 && peer.stage == "socket-after-commit-before-write" {
@@ -130,8 +142,8 @@ socket_recovery_write :: proc(data: rawptr, src: []u8) -> (int, surf.WebSocket_S
 	if peer.tcp_enabled {
 		written, error := peer.native_stream.write(peer.native_stream.data, src)
 
-		if error.kind != .None {
-			return written, error
+		if error != nil {
+			return written, {kind = .IO_Failed}
 		}
 
 		count = written
@@ -194,14 +206,11 @@ socket_recovery_attach :: proc(f: ^Fixture, directory, stage: string, replay := 
 
 	peer.socket.websocket = {
 		phase = .Open,
-		allocator = context.allocator,
-		config = {host = "synthetic.invalid", max_message_size = 8192},
-		stream = {
-			data = peer,
-			read = socket_recovery_read,
-			write = socket_recovery_write,
-			close = socket_recovery_stream_close,
-		},
+		max_message_size = 8192,
+		data = peer,
+		read = wire_frames.reader(socket_recovery_read),
+		write = wire_frames.writer(socket_recovery_write),
+		close = socket_recovery_stream_close,
 	}
 
 	if socket_tcp_port != 0 {
@@ -245,15 +254,18 @@ socket_recovery_prepare :: proc(f: ^Fixture, peer: ^Socket_Recovery) {
 	prekeys_set(f)
 	receiver := session_bytes(&f.pair.a)
 	defer delete(receiver)
+
 	assert(wa.state_store_set(&f.store, .Captured_Message, "socket-peer-session", receiver).kind == .None)
 	address, addressed := wa.socket_signal_address(&peer.socket, SOCKET_B)
 	assert(addressed.kind == .None)
 	defer delete(address)
+
 	session_set(&f.store, address, &f.pair.b)
 	identity := wa.signal_curve_public(fixture_private(0))
 	assert(wa.state_store_set(&f.store, .Identity, address, identity[:]).kind == .None)
 	body := socket_body()
 	defer delete(body)
+
 	// Stable caller intent exists before any production encryption or output.
 	assert(wa.state_store_set(&f.store, .Captured_Message, SOCKET_ID, body).kind == .None)
 	assert(wa.state_store_save(&f.store, f.path).kind == .None)
@@ -262,9 +274,11 @@ socket_recovery_prepare :: proc(f: ^Fixture, peer: ^Socket_Recovery) {
 socket_recovery_send :: proc(peer: ^Socket_Recovery) {
 	body := socket_body()
 	defer delete(body)
+
 	canonical, addressed := wa.socket_signal_address(&peer.socket, SOCKET_A)
 	assert(addressed.kind == .None)
 	defer delete(canonical)
+
 	id, error := wa.socket_group_send_prepared(
 		&peer.socket,
 		SOCKET_GROUP,
@@ -277,6 +291,7 @@ socket_recovery_send :: proc(peer: ^Socket_Recovery) {
 		[]string{SOCKET_B},
 	)
 	defer delete(id)
+
 	assert(error.kind == .None && id == SOCKET_ID && peer.socket.sequence == 0)
 	assert(peer.socket.client.noise.write_counter == 1 && peer.output_size > 0)
 }
@@ -290,7 +305,10 @@ socket_recovery_ack_frame :: proc(destination: []u8) -> int {
 	assert(binary_error.kind == .None)
 	server := wa.Noise_State {
 		phase = .Transport,
-	}; defer wa.noise_clear(&server)
+	}
+
+	defer wa.noise_clear(&server)
+
 	encrypted_size, encrypted := wa.noise_encrypt(&server, ciphertext[:], encoded[:size])
 	assert(encrypted == .None)
 	envelope_size, framed := wa.frame_encode(envelope[:], ciphertext[:encrypted_size])
@@ -330,8 +348,10 @@ socket_recovery_ack :: proc(peer: ^Socket_Recovery) {
 socket_stage_run :: proc(directory, stage: string) {
 	f := fixture_open(directory, true)
 	defer fixture_close(f)
+
 	peer := socket_recovery_attach(f, directory, stage)
 	defer socket_recovery_close(peer)
+
 	socket_recovery_prepare(f, peer)
 
 	if stage == "socket-before-send" {
@@ -372,7 +392,10 @@ socket_transport_inner :: proc(packet: []u8) -> []u8 {
 	assert(framed == .None && consumed == len(payload))
 	transport := wa.Noise_State {
 		phase = .Transport,
-	}; defer wa.noise_clear(&transport)
+	}
+
+	defer wa.noise_clear(&transport)
+
 	plain: [8192]u8
 	count, decrypted := wa.noise_decrypt(&transport, plain[:], encrypted)
 	assert(decrypted == .None)
@@ -388,6 +411,7 @@ socket_peer_decrypt :: proc(f: ^Fixture, inner: []u8) {
 	document, decoded := wa.binary_node_decode(inner)
 	assert(decoded.kind == .None)
 	defer wa.binary_document_destroy(&document)
+
 	id, id_found := wa.node_attr(document.root, "id")
 	destination, destination_found := wa.node_attr(document.root, "to")
 	assert(
@@ -450,14 +474,18 @@ socket_peer_decrypt :: proc(f: ^Fixture, inner: []u8) {
 socket_verify_run :: proc(directory, stage: string) {
 	f := fixture_open(directory, false)
 	defer fixture_close(f)
+
 	before, io_error := os.read_entire_file(f.path, context.allocator)
 	assert(io_error == nil)
 	defer delete(before)
+
 	peer := socket_recovery_attach(f, directory, stage, true)
 	defer socket_recovery_close(peer)
+
 	address, addressed := wa.socket_signal_address(&peer.socket, SOCKET_B)
 	assert(addressed.kind == .None)
 	defer delete(address)
+
 	// Load the production sender session and the separate synthetic peer snapshot.
 	session_get(&f.store, address, &f.pair.b)
 	receiver, receiver_found := wa.state_store_get(&f.store, .Captured_Message, "socket-peer-session")
@@ -468,6 +496,7 @@ socket_verify_run :: proc(directory, stage: string) {
 	prekey_before, prekey_io := os.read_entire_file(peer.prekey_path, context.allocator)
 	assert(prekey_io == nil)
 	defer delete(prekey_before)
+
 	encoded_prekeys, prekeys_found := wa.state_store_get(&f.store, .Captured_Message, "prekeys-b")
 	assert(prekeys_found && bytes.equal(prekey_before, encoded_prekeys))
 	pending, pending_found := wa.state_store_get(&f.store, .Outbound_Message, SOCKET_ID)
@@ -475,6 +504,7 @@ socket_verify_run :: proc(directory, stage: string) {
 	intent, intent_found := wa.state_store_get(&f.store, .Captured_Message, SOCKET_ID)
 	body := socket_body()
 	defer delete(body)
+
 	assert(intent_found && bytes.equal(intent, body))
 	_, journal := wa.state_store_get(&f.store, .Captured_Message, SOCKET_ACK_JOURNAL)
 	before_send := stage == "socket-before-send"
@@ -485,8 +515,10 @@ socket_verify_run :: proc(directory, stage: string) {
 	canonical, canonical_error := wa.socket_signal_address(&peer.socket, SOCKET_A)
 	assert(canonical_error.kind == .None)
 	defer delete(canonical)
+
 	key_name := fmt.aprintf("%s|%s", SOCKET_GROUP, canonical)
 	defer delete(key_name)
+
 	snapshot, group_found := wa.state_store_get(&f.store, .Sender_Key, key_name)
 	assert(group_found != before_send)
 
@@ -506,20 +538,24 @@ socket_verify_run :: proc(directory, stage: string) {
 
 	path := fmt.aprintf("%s/transport.bin", directory)
 	defer delete(path)
+
 	escaped := !before_send && stage != "socket-after-commit-before-write"
 	assert(os.exists(path) == escaped)
 
 	if escaped {
 		witness_path := fmt.aprintf("%s/transport-state.bin", directory)
 		defer delete(witness_path)
+
 		witness, witness_io := os.read_entire_file(witness_path, context.allocator)
 		assert(witness_io == nil)
 		defer delete(witness)
+
 		expected := socket_state_witness(peer)
 		assert(bytes.equal(witness, expected[:]))
 		packet, read_error := os.read_entire_file(path, context.allocator)
 		assert(read_error == nil)
 		defer delete(packet)
+
 		inner := socket_transport_inner(packet)
 		defer delete(inner)
 
@@ -538,6 +574,7 @@ socket_verify_run :: proc(directory, stage: string) {
 		revision := f.store.revision
 		id, error := wa.socket_send_group(&peer.socket, SOCKET_GROUP, body, message_id = SOCKET_ID)
 		defer delete(id)
+
 		assert(error.kind == .None && id == SOCKET_ID && peer.socket.sequence == 0)
 		assert(f.store.revision == revision && peer.socket.client.noise.write_counter == 1)
 
@@ -547,11 +584,14 @@ socket_verify_run :: proc(directory, stage: string) {
 
 		replay_path := fmt.aprintf("%s/replay.bin", directory)
 		defer delete(replay_path)
+
 		packet, read_error := os.read_entire_file(replay_path, context.allocator)
 		assert(read_error == nil)
 		defer delete(packet)
+
 		replay_inner := socket_transport_inner(packet)
 		defer delete(replay_inner)
+
 		assert(bytes.equal(replay_inner, pending))
 	}
 
@@ -564,10 +604,12 @@ socket_verify_run :: proc(directory, stage: string) {
 	after, after_error := os.read_entire_file(f.path, context.allocator)
 	assert(after_error == nil)
 	defer delete(after)
+
 	assert(bytes.equal(before, after))
 	prekey_after, prekey_after_io := os.read_entire_file(peer.prekey_path, context.allocator)
 	assert(prekey_after_io == nil)
 	defer delete(prekey_after)
+
 	assert(bytes.equal(prekey_before, prekey_after))
 	fmt.printf(
 		"ENCRYPTED_SOCKET_REOPEN_PASS stage=%s pending=%t application_ack_known=%t recipient_delivery=false\n",

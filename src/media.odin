@@ -9,6 +9,7 @@ import "core:encoding/base64"
 import "core:encoding/json"
 import "core:fmt"
 import "core:mem"
+import "core:os"
 import "core:strconv"
 import "core:strings"
 import "core:sync"
@@ -31,14 +32,17 @@ Media_Kind :: enum {
 	History,
 	Audio,
 }
+
 Media_Keys :: struct {
 	iv:                                 [16]u8,
 	cipher_key, mac_key, reference_key: [32]u8,
 }
+
 Media_Metadata :: struct {
 	media_key, file_sha256, file_enc_sha256: [32]u8,
 	file_length:                             u64,
 }
+
 Media_Error_Kind :: enum {
 	None,
 	Invalid_Kind,
@@ -74,6 +78,7 @@ Media_Error_Kind :: enum {
 	Authentication_Failed,
 	Invalid_Retry,
 }
+
 Media_Error :: struct {
 	kind:       Media_Error_Kind,
 	protobuf:   Protobuf_Error,
@@ -88,6 +93,7 @@ media_keys_clear :: proc(keys: ^Media_Keys) {
 		crypto.zero_explicit(keys, size_of(Media_Keys))
 	}
 }
+
 media_metadata_clear :: proc(metadata: ^Media_Metadata) {
 	if metadata != nil {
 		crypto.zero_explicit(metadata, size_of(Media_Metadata))
@@ -98,6 +104,7 @@ media_key_generate :: proc() -> (key: [32]u8, err: Media_Error) {
 	when !crypto.HAS_RAND_BYTES {
 		return {}, {kind = .Entropy_Unavailable}
 	}
+
 	crypto.rand_bytes(key[:])
 
 	return key, {}
@@ -128,8 +135,10 @@ media_keys_derive :: proc(
 
 	key := media_key
 	defer crypto.zero_explicit(&key, 32)
+
 	expanded: [112]u8
 	defer crypto.zero_explicit(&expanded, 112)
+
 	salt: [32]u8
 	hkdf.extract_and_expand(.SHA256, salt[:], key[:], transmute([]u8)info, expanded[:])
 	copy(keys.iv[:], expanded[:16])
@@ -167,6 +176,7 @@ media_encrypt :: proc(
 	}
 
 	defer media_keys_clear(&keys)
+
 	cipher_size := (len(plaintext) / 16 + 1) * 16
 	required := cipher_size + MEDIA_MAC_SIZE
 	if len(dst) < required {
@@ -180,10 +190,13 @@ media_encrypt :: proc(
 	ctx: aes.Context_ECB
 	aes.init_ecb(&ctx, keys.cipher_key[:])
 	defer aes.reset_ecb(&ctx)
+
 	previous := keys.iv
 	defer crypto.zero_explicit(&previous, 16)
+
 	block: [16]u8
 	defer crypto.zero_explicit(&block, 16)
+
 	padding := cast(u8)(cipher_size - len(plaintext))
 	for at := 0; at < cipher_size; at += 16 {
 		for i in 0 ..< 16 {
@@ -199,8 +212,10 @@ media_encrypt :: proc(
 		aes.encrypt_ecb(&ctx, dst[at:at + 16], block[:])
 		copy(previous[:], dst[at:at + 16])
 	}
+
 	mac := compute_media_authentication_tag(keys, dst[:cipher_size])
 	defer crypto.zero_explicit(&mac, 32)
+
 	copy(dst[cipher_size:required], mac[:MEDIA_MAC_SIZE])
 	metadata.media_key = media_key
 	metadata.file_sha256 = sha256(plaintext)
@@ -223,6 +238,7 @@ media_decrypt :: proc(
 ) {
 	details := metadata
 	defer media_metadata_clear(&details)
+
 	if max_size < 0 || max_size > MAX_MEDIA_SIZE_LIMIT {
 		return 0, {kind = .Invalid_Limit}
 	}
@@ -251,23 +267,27 @@ media_decrypt :: proc(
 	}
 
 	defer media_keys_clear(&keys)
+
 	if authentication_error := media_ciphertext_authenticate(encrypted, &details, &keys);
 	   authentication_error.kind != .None {
 		return 0, authentication_error
 	}
+
 	cipher_size := len(encrypted) - MEDIA_MAC_SIZE
 	plaintext, allocation_err := make([]u8, cipher_size)
 	if allocation_err != nil {
 		return 0, {kind = .Allocation_Failed, allocation = allocation_err}
 	}
-
 	defer delete(plaintext)
+
 	defer crypto.zero_explicit(raw_data(plaintext), len(plaintext))
+
 	media_cbc_decrypt_blocks(plaintext, encrypted, cipher_size, &keys)
 	if plaintext_error := media_plaintext_validate(plaintext, cipher_size, plain_size, &details);
 	   plaintext_error.kind != .None {
 		return 0, plaintext_error
 	}
+
 	copy(dst, plaintext[:plain_size])
 	return plain_size, {}
 }
@@ -298,8 +318,10 @@ media_cbc_decrypt_blocks :: proc(plaintext, encrypted: []u8, cipher_size: int, k
 	ctx: aes.Context_ECB
 	aes.init_ecb(&ctx, keys.cipher_key[:])
 	defer aes.reset_ecb(&ctx)
+
 	previous := keys.iv
 	defer crypto.zero_explicit(&previous, 16)
+
 	block: [16]u8
 	defer crypto.zero_explicit(&block, 16)
 
@@ -308,6 +330,7 @@ media_cbc_decrypt_blocks :: proc(plaintext, encrypted: []u8, cipher_size: int, k
 		for i in 0 ..< 16 {
 			plaintext[at + i] = block[i] ~ previous[i]
 		}
+
 		copy(previous[:], encrypted[at:at + 16])
 	}
 }
@@ -328,6 +351,7 @@ media_plaintext_validate :: proc(
 			difference |= plaintext[cipher_size - 1 - i] ~ cast(u8)padding
 		}
 	}
+
 	if difference != 0 {
 		return {kind = .Invalid_Padding}
 	}
@@ -347,6 +371,7 @@ media_plaintext_validate :: proc(
 compute_media_authentication_tag :: proc(keys: Media_Keys, ciphertext: []u8) -> [32]u8 {
 	key := keys
 	defer media_keys_clear(&key)
+
 	ctx: hmac.Context
 	hmac.init(&ctx, .SHA256, key.mac_key[:])
 	hmac.update(&ctx, key.iv[:])
@@ -405,6 +430,7 @@ Message_Key :: struct {
 	from_me:                                              bool,
 	has_remote_jid, has_id, has_participant, has_from_me: bool,
 }
+
 Reaction_Message :: struct {
 	key:                                                          Message_Key,
 	text, grouping_key:                                           string,
@@ -535,6 +561,7 @@ media_message_decode :: proc(src: []u8) -> (message: Media_Message, err: Media_E
 	if number == 8 {
 		return decode_audio_message(payload)
 	}
+
 	if number != 3 && number != 7 {
 		return {}, {}
 	}
@@ -583,6 +610,7 @@ media_message_decode :: proc(src: []u8) -> (message: Media_Message, err: Media_E
 			   integer_error.kind != .None {
 				return {}, integer_error
 			}
+
 			continue
 		}
 
@@ -600,6 +628,7 @@ decode_audio_message :: proc(payload: []u8) -> (Media_Message, Media_Error) {
 	message := Media_Message {
 		kind = .Audio,
 	}
+
 	at := 0
 	seen: u32
 	for at < len(payload) {
@@ -607,27 +636,34 @@ decode_audio_message :: proc(payload: []u8) -> (Media_Message, Media_Error) {
 		if err != .None {
 			return {}, {kind = .Invalid_Protobuf, protobuf = err}
 		}
+
 		if field.number > 10 && field.number != 17 {
 			continue
 		}
+
 		bit := u32(1) << field.number
 		if seen & bit != 0 {
 			return {}, {kind = .Duplicate_Field}
 		}
+
 		seen |= bit
 		integer := field.number >= 4 && field.number <= 6 || field.number == 10
 		if field.wire_type != (0 if integer else 2) {
 			return {}, {kind = .Invalid_Protobuf}
 		}
+
 		switch field.number {
 		case 1, 2, 9:
 			if e := media_message_string_decode(&message, field); e.kind != .None {
 				return {}, e
 			}
+
+
 		case 3, 7, 8:
 			if len(field.data) != 32 {
 				return {}, {kind = .Invalid_Metadata}
 			}
+
 			switch field.number {
 			case 3:
 				message.file_sha256, message.has_file_sha256 = field.data, true
@@ -636,12 +672,15 @@ decode_audio_message :: proc(payload: []u8) -> (Media_Message, Media_Error) {
 			case 8:
 				message.file_enc_sha256, message.has_file_enc_sha256 = field.data, true
 			}
+
+
 		case 4:
 			message.file_length, message.has_file_length = field.value, true
 		case 5:
 			if field.value > u64(max(u32)) {
 				return {}, {kind = .Invalid_Protobuf, protobuf = .Integer_Overflow}
 			}
+
 			message.duration_seconds, message.has_duration_seconds = u32(field.value), true
 		case 6:
 			message.voice_note, message.has_voice_note = field.value != 0, true
@@ -652,9 +691,11 @@ decode_audio_message :: proc(payload: []u8) -> (Media_Message, Media_Error) {
 			if e.kind != .None {
 				return {}, e
 			}
+
 			message.context_info, message.has_context = context_info, true
 		}
 	}
+
 	return message, {}
 }
 
@@ -670,11 +711,14 @@ media_message_field_known :: proc(
 		if message.kind == .Image {
 			return true
 		}
+
+
 	case 8, 20:
 		if message.kind == .Document {
 			return true
 		}
 	}
+
 	return(
 		field.number == key_field ||
 		field.number == path_field ||
@@ -778,6 +822,7 @@ media_message_string_decode :: proc(
 		} else {
 			message.title, message.has_title = value, true
 		}
+
 
 	case 8:
 		message.file_name, message.has_file_name = value, true
@@ -930,14 +975,24 @@ media_error_from_protobuf_writer :: proc(writer: ^Protobuf_Writer) -> Media_Erro
 	switch writer.err {
 	case .None:
 		return {}
+
+
 	case .Oversized:
 		return {kind = .Message_Oversized}
+
+
 	case .Overlapping_Buffers:
 		return {kind = .Overlapping_Buffers}
+
+
 	case .Invalid_UTF8:
 		return {kind = .Invalid_UTF8}
+
+
 	case .Invalid_Metadata:
 		return {kind = .Invalid_Metadata}
+
+
 	case .Invalid_Protobuf:
 		return {kind = .Invalid_Protobuf, protobuf = writer.protobuf}
 	}
@@ -1003,6 +1058,7 @@ media_emit_body :: proc(writer: ^Protobuf_Writer, message: Media_Message) {
 		if !media_emit_bytes_fields(writer, m, number, key) {
 			return
 		}
+
 		if !media_emit_integer_context_fields(writer, m, number, timestamp) {
 			return
 		}
@@ -1254,6 +1310,8 @@ media_extract_content :: proc(
 				if err.kind != .None {
 					return nil, 0, err
 				}
+
+
 			case:
 				payload, number = field.data, field.number
 			}
@@ -1441,7 +1499,7 @@ MAX_MEDIA_URL_SIZE :: 4096
 // Nil selects the native authenticated HTTP client. An explicit executor is
 // trusted application code and must uphold the supplied TLS/bounds settings.
 Media_HTTP_Execute :: #type proc(
-	request: http.Request,
+	request: surf.Request,
 	config: surf.Config,
 ) -> (
 	surf.Response,
@@ -1449,7 +1507,7 @@ Media_HTTP_Execute :: #type proc(
 )
 
 media_http_native :: proc(
-	request: http.Request,
+	request: surf.Request,
 	config: surf.Config,
 ) -> (
 	surf.Response,
@@ -1457,18 +1515,21 @@ media_http_native :: proc(
 ) {
 	return surf.execute(request, config)
 }
+
 Media_Host :: struct {
 	hostname:           string,
 	// Zero means the server did not advertise a per-host limit. Local media
 	// and HTTP limits still apply to every upload.
 	max_content_length: u64,
 }
+
 // Strings borrow the decoded Binary_Document; host storage belongs to caller.
 Media_Connection :: struct {
 	auth:        string,
 	ttl_seconds: u32,
 	hosts:       []Media_Host,
 }
+
 Media_Upload_Result :: struct {
 	url:              [MAX_MEDIA_URL_SIZE]u8,
 	url_size:         int,
@@ -1547,8 +1608,10 @@ media_connection_decode :: proc(
 		hostname, _ := node_attr(host, "hostname")
 		length, _ := read_media_host_upload_limit(host)
 		storage[at] = {hostname, length}
+
 		at += 1
 	}
+
 	return {auth = auth, ttl_seconds = cast(u32)ttl, hosts = storage[:count]}, {}
 }
 
@@ -1666,6 +1729,7 @@ media_upload_url :: proc(
 	case:
 		return "", {kind = .Invalid_Kind}
 	}
+
 	hash := encrypted_hash
 	token: [44]u8
 	base64.encode_into_buf(token[:], hash[:])
@@ -1678,10 +1742,12 @@ media_upload_url :: proc(
 			c = '_'
 		}
 	}
+
 	// Use the same unescaped characters as encodeURIComponent.
 	scratch: [MAX_MEDIA_URL_SIZE]u8
 	at := 0
 	pieces := []string{"https://", hostname, path, cast(string)token[:43], "?auth="}
+
 	for piece in pieces {
 		if len(piece) > len(scratch) - at {
 			return "", {kind = .Invalid_Connection}
@@ -1689,14 +1755,17 @@ media_upload_url :: proc(
 
 		at += copy(scratch[at:], transmute([]u8)piece)
 	}
+
 	if auth_error := media_upload_auth_encode(scratch[:], &at, auth); auth_error.kind != .None {
 		return "", auth_error
 	}
+
 	if 7 + 43 > len(scratch) - at {
 		return "", {kind = .Invalid_Connection}
 	}
 
 	at += copy(scratch[at:], []u8{38, 116, 111, 107, 101, 110, 61})
+
 	at += copy(scratch[at:], token[:43])
 	if len(dst) < at {
 		return "", {kind = .Destination_Undersized}
@@ -1754,13 +1823,13 @@ media_upload_response_decode :: proc(
 	if depth_error := media_upload_json_depth_validate(src); depth_error.kind != .None {
 		return {}, depth_error
 	}
+
 	parser := json.make_parser(src, spec = .JSON)
 	value, e := json.parse_value(&parser)
 
 	if e != .None {
 		return {}, {kind = .Invalid_Upload_Response}
 	}
-
 	defer json.destroy_value(value)
 
 	if parser.curr_token.kind != .EOF {
@@ -1880,20 +1949,25 @@ media_upload :: proc(
 			http = {kind = .Invalid_Config, phase = .Configuration, write_effect = .Not_Sent},
 		}
 	}
+
 	budget := settings.timeout
 	if budget == 0 {
 		budget = 30 * time.Second
 	}
+
 	started := time.tick_now()
 	last := Media_Error {
 		kind = .Invalid_Connection,
 	}
+
 	effect: surf.HTTP_Write_Effect = .Not_Sent
 	for host in connection.hosts {
 		if host.max_content_length != 0 && cast(u64)len(encrypted) > host.max_content_length {
 			last = {
 				kind = .Media_Oversized,
-			}; continue
+			}
+
+			continue
 		}
 
 		url_buffer: [MAX_MEDIA_URL_SIZE]u8
@@ -1935,10 +2009,12 @@ media_upload :: proc(
 
 		last = exchange_error
 	}
+
 	// A later dial failure cannot erase an earlier attempt's uncertain effect.
 	if last.kind == .HTTP_Failed {
 		last.http.write_effect = effect
 	}
+
 	return {}, last
 }
 
@@ -1986,7 +2062,7 @@ media_upload_exchange :: proc(
 			method = .POST,
 			url = url,
 			body = encrypted,
-			headers = []http.Header {
+			headers = []surf.Header {
 				{"Content-Type", "application/octet-stream"},
 				{"Origin", "https://web.whatsapp.com"},
 			},
@@ -2030,6 +2106,7 @@ media_download :: proc(
 
 	metadata, e := media_metadata_from_message(message)
 	defer media_metadata_clear(&metadata)
+
 	if e.kind != .None {
 		return 0, e
 	}
@@ -2047,6 +2124,7 @@ media_download :: proc(
 		return 0, fetch_err
 	}
 	defer surf.response_destroy(&response)
+
 	return media_decrypt(dst, response.body, message.kind, metadata, max_size)
 }
 
@@ -2069,29 +2147,34 @@ fetch_media_ciphertext :: proc(
 	if validation.kind != .None {
 		return {}, validation
 	}
+
 	limit := Media_Metadata {
 		file_length = max_plaintext,
 	}
+
 	settings, settings_error := media_download_settings(config, &limit)
 	if settings_error.kind != .None {
 		return {}, settings_error
 	}
+
 	response, he := exchange(
 		{
 			method = .GET,
 			url = url,
-			headers = []http.Header{{"Origin", "https://web.whatsapp.com"}},
+			headers = []surf.Header{{"Origin", "https://web.whatsapp.com"}},
 		},
 		settings,
 	)
 	if he.kind != .None {
 		return {}, {kind = .HTTP_Failed, http = he}
 	}
+
 	if response.status != 200 {
 		status := response.status
 		surf.response_destroy(&response)
 		return {}, {kind = .HTTP_Status, status = status}
 	}
+
 	return response, {}
 }
 
@@ -2118,6 +2201,7 @@ media_download_settings :: proc(
 media_request_id_valid :: proc(id: string) -> bool {
 	return len(id) > 0 && len(id) <= 128 && utf8.valid_string(id)
 }
+
 media_hostname_valid :: proc(host: string) -> bool {
 	if len(host) == 0 || len(host) > 253 || host[0] == '.' || host[len(host) - 1] == '.' {
 		return false
@@ -2151,6 +2235,7 @@ Media_Retry_Result :: enum {
 	Not_Found        = 2,
 	Decryption_Error = 3,
 }
+
 // Decoded strings and message_secret borrow the authenticated caller buffer.
 Media_Retry_Notification :: struct {
 	stanza_id, direct_path:                                         string,
@@ -2158,6 +2243,7 @@ Media_Retry_Notification :: struct {
 	message_secret:                                                 []u8,
 	has_stanza_id, has_direct_path, has_result, has_message_secret: bool,
 }
+
 Media_Retry_Event :: struct {
 	key:            Message_Key,
 	ciphertext, iv: []u8,
@@ -2178,6 +2264,7 @@ media_retry_request_encode :: proc(
 	when !crypto.HAS_RAND_BYTES {
 		return 0, {kind = .Entropy_Unavailable}
 	}
+
 	nonce: [12]u8
 	crypto.rand_bytes(nonce[:])
 	return media_retry_request_with_nonce(dst, key, media_key, me_jid, nonce)
@@ -2204,6 +2291,7 @@ media_retry_request_with_nonce :: proc(
 	writer := Protobuf_Writer {
 		dst = receipt[:],
 	}
+
 	protobuf_write_string(&writer, 1, key.id)
 	if writer.err != .None {
 		return 0, media_error_from_protobuf_writer(&writer)
@@ -2211,11 +2299,14 @@ media_retry_request_with_nonce :: proc(
 
 	retry_key := derive_media_retry_key(media_key)
 	defer crypto.zero_explicit(&retry_key, 32)
+
 	ctx: aes.Context_GCM
 	aes.init_gcm(&ctx, retry_key[:])
 	defer crypto.zero_explicit(&ctx, size_of(ctx))
+
 	ciphertext: [272]u8
 	defer crypto.zero_explicit(&ciphertext, size_of(ciphertext))
+
 	iv := nonce
 	aes.seal_gcm(
 		&ctx,
@@ -2247,6 +2338,7 @@ media_retry_receipt_encode :: proc(
 		{"from_me", from_me},
 		{"participant", key.participant},
 	}
+
 	if len(key.participant) == 0 {
 		attrs = attrs[:2]
 	}
@@ -2269,6 +2361,7 @@ media_retry_receipt_encode :: proc(
 			{tag = "rmr", attrs = attrs},
 		},
 	}
+
 	n, e := binary_node_encode(dst, node)
 	if e.kind != .None {
 		return n, {kind = .Binary_Node_Failed, binary = e}
@@ -2441,11 +2534,14 @@ media_retry_decrypt :: proc(
 
 	scratch: [8192]u8
 	defer crypto.zero_explicit(&scratch, size_of(scratch))
+
 	retry_key := derive_media_retry_key(media_key)
 	defer crypto.zero_explicit(&retry_key, 32)
+
 	ctx: aes.Context_GCM
 	aes.init_gcm(&ctx, retry_key[:])
 	defer crypto.zero_explicit(&ctx, size_of(ctx))
+
 	valid := aes.open_gcm(
 		&ctx,
 		scratch[:n],
@@ -2483,6 +2579,7 @@ media_retry_decrypt :: proc(
 derive_media_retry_key :: proc(media_key: [32]u8) -> [32]u8 {
 	key := media_key
 	defer crypto.zero_explicit(&key, 32)
+
 	result: [32]u8
 	salt: [32]u8
 	info := "WhatsApp Media Retry Notification"
@@ -2490,6 +2587,7 @@ derive_media_retry_key :: proc(media_key: [32]u8) -> [32]u8 {
 
 	return result
 }
+
 media_retry_notification_decode :: proc(
 	src: []u8,
 ) -> (
@@ -2568,6 +2666,7 @@ media_retry_notification_decode :: proc(
 // request bytes, media metadata, connection strings and TLS roots remain alive
 // until join. Its default thread allocator owns/frees all HTTP scratch state.
 Socket_HTTP_Job :: struct {
+	media_pool:              ^Media_HTTP_Pool,
 	kind:                   enum {
 		HTTP,
 		Upload,
@@ -2575,7 +2674,8 @@ Socket_HTTP_Job :: struct {
 		Contact_Blob,
 	},
 	done, cancel:           bool,
-	request:                http.Request,
+	completion:             ^os.File,
+	request:                surf.Request,
 	config:                 surf.Config,
 	execute:                Media_HTTP_Execute,
 	response:               surf.Response,
@@ -2590,6 +2690,7 @@ Socket_HTTP_Job :: struct {
 	n:                      int,
 	media_error:            Media_Error,
 }
+
 @(thread_local)
 socket_http_current_job: ^Socket_HTTP_Job
 
@@ -2599,7 +2700,7 @@ socket_http_current_job: ^Socket_HTTP_Job
 // Caller destroys a successful Response with surf.response_destroy.
 socket_http_execute :: proc(
 	socket: ^Socket,
-	request: http.Request,
+	request: surf.Request,
 	config: surf.Config,
 	execute: Media_HTTP_Execute = nil,
 ) -> (
@@ -2612,7 +2713,9 @@ socket_http_execute :: proc(
 		config  = config,
 		execute = execute,
 	}
+
 	defer crypto.zero_explicit(&job, size_of(job))
+
 	e := socket_http_run(socket, &job)
 	if e.kind != .None {
 		surf.response_destroy(&job.response)
@@ -2658,7 +2761,9 @@ socket_media_upload_http :: proc(
 		metadata   = metadata,
 		connection = connection,
 	}
+
 	defer crypto.zero_explicit(&job, size_of(job))
+
 	if e := socket_http_run(socket, &job); e.kind != .None {
 		return {}, {}, e
 	}
@@ -2684,6 +2789,7 @@ socket_media_download_http :: proc(
 	// Reject local metadata/buffer failures before starting an event pump.
 	metadata, validation := media_metadata_from_message(message)
 	defer media_metadata_clear(&metadata)
+
 	if validation.kind != .None {
 		return 0, validation, {}
 	}
@@ -2707,18 +2813,42 @@ socket_media_download_http :: proc(
 	if ae != nil {
 		return 0, {}, {kind = .Allocation_Failed, allocation = ae}
 	}
-
 	defer {
 		crypto.zero_explicit(raw_data(scratch), len(scratch))
 		delete(scratch)
 	}
+
 	job := Socket_HTTP_Job {
 		kind        = .Download,
 		config      = config,
 		destination = scratch,
 		message     = message,
 	}
+
 	defer crypto.zero_explicit(&job, size_of(job))
+
+	// The pump can close the socket or start another download before this worker joins.
+	if socket.phase == .Online && socket.config.pool_media_downloads {
+		job.media_pool = socket.media_pool
+		socket.media_pool = nil
+		if job.media_pool == nil {
+			pool, e := media_http_pool_open(config, socket.websocket.transport)
+			if e.kind != .None {
+				return 0, {kind = .HTTP_Failed, http = e}, {}
+			}
+
+			job.media_pool = pool
+		}
+	}
+
+	defer {
+		if socket.phase == .Online && socket.media_pool == nil {
+			socket.media_pool = job.media_pool
+		} else {
+			media_http_pool_close(job.media_pool)
+		}
+	}
+
 	if socket.phase == .Provisioning {
 		job.n, job.media_error = socket_media_download_direct(&job)
 	} else if e := socket_http_run(socket, &job); e.kind != .None {
@@ -2752,6 +2882,8 @@ socket_http_worker :: proc(data: rawptr) {
 	defer {
 		socket_http_current_job = nil
 		sync.atomic_store(&job.done, true)
+		// Closing the worker's end wakes poll even if completion preceded the wait.
+		os.close(job.completion)
 	}
 
 	// A canceled multi-host upload does not begin another request. The active
@@ -2793,7 +2925,7 @@ socket_http_worker :: proc(data: rawptr) {
 }
 
 socket_http_worker_execute :: proc(
-	request: http.Request,
+	request: surf.Request,
 	config: surf.Config,
 ) -> (
 	surf.Response,
@@ -2808,6 +2940,10 @@ socket_http_worker_execute :: proc(
 	e: surf.HTTP_Error
 	if job.execute != nil {
 		response, e = job.execute(request, config)
+	} else if job.media_pool != nil {
+		response, e = media_http_pool_download(
+			job.media_pool, request, config.max_body_size, config.timeout, &job.cancel,
+		)
 	} else {
 		response, e = surf.execute(request, config)
 	}
@@ -2827,8 +2963,18 @@ socket_http_run :: proc(socket: ^Socket, job: ^Socket_HTTP_Job) -> Socket_Error 
 
 	socket.query_depth += 1
 	defer socket.query_depth -= 1
+
+	wakeup, completion, pipe_err := os.pipe()
+	if pipe_err != nil {
+		return {kind = .Poll_Failed}
+	}
+
+	defer os.close(wakeup)
+
+	job.completion = completion
 	worker := thread.create_and_start_with_data(job, socket_http_worker)
 	if worker == nil {
+		os.close(completion)
 		return {kind = .Allocation_Failed}
 	}
 
@@ -2843,7 +2989,15 @@ socket_http_run :: proc(socket: ^Socket, job: ^Socket_HTTP_Job) -> Socket_Error 
 			return e
 		}
 
-		ready, poll_error := socket_network_poll(socket, 100 * time.Millisecond)
+		wait := 100 * time.Millisecond
+		if socket.history_deadline != {} {
+			wait = min(wait, time.diff(time.now(), socket.history_deadline))
+			if wait <= 0 {
+				return {kind = .Query_Timeout}
+			}
+		}
+
+		ready, poll_error := socket_network_poll_with_wakeup(socket, wait, wakeup)
 		if poll_error.kind != .None {
 			return poll_error
 		}
@@ -2942,6 +3096,7 @@ socket_send_image :: proc(
 ) {
 	return socket_send_media(socket, group, plaintext, .Image, caption, mime_type, "")
 }
+
 socket_send_document :: proc(
 	socket: ^Socket,
 	group: string,
@@ -3043,6 +3198,7 @@ socket_send_media :: proc(
 
 	key, ke := media_key_generate()
 	defer crypto.zero_explicit(&key, size_of(key))
+
 	if ke.kind != .None {
 		return "", {kind = .Media_Failed, media = ke}
 	}
@@ -3051,13 +3207,14 @@ socket_send_media :: proc(
 	if ae != nil {
 		return "", {kind = .Allocation_Failed, allocation = ae}
 	}
-
 	defer {
 		crypto.zero_explicit(raw_data(ciphertext), len(ciphertext))
 		delete(ciphertext)
 	}
+
 	n, metadata, e := media_encrypt(ciphertext, plaintext, kind, key)
 	defer media_metadata_clear(&metadata)
+
 	if e.kind != .None {
 		return "", {kind = .Media_Failed, media = e}
 	}
@@ -3066,6 +3223,7 @@ socket_send_media :: proc(
 	if upload_error.kind != .None {
 		return "", upload_error
 	}
+
 	return socket_media_message_send(
 		socket,
 		group,
@@ -3095,12 +3253,15 @@ socket_media_existing_send :: proc(
 	if id == "" {
 		return "", false, {}
 	}
+
 	if !socket_inbox_id_valid(id) {
 		return "", true, {kind = .Invalid_Config}
 	}
+
 	if socket.store == nil || !socket.store.initialized {
 		return "", true, {kind = .Invalid_State}
 	}
+
 	content, exists := state_store_get(socket.store, .Outbound_Content, id)
 	if !exists {
 		if _, pending := state_store_get(socket.store, .Outbound_Message, id); pending {
@@ -3109,38 +3270,47 @@ socket_media_existing_send :: proc(
 
 		return "", false, {}
 	}
+
 	document, decoded := binary_node_decode(content)
 	if decoded.kind != .None {
 		return "", true, {kind = .Binary_Failed, binary = decoded}
 	}
 	defer binary_document_destroy(&document)
+
 	stored_group, _ := node_attr(document.root, "to")
 	stored_type, _ := node_attr(document.root, "mediatype")
 	protobuf, valid := document.root.content.([]u8)
 	if document.root.tag != "saved" || !valid {
 		return "", true, {kind = .Protocol_Error}
 	}
+
 	message, parsed := media_message_decode(protobuf)
 	if parsed.kind != .None {
 		return "", true, {kind = .Media_Failed, media = parsed}
 	}
+
 	metadata, metadata_error := media_metadata_from_message(message)
 	defer media_metadata_clear(&metadata)
+
 	if metadata_error.kind != .None {
 		return "", true, {kind = .Media_Failed, media = metadata_error}
 	}
+
 	expected_type := kind == .Document ? "document" : "image"
 	if stored_group != group || stored_type != expected_type || message.kind != kind {
 		return "", true, {kind = .Invalid_Config}
 	}
+
 	if message.caption != caption ||
 	   message.mime_type != mime_type ||
 	   message.file_name != file_name {
 		return "", true, {kind = .Invalid_Config}
 	}
+
 	if metadata.file_length != u64(len(plaintext)) || metadata.file_sha256 != sha256(plaintext) {
 		return "", true, {kind = .Invalid_Config}
 	}
+
 	owned, error := socket_send_group(socket, group, protobuf, expected_type, id)
 	return owned, true, error
 }
@@ -3206,14 +3376,14 @@ socket_media_upload :: proc(
 	if de.kind != .None {
 		return {}, {kind = .Binary_Failed, binary = de}
 	}
-
 	defer binary_document_destroy(&query)
+
 	response, re := socket_query(socket, query.root)
 	if re.kind != .None {
 		return {}, re
 	}
-
 	defer binary_document_destroy(&response)
+
 	hosts: [MAX_MEDIA_HOSTS]Media_Host
 	connection, ce := media_connection_decode(response.root, id, hosts[:])
 	if ce.kind != .None {
@@ -3266,6 +3436,7 @@ socket_media_message_send :: proc(
 		media_key_timestamp     = time.to_unix_seconds(time.now()),
 		has_media_key_timestamp = true,
 	}
+
 	required, measure := media_message_encode(nil, message)
 	if measure.kind != .Destination_Undersized {
 		return "", {kind = .Media_Failed, media = measure}
@@ -3275,11 +3446,11 @@ socket_media_message_send :: proc(
 	if pe != nil {
 		return "", {kind = .Allocation_Failed, allocation = pe}
 	}
-
 	defer {
 		crypto.zero_explicit(raw_data(protobuf), len(protobuf))
 		delete(protobuf)
 	}
+
 	_, encode_err := media_message_encode(protobuf, message)
 	if encode_err.kind != .None {
 		return "", {kind = .Media_Failed, media = encode_err}
@@ -3396,6 +3567,7 @@ socket_media_download_recover :: proc(
 ) {
 	metadata, me := media_metadata_from_message(media^)
 	defer media_metadata_clear(&metadata)
+
 	if me.kind != .None {
 		return 0, {kind = .Media_Failed, media = me}
 	}
@@ -3406,26 +3578,32 @@ socket_media_download_recover :: proc(
 		participant = message.participant,
 		from_me     = message.from_me,
 	}
+
 	chat: [256]u8
 	if message.group == "" {
 		peer := message.participant
 		if message.from_me && message.recipient != "" {
 			peer = message.recipient
 		}
+
 		user, _, e := pairing_jid_decode(peer)
 		if e.kind != .None {
 			return 0, {kind = .Invalid_Config}
 		}
+
 		at := strings.index_byte(peer, '@')
 		key.remote_jid = fmt.bprintf(chat[:], "%s%s", user, peer[at:])
 		key.participant = ""
 	}
+
 	if request_error := socket_media_retry_send(socket, key, &metadata);
 	   request_error.kind != .None {
 		return 0, request_error
 	}
+
 	retry_buffer: [8192]u8
 	defer crypto.zero_explicit(&retry_buffer, size_of(retry_buffer))
+
 	notification, retry_err := socket_media_wait_retry(
 		socket,
 		key,
@@ -3513,11 +3691,8 @@ socket_media_wait_retry :: proc(
 	Socket_Error,
 ) {
 	socket.query_depth += 1
-	socket.read_deadline_scopes += 1
-	defer {
-		socket.query_depth -= 1
-		socket.read_deadline_scopes -= 1
-	}
+	defer socket.query_depth -= 1
+
 	timeout := socket.config.query_timeout
 	if timeout == 0 {
 		timeout = 30 * time.Second
@@ -3534,6 +3709,7 @@ socket_media_wait_retry :: proc(
 			owned := document
 			ordered_remove(&socket.pending_media_retry, index)
 			defer binary_document_destroy(&owned)
+
 			return socket_media_notification_open(owned.root, key, media_key, plaintext)
 		}
 
@@ -3541,6 +3717,7 @@ socket_media_wait_retry :: proc(
 		if read_error.kind != .None {
 			return {}, read_error
 		}
+
 		if !ready {
 			continue
 		}
@@ -3554,6 +3731,7 @@ socket_media_wait_retry :: proc(
 			   queue_error.kind != .None {
 				return {}, queue_error
 			}
+
 			continue
 		}
 
@@ -3587,7 +3765,7 @@ socket_media_retry_event_read :: proc(
 		return {}, false, e
 	}
 
-	ready, poll_err := socket_network_poll(socket, 100 * time.Millisecond)
+	ready, poll_err := socket_network_poll(socket, clamp(time.diff(time.now(), deadline), time.Duration(0), 100 * time.Millisecond))
 	if poll_err.kind != .None {
 		return {}, false, poll_err
 	}
@@ -3596,21 +3774,9 @@ socket_media_retry_event_read :: proc(
 		return {}, false, {}
 	}
 
-	if e := socket_read_deadline(socket, deadline); e.kind != .None {
-		return {}, false, e
-	}
-
-	event, e := socket_receive_wire(socket)
+	event, e := socket_receive_wire(socket, deadline)
 	if e.kind != .None {
 		return {}, false, e
-	}
-
-	if reset := socket_read_deadline(socket, {}); reset.kind != .None {
-		if event.message != nil {
-			socket_message_destroy(event.message)
-		}
-
-		return {}, false, reset
 	}
 
 	return event, true, {}

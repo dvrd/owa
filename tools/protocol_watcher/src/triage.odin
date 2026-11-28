@@ -7,16 +7,17 @@ Owner :: struct {
 	targets, checks: []string,
 	question:        string,
 }
+
 OWNERS := [?]Owner {
 	{
 		"baileys",
 		"src/Socket/socket.ts",
-		[]string{"socket.odin", "connection.odin", "auth.odin", "pairing.odin"},
+		[]string{"socket.odin", "noise_handshake.odin", "auth.odin", "pairing.odin"},
 		[]string {
 			"tests/e2e/client/socket_test.odin",
 			"tests/e2e/loopback_noise",
-			"tests/auth_test.odin",
-			"tests/pairing_test.odin",
+			"tests/unit/auth_test.odin",
+			"tests/unit/pairing_test.odin",
 		},
 		"Does the changed socket lifecycle require a different admission, shutdown or certificate decision?",
 	},
@@ -24,40 +25,40 @@ OWNERS := [?]Owner {
 		"baileys",
 		"src/Socket/messages-send.ts",
 		[]string{"send.odin", "signal.odin"},
-		[]string{"tests/send_test.odin", "tests/e2e/encrypted_recovery"},
+		[]string{"tests/unit/send_test.odin", "tests/e2e/encrypted_recovery"},
 		"Does the send change alter IDs, encryption envelopes or durable retry ownership?",
 	},
 	{
 		"baileys",
 		"src/Socket/messages-recv.ts",
 		[]string{"receive.odin", "socket.odin", "addressing.odin"},
-		[]string{"tests/receive_test.odin", "tests/pairing_test.odin"},
+		[]string{"tests/unit/receive_test.odin", "tests/unit/pairing_test.odin"},
 		"Does the receive change alter ACKs, durable completion, sender alias authority or pinned session selection?",
 	},
 	{
 		"baileys",
 		"src/Utils/validate-connection.ts",
-		[]string{"pairing.odin", "connection.odin", "auth.odin", "protobuf.odin"},
+		[]string{"pairing.odin", "noise_handshake.odin", "auth.odin", "protobuf.odin"},
 		[]string {
 			"tests/e2e/client/socket_test.odin",
-			"tests/connection_test.odin",
-			"tests/pairing_test.odin",
-			"tests/auth_test.odin",
+			"tests/unit/noise_certificate_test.odin",
+			"tests/unit/pairing_test.odin",
+			"tests/unit/auth_test.odin",
 		},
 		"Which connection validation predicate changed, and is the same predicate owned locally?",
 	},
 	{
 		"baileys",
 		"src/Utils/noise-handler.ts",
-		[]string{"connection.odin", "socket.odin"},
-		[]string{"tests/e2e/loopback_noise", "tests/connection_test.odin"},
+		[]string{"noise_handshake.odin", "binary_framing.odin", "noise_cipher.odin", "noise_certificate.odin", "socket.odin"},
+		[]string{"tests/e2e/loopback_noise", "tests/unit/noise_certificate_test.odin"},
 		"Does the Noise transcript, frame boundary or certificate authentication contract change?",
 	},
 	{
 		"baileys",
 		"src/Defaults/baileys-version.json",
-		[]string{"pairing.odin", "connection.odin"},
-		[]string{"tests/pairing_test.odin"},
+		[]string{"pairing.odin", "noise_handshake.odin"},
+		[]string{"tests/unit/pairing_test.odin"},
 		"Does this advertised version require a payload change, or only a separately qualified version choice?",
 	},
 	{
@@ -65,8 +66,8 @@ OWNERS := [?]Owner {
 		"src/WABinary/constants.ts",
 		[]string{"binary_tokens.odin", "binary_node.odin"},
 		[]string {
-			"tests/binary_tokens_test.odin",
-			"tests/binary_node_test.odin",
+			"tests/unit/binary_tokens_test.odin",
+			"tests/unit/binary_node_test.odin",
 			"tests/e2e/encrypted_recovery",
 		},
 		"Which token positions or binary framing contracts differ from the locally bound dictionary?",
@@ -75,56 +76,56 @@ OWNERS := [?]Owner {
 		"baileys",
 		"WAProto/WAProto.proto",
 		[]string{"protobuf.odin", "receive.odin", "send.odin"},
-		[]string{"tests/e2e/encrypted_recovery", "tests/protobuf_test.odin"},
+		[]string{"tests/e2e/encrypted_recovery", "tests/unit/protobuf_test.odin"},
 		"Which changed field numbers, wire types or defaults are consumed by the local codec?",
 	},
 	{
 		"whatsmeow",
 		"client.go",
-		[]string{"socket.odin", "connection.odin"},
+		[]string{"socket.odin", "noise_handshake.odin"},
 		[]string{"tests/e2e/loopback_noise", "tests/e2e/encrypted_recovery"},
 		"Does the client lifecycle change affect locally owned admission or recovery state?",
 	},
 	{
 		"whatsmeow",
 		"connectionevents.go",
-		[]string{"connection.odin", "receive.odin"},
-		[]string{"tests/receive_test.odin"},
+		[]string{"noise_handshake.odin", "receive.odin"},
+		[]string{"tests/unit/receive_test.odin"},
 		"Which disconnect, notification or ACK state transition changes locally?",
 	},
 	{
 		"whatsmeow",
 		"handshake.go",
-		[]string{"connection.odin", "protobuf.odin"},
-		[]string{"tests/connection_test.odin", "tests/e2e/loopback_noise"},
+		[]string{"noise_handshake.odin", "noise_certificate.odin", "signal_curve25519.odin", "protobuf.odin"},
+		[]string{"tests/unit/noise_certificate_test.odin", "tests/e2e/loopback_noise"},
 		"Does the authenticated handshake transcript or certificate predicate change?",
 	},
 	{
 		"whatsmeow",
 		"pair.go",
 		[]string{"pairing.odin", "protobuf.odin", "auth.odin"},
-		[]string{"tests/pairing_test.odin", "tests/auth_test.odin"},
+		[]string{"tests/unit/pairing_test.odin", "tests/unit/auth_test.odin"},
 		"Which pairing payload or signature predicate changes, and is it used by this implementation?",
 	},
 	{
 		"whatsmeow",
 		"send.go",
 		[]string{"send.odin", "signal.odin"},
-		[]string{"tests/send_test.odin", "tests/e2e/encrypted_recovery"},
+		[]string{"tests/unit/send_test.odin", "tests/e2e/encrypted_recovery"},
 		"Does the send envelope or ID ownership differ on an independently reproduced synthetic case?",
 	},
 	{
 		"whatsmeow",
 		"retry.go",
 		[]string{"receive.odin", "send.odin", "signal.odin"},
-		[]string{"tests/receive_test.odin", "tests/e2e/encrypted_recovery"},
+		[]string{"tests/unit/receive_test.odin", "tests/e2e/encrypted_recovery"},
 		"Does the retry transition change identity reuse, durable completion or the stop-on-negative-ACK policy?",
 	},
 	{
 		"whatsmeow",
 		"store/clientpayload.go",
 		[]string{"pairing.odin", "protobuf.odin"},
-		[]string{"tests/protobuf_test.odin"},
+		[]string{"tests/unit/protobuf_test.odin"},
 		"Which advertised client payload field changed, and does the local encoder emit it?",
 	},
 	{
@@ -132,8 +133,8 @@ OWNERS := [?]Owner {
 		"binary/token/token.go",
 		[]string{"binary_tokens.odin", "binary_node.odin"},
 		[]string {
-			"tests/binary_tokens_test.odin",
-			"tests/binary_node_test.odin",
+			"tests/unit/binary_tokens_test.odin",
+			"tests/unit/binary_node_test.odin",
 			"tests/e2e/encrypted_recovery",
 		},
 		"Which dictionary index or token-encoding contract changes versus local tables?",
@@ -157,14 +158,17 @@ TABLE_COUNT :: 236
 Token :: struct {
 	kind, text: string,
 }
+
 Comment :: struct {
 	index, column: int,
 	text:          string,
 }
+
 Lexed :: struct {
 	tokens:    [dynamic]Token,
 	sensitive: [dynamic]Comment,
 }
+
 OPERATORS := []string {
 	">>>=",
 	"===",
@@ -205,6 +209,7 @@ OPERATORS := []string {
 	"&^=",
 	"&^",
 }
+
 owner_for :: proc(source, path: string) -> (Owner, bool) {
 	for owner in OWNERS {
 		if owner.source == source && owner.path == path {
@@ -214,13 +219,19 @@ owner_for :: proc(source, path: string) -> (Owner, bool) {
 
 	return {}, false
 }
+
 repository :: proc(source: string) -> string {
 	if source == "baileys" {
 		return "WhiskeySockets/Baileys"
-	}; if source == "whatsmeow" {
+	}
+
+	if source == "whatsmeow" {
 		return "tulir/whatsmeow"
-	}; return ""
+	}
+
+	return ""
 }
+
 reference_commit :: proc(source: string) -> string {
 	if source == "baileys" {
 		return "e05b16b4aa0d7d3eb2594677e015454af1225b75"
@@ -232,12 +243,15 @@ reference_commit :: proc(source: string) -> string {
 
 	return ""
 }
+
 identifier_start :: proc(c: u8) -> bool {
 	return strings.index_byte(ASCII_LETTERS + "_$", c) >= 0
 }
+
 is_identifier_continuation :: proc(c: u8) -> bool {
 	return identifier_start(c) || strings.index_byte(DECIMAL_DIGITS, c) >= 0
 }
+
 sensitive_comment :: proc(comment: string) -> bool {
 	lower := strings.to_lower(comment)
 
@@ -291,6 +305,7 @@ sensitive_comment :: proc(comment: string) -> bool {
 		strings.has_prefix(lower, "/*line") \
 	)
 }
+
 find_numeric_token_end :: proc(s: string, at: int) -> int {
 	i := at
 	if i + 2 < len(s) &&
@@ -316,9 +331,11 @@ find_numeric_token_end :: proc(s: string, at: int) -> int {
 				break
 			}
 		}
+
 		if i == start {
 			return at + 1
 		}
+
 		return i
 	}
 
@@ -339,7 +356,9 @@ find_numeric_token_end :: proc(s: string, at: int) -> int {
 
 		if end < len(s) && (s[end] == '+' || s[end] == '-') {
 			end += 1
-		}; start := end
+		}
+
+		start := end
 		for end < len(s) && strings.index_byte(DECIMAL_DIGITS + "_", s[end]) >= 0 {
 			end += 1
 		}
@@ -355,6 +374,7 @@ find_numeric_token_end :: proc(s: string, at: int) -> int {
 
 	return i
 }
+
 lex :: proc(data: []u8, language: string) -> (Lexed, string) {
 	result: Lexed
 	s := string(data)
@@ -393,6 +413,7 @@ lex :: proc(data: []u8, language: string) -> (Lexed, string) {
 		if c == '\r' || c == '\n' {
 			i += 2 if strings.has_prefix(s[i:], "\r\n") else 1
 			append(&result.tokens, Token{"newline", "\n"})
+
 			continue
 		}
 
@@ -408,7 +429,9 @@ lex :: proc(data: []u8, language: string) -> (Lexed, string) {
 
 				if at < 0 {
 					return {}, "UNCLOSED_COMMENT"
-				}; i += at + 4
+				}
+
+				i += at + 4
 			}
 
 			comment := s[start:i]
@@ -440,7 +463,9 @@ lex :: proc(data: []u8, language: string) -> (Lexed, string) {
 
 			if len(result.tokens) > MAX_TOKENS {
 				return {}, "TOKEN_LIMIT"
-			}; continue
+			}
+
+			continue
 		}
 
 		if c == '\'' || c == '"' || c == '`' {
@@ -468,12 +493,17 @@ lex :: proc(data: []u8, language: string) -> (Lexed, string) {
 				return {}, "TEMPLATE_EXPRESSION"
 			}
 
-			append(&result.tokens, Token{"raw" if quote == '`' else "string", literal}); continue
+			append(&result.tokens, Token{"raw" if quote == '`' else "string", literal})
+
+			continue
 		}
 
 		if identifier_start(c) {
 			start := i; i += 1; for i < len(s) && is_identifier_continuation(s[i]) {i += 1}
-			append(&result.tokens, Token{"identifier", s[start:i]}); continue
+
+			append(&result.tokens, Token{"identifier", s[start:i]})
+
+			continue
 		}
 
 		if strings.index_byte(DECIMAL_DIGITS, c) >= 0 ||
@@ -484,7 +514,9 @@ lex :: proc(data: []u8, language: string) -> (Lexed, string) {
 				return {}, "NUMBER_BOUNDARY"
 			}
 
-			append(&result.tokens, Token{"number", s[start:i]}); continue
+			append(&result.tokens, Token{"number", s[start:i]})
+
+			continue
 		}
 
 		if language == "ts" && (c == '/' || strings.has_prefix(s[i:], "<!--") || strings.has_prefix(s[i:], "-->")) {
@@ -500,7 +532,9 @@ lex :: proc(data: []u8, language: string) -> (Lexed, string) {
 
 		for op in OPERATORS {
 			if strings.has_prefix(s[i:], op) {
-				append(&result.tokens, Token{"operator", op}); i += len(op); matched = true; break
+				append(&result.tokens, Token{"operator", op})
+
+				i += len(op); matched = true; break
 			}
 		}
 
@@ -528,7 +562,9 @@ lex :: proc(data: []u8, language: string) -> (Lexed, string) {
 			}
 		}
 
-		append(&result.tokens, Token{"punctuation", s[i:i + 1]}); i += 1
+		append(&result.tokens, Token{"punctuation", s[i:i + 1]})
+
+		i += 1
 	}
 
 	if len(stack) != 0 {
@@ -539,7 +575,9 @@ lex :: proc(data: []u8, language: string) -> (Lexed, string) {
 		for token in result.tokens {
 			if token == (Token{"raw", "`C`"}) {
 				return {}, "CGO_PREAMBLE_AMBIGUITY"
-			}; if token.kind == "string" {
+			}
+
+			if token.kind == "string" {
 				unquoted, literal_error := literal_string(token)
 				if literal_error == "" && unquoted == "C" {
 					return {}, "CGO_PREAMBLE_AMBIGUITY"
@@ -550,6 +588,7 @@ lex :: proc(data: []u8, language: string) -> (Lexed, string) {
 
 	return result, ""
 }
+
 literal_string :: proc(token: Token) -> (string, string) {
 	s := token.text; if token.kind != "string" || len(s) < 2 {
 		return "", "STRING_LITERAL_REQUIRED"
@@ -594,7 +633,9 @@ literal_string :: proc(token: Token) -> (string, string) {
 
 			n, ok := strconv.parse_u64(s[i:i + 4], 16); if !ok {
 				return "", "STRING_ESCAPE"
-			}; i += 4
+			}
+
+			i += 4
 			if n >= 0xd800 && n <= 0xdbff {
 				if i + 6 > len(s) - 1 || s[i:i + 2] != "\\u" {
 					return "", "STRING_ESCAPE"
@@ -620,8 +661,11 @@ literal_string :: proc(token: Token) -> (string, string) {
 
 	result := strings.to_string(b); if len(result) > 1024 || !utf8.valid_string(result) {
 		return "", "TABLE_STRING_LIMIT"
-	}; return result, ""
+	}
+
+	return result, ""
 }
+
 extract_single_byte_token_table :: proc(tokens: []Token, language: string) -> ([]string, []Token, string) {
 	significant := make([dynamic]int)
 
@@ -656,10 +700,14 @@ extract_single_byte_token_table :: proc(tokens: []Token, language: string) -> ([
 			return nil, nil, "NESTED_TABLE"
 		}
 
-		pattern := []string{"=", "["}; close := "]"
+		pattern := []string{"=", "["}
+
+		close := "]"
 
 		if language != "ts" {
-			pattern = []string{":=", "[", "236", "]", "string", "{"}; close = "}"
+			pattern = []string{":=", "[", "236", "]", "string", "{"}
+
+			close = "}"
 		}
 
 		if at + len(pattern) >= len(significant) {
@@ -683,7 +731,9 @@ extract_single_byte_token_table :: proc(tokens: []Token, language: string) -> ([
 
 			value, error := literal_string(element); if error != "" {
 				return nil, nil, error
-			}; append(&values, value); cursor += 1
+			}
+
+			append(&values, value); cursor += 1
 			if len(values) > TABLE_COUNT {
 				return nil, nil, "TABLE_COUNT"
 			}
@@ -698,7 +748,9 @@ extract_single_byte_token_table :: proc(tokens: []Token, language: string) -> ([
 
 			if tokens[significant[cursor]].text != "," {
 				return nil, nil, "TABLE_EXPRESSION"
-			}; cursor += 1
+			}
+
+			cursor += 1
 		}
 
 		if cursor >= len(significant) || len(values) != TABLE_COUNT {
@@ -707,12 +759,15 @@ extract_single_byte_token_table :: proc(tokens: []Token, language: string) -> ([
 
 		append(&outside, ..tokens[:significant[start]])
 		append(&outside, Token{"table", "SINGLE_BYTE_TOKENS"})
+
 		append(&outside, ..tokens[significant[cursor] + 1:]); found += 1
 	}
 
 	if found != 1 {
 		return nil, nil, "TABLE_DECLARATION_COUNT"
-	}; return values[:], outside[:], ""
+	}
+
+	return values[:], outside[:], ""
 }
 
 // owner_root is the directory holding a library owner file: the repository's
@@ -726,6 +781,7 @@ owner_root :: proc(root, relative: string) -> string {
 
 	return strings.concatenate({root, "/src"}, context.temp_allocator)
 }
+
 // Existing review records bind hashes to their original repository paths.
 contract_directory :: proc(path: string) -> string {
 	legacy :: "tools/protocol_watch/contracts/"
@@ -762,6 +818,7 @@ owned_bytes :: proc(root, relative, prefix, suffix: string) -> ([]u8, string) {
 
 	return data, ""
 }
+
 record_bound :: proc(root: string, record: Value, prefix, suffix: string) -> string {
 	if !has_exact_object_fields(record, []string{"path", "sha256"}) || !hex_valid(str(get(record, "sha256")), 64) {
 		return "CONTRACT_RECORD"
@@ -775,14 +832,19 @@ record_bound :: proc(root: string, record: Value, prefix, suffix: string) -> str
 
 	if sha256(data) != str(get(record, "sha256")) {
 		return "CONTRACT_STALE"
-	}; return ""
+	}
+
+	return ""
 }
+
 value_strings :: proc(values: []string) -> Value {return string_array(values)}
+
 finish_change_assessment :: proc(input: Value, kind, reason, summary: string) -> Value {
 	result := input
 	put(&result, "kind", text(kind)); put(&result, "reason", text(reason))
 	put(&result, "summary", text(summary)); return result
 }
+
 approved_metadata :: proc(assessment: Value, root, path: string) -> (Value, string) {
 	raw, error := owned_bytes(root, path, contract_directory(path), ".json")
 
@@ -837,7 +899,9 @@ approved_metadata :: proc(assessment: Value, root, path: string) -> (Value, stri
 	for index in indices {
 		n, index_ok := integer(index); if !index_ok || n < 0 || n >= 236 || n <= last {
 			return null(), "CONTRACT_INDICES"
-		}; last = n
+		}
+
+		last = n
 	}
 
 	owner, _ := owner_for("baileys", "src/WABinary/constants.ts")
@@ -897,7 +961,9 @@ approved_metadata :: proc(assessment: Value, root, path: string) -> (Value, stri
 	if fixture, has_fixture := get(contract, "fixture").(j.Object); has_fixture {
 		error = record_bound(root, fixture, "tests/", ""); if error != "" {
 			return null(), error
-		}; put(&result, "fixture", fixture)
+		}
+
+		put(&result, "fixture", fixture)
 	} else if object_contract, has_contract := contract.(j.Object); has_contract {
 		if "fixture" in object_contract {
 			return null(), "CONTRACT_RECORD"
@@ -906,6 +972,7 @@ approved_metadata :: proc(assessment: Value, root, path: string) -> (Value, stri
 
 	return result, ""
 }
+
 validate_approved_contract :: proc(assessment: Value, root: string) -> bool {
 	schema, ok := integer(get(assessment, "schema"))
 	if !ok ||
@@ -920,6 +987,7 @@ validate_approved_contract :: proc(assessment: Value, root: string) -> bool {
 
 	return error == "" && equal(actual, expected)
 }
+
 assess_upstream_file_change :: proc(
 	source: Value,
 	path: string,
@@ -932,6 +1000,7 @@ assess_upstream_file_change :: proc(
 	if _, ok := source.(j.Object); ok {
 		name = str(get(source, "name"))
 	}
+
 	owner, bound := owner_for(name, path)
 	if _, ok := source.(j.Object); ok {
 		provided := str(get(source, "reference_commit"))
@@ -940,6 +1009,7 @@ assess_upstream_file_change :: proc(
 			str(get(source, "repository")) == repository(name) &&
 			(!slice.contains(keys(source), "reference_commit") || provided == reference_commit(name))
 	}
+
 	evidence := object(
 		{"reference", digest(before, before_present)},
 		{"current", digest(after, after_present)},
@@ -961,6 +1031,7 @@ assess_upstream_file_change :: proc(
 		put(&evidence, "question", text("Which allowlisted source and monitored path does this observation describe?"))
 		return result
 	}
+
 	put(&evidence, "question", text(owner.question))
 	put(&result, "checks", value_strings(owner.checks))
 	put(
@@ -991,6 +1062,7 @@ assess_upstream_file_change :: proc(
 
 		append(&targets, object({"path", text(owner_path)}, {"sha256", text(sha256(bytes))}))
 	}
+
 	put(&result, "local_targets", targets)
 	if !before_present || !after_present || len(before) > MAX_BYTES || len(after) > MAX_BYTES {
 		return finish_change_assessment(
@@ -1000,6 +1072,7 @@ assess_upstream_file_change :: proc(
 			"A missing, unsupported or oversized file prevents bounded comparison.",
 		)
 	}
+
 	if string(before) == string(after) {
 		return finish_change_assessment(
 			result,
@@ -1008,6 +1081,7 @@ assess_upstream_file_change :: proc(
 			"The monitored file bytes are unchanged; compatibility is not inferred.",
 		)
 	}
+
 	if strings.has_suffix(path, ".json") {
 		a, ae := decode(before, MAX_BYTES); b, be := decode(after, MAX_BYTES)
 
@@ -1036,6 +1110,7 @@ assess_upstream_file_change :: proc(
 			"The advertised JSON value changed; qualify the specific local payload decision.",
 		)
 	}
+
 	language := "ts" if strings.has_suffix(path, ".ts") else "go" if strings.has_suffix(path, ".go") else "proto"
 	old, old_error := lex(before, language); next, next_error := lex(after, language)
 	if old_error != "" || next_error != "" {
@@ -1046,6 +1121,7 @@ assess_upstream_file_change :: proc(
 			"Syntax, slash or literal ambiguity prevents a safe lexical equivalence proof.",
 		)
 	}
+
 	if !slice.equal(old.sensitive[:], next.sensitive[:]) {
 		return finish_change_assessment(
 			result,
@@ -1054,6 +1130,7 @@ assess_upstream_file_change :: proc(
 			"A directive or license-bearing comment changed and must not be stripped as formatting.",
 		)
 	}
+
 	if slice.equal(old.tokens[:], next.tokens[:]) {
 		return finish_change_assessment(
 			result,
@@ -1062,6 +1139,7 @@ assess_upstream_file_change :: proc(
 			"Exact tokens, newlines and literals are unchanged; only safely ignored formatting/comments differ.",
 		)
 	}
+
 	if name != "baileys" || path != "src/WABinary/constants.ts" {
 		return finish_change_assessment(
 			result,
@@ -1070,6 +1148,7 @@ assess_upstream_file_change :: proc(
 			"Tokens changed; resolve the named local contract question with a synthetic regression.",
 		)
 	}
+
 	reference, outside_old, re := extract_single_byte_token_table(old.tokens[:], "ts")
 	current, outside_new, ce := extract_single_byte_token_table(next.tokens[:], "ts")
 	local_bytes, le := read_file(join(owner_root(root, "binary_tokens.odin"), "binary_tokens.odin"))
@@ -1088,6 +1167,7 @@ assess_upstream_file_change :: proc(
 			"Only one strict 236-string constant array per source and a bound local array can prove this edit.",
 		)
 	}
+
 	if !slice.equal(outside_old, outside_new) {
 		return finish_change_assessment(
 			result,
@@ -1096,6 +1176,7 @@ assess_upstream_file_change :: proc(
 			"Tokens outside the dictionary changed; table drift alone cannot classify this observation.",
 		)
 	}
+
 	if slice.equal(reference, current) {
 		return finish_change_assessment(
 			result,
@@ -1104,6 +1185,7 @@ assess_upstream_file_change :: proc(
 			"The strict table values and outside tokens are unchanged.",
 		)
 	}
+
 	if slice.equal(local_values, current) {
 		put(&evidence, "local_table_matches", text("current"))
 		return finish_change_assessment(
@@ -1113,6 +1195,7 @@ assess_upstream_file_change :: proc(
 			"The local 236-entry dictionary already matches the supplied current table.",
 		)
 	}
+
 	if !slice.equal(local_values, reference) {
 		return finish_change_assessment(
 			result,
@@ -1121,6 +1204,7 @@ assess_upstream_file_change :: proc(
 			"The local table matches neither supplied reference nor current; establish its source before a fix.",
 		)
 	}
+
 	changes, indices := make(j.Array), make(j.Array)
 	for value, i in reference {
 		if value == current[i] {
@@ -1143,6 +1227,7 @@ assess_upstream_file_change :: proc(
 			)
 		}
 	}
+
 	put(&evidence, "static_regression", text("indexed_table_comparison"))
 	put(&evidence, "reference_table_sha256", text(sha256(transmute([]u8)encode(value_strings(reference)))))
 	put(&evidence, "target_table_sha256", text(sha256(transmute([]u8)encode(value_strings(current)))))
@@ -1183,6 +1268,7 @@ assess_upstream_file_change :: proc(
 			"Exact dictionary drift is relevant, but updateworthiness is unproven; obtain an independently reviewed target requirement before implementation.",
 		)
 	}
+
 	approval, error := approved_metadata(result, root, approved_contract)
 	if error != "" {
 		return finish_change_assessment(
@@ -1192,6 +1278,7 @@ assess_upstream_file_change :: proc(
 			"The explicit reviewed target contract could not be bound to this static counterexample and current local owners.",
 		)
 	}
+
 	put(&evidence, "approved_contract", approval); put(&result, "acceptance", plan)
 	return finish_change_assessment(
 		result,
@@ -1200,13 +1287,16 @@ assess_upstream_file_change :: proc(
 		"An explicit reviewed requirement names this exact target table; the owned indexed comparison demonstrates a local contract gap, not server compatibility.",
 	)
 }
+
 excerpt :: proc(value: string) -> string {
 	out: strings.Builder; n := 0
 
 	for c in value {
 		if n == 128 {
 			break
-		}; strings.write_rune(&out, c if c >= 32 && c < 127 else '?'); n += 1
+		}
+
+		strings.write_rune(&out, c if c >= 32 && c < 127 else '?'); n += 1
 	}
 
 	return strings.to_string(out)

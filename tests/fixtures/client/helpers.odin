@@ -1,5 +1,6 @@
 package client_fixture
 
+import wire_frames "../message_transport"
 import "core:bytes"
 import "core:encoding/hex"
 import "core:fmt"
@@ -7,9 +8,8 @@ import "core:os"
 import "core:sync"
 import "core:testing"
 import "core:time"
-import "shared:async/http"
-import surf "shared:surf"
-import ws "shared:websocket"
+import "shared:surf"
+import ws "shared:async/websocket"
 import wa "shared:whatsapp"
 
 codec_api_hex :: proc(text: string) -> []u8 {
@@ -31,7 +31,7 @@ Download_State :: struct {
 }
 
 download_http :: proc(
-	request: http.Request,
+	request: surf.Request,
 	config: surf.Config,
 ) -> (
 	surf.Response,
@@ -57,7 +57,7 @@ Http_Marker :: struct {
 }
 
 http_marker_execute :: proc(
-	request: http.Request,
+	request: surf.Request,
 	config: surf.Config,
 ) -> (
 	surf.Response,
@@ -78,7 +78,7 @@ http_marker_execute :: proc(
 	return {status = 200, body = transmute([]u8)body}, {}
 }
 
-http_marker_request :: proc(marker: ^Http_Marker) -> http.Request {
+http_marker_request :: proc(marker: ^Http_Marker) -> surf.Request {
 	bytes := cast([^]u8)marker
 
 	return {method = .GET, url = "https://synthetic.invalid", body = bytes[:size_of(Http_Marker)]}
@@ -108,6 +108,7 @@ ack_routing_unchanged :: proc(t: ^testing.T, f: ^Negative_Ack_Fixture, before: [
 	testing.expect_value(t, len(f.socket.deferred_retries), 0)
 	after := negative_ack_disk(f)
 	defer delete(after)
+
 	testing.expect(t, bytes.equal(before, after), "transport ACK cannot commit chat state")
 }
 
@@ -165,9 +166,11 @@ negative_ack_unchanged :: proc(t: ^testing.T, f: ^Negative_Ack_Fixture, before: 
 	testing.expect_value(t, f.socket.phase, .Online)
 	after := negative_ack_disk(f)
 	defer delete(after)
+
 	testing.expect(t, bytes.equal(before, after), "negative/irrelevant ACK must not rewrite disk")
 	restored: wa.State_Store
 	defer wa.state_store_clear(&restored)
+
 	testing.expect_value(t, wa.state_store_load(&restored, f.path, f.store.identity).kind, .None)
 	testing.expect_value(t, restored.revision, revision)
 
@@ -226,7 +229,7 @@ Send_Id_Wire :: struct {
 send_id_http_calls: int
 
 send_id_http :: proc(
-	request: http.Request,
+	request: surf.Request,
 	config: surf.Config,
 ) -> (
 	surf.Response,
@@ -239,9 +242,8 @@ send_id_http :: proc(
 send_id_wire_connect :: proc(socket: ^wa.Socket, wire: ^Send_Id_Wire) {
 	socket.websocket = {
 		phase = .Open,
-		allocator = context.allocator,
-		config = {host = "synthetic.invalid", max_message_size = 4096},
-		stream = {data = wire, write = send_id_wire_write, read = send_id_wire_read, close = send_id_wire_close},
+		max_message_size = 4096,
+		data = wire, write = wire_frames.writer(send_id_wire_write), read = wire_frames.reader(send_id_wire_read), close = send_id_wire_close,
 	}
 
 	socket.client = {
@@ -257,7 +259,7 @@ send_id_wire_connect :: proc(socket: ^wa.Socket, wire: ^Send_Id_Wire) {
 	send_id_http_calls = 0
 }
 
-send_id_wire_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Stream_Error) {
+send_id_wire_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_Error) {
 	wire := cast(^Send_Id_Wire)data
 	assert(len(source) <= len(wire.data) - wire.used)
 	wire.used += copy(wire.data[wire.used:], source)
@@ -265,11 +267,11 @@ send_id_wire_write :: proc(data: rawptr, source: []u8) -> (int, surf.WebSocket_S
 	return len(source), {}
 }
 
-send_id_wire_read :: proc(data: rawptr, destination: []u8) -> (int, surf.WebSocket_Stream_Error) {
-	return 0, {kind = .EOF}
+send_id_wire_read :: proc(data: rawptr, destination: []u8) -> (int, surf.WebSocket_Error) {
+	return 0, {kind = .Peer_Closed}
 }
 
-send_id_wire_close :: proc(data: rawptr) -> surf.WebSocket_Stream_Error {
+send_id_wire_close :: proc(data: rawptr, _: u16) -> surf.WebSocket_Error {
 	return {}
 }
 

@@ -9,8 +9,8 @@ import "core:net"
 import "core:testing"
 import "core:thread"
 import "core:time"
-import surf "shared:surf"
-import ws "shared:websocket"
+import "shared:surf"
+import ws "shared:async/websocket"
 import wa "shared:whatsapp"
 
 // Match the exact certificate bytes in the fixed loopback transcript.
@@ -20,7 +20,7 @@ fixture_verify_certificate :: proc(payload: []u8, _: [32]u8) -> wa.Certificate_E
 
 // Fixed synthetic handshake keys for this fixture.
 // This explicitly replaces only this test connection's ephemeral before I/O.
-fixture_client :: proc(client: ^wa.Client, connection: ^surf.WebSocket_Conn) {
+fixture_client :: proc(client: ^wa.Client, connection: ^wa.Message_Connection) {
 	credentials: wa.Noise_Credentials
 
 	for &byte, index in credentials.static_private_key {
@@ -42,37 +42,38 @@ fixture_client :: proc(client: ^wa.Client, connection: ^surf.WebSocket_Conn) {
 }
 
 fixture_run :: proc(port: int, mode: string) {
-	socket, dial_error := net.dial_tcp_from_endpoint({net.IP4_Loopback, port})
-	assert(dial_error == nil)
-	tcp := net.TCP_Connection {
-		socket = socket,
+	connection: wa.Message_Connection
+	config := wa.socket_websocket_settings({host = "127.0.0.1", port = port, target = "/synthetic"})
+	assert(config.secure && config.ping_interval == surf.WEBSOCKET_PING_OFF)
+	config.secure = false
+	config.max_message_size = 1024
+	config.handshake_timeout = time.Second
+	opened := wa.message_connection_open(&connection, config)
+	if mode == "refused" || mode == "upgrade-eof" {
+		if mode == "refused" {
+			assert(opened.kind == .Refused && opened.status == 403)
+		} else {
+			assert(opened.kind != .None)
+		}
+
+		assert(connection.phase == .Uninitialized && connection.transport == nil)
+		assert(wa.message_connection_close(&connection).kind == .None)
+		return
 	}
 
-	connection: surf.WebSocket_Conn
-	assert(
-		surf.websocket_client(
-			&connection,
-			surf.websocket_tcp_stream(&tcp),
-			{
-				host = "127.0.0.1",
-				target = "/synthetic",
-				max_message_size = 1024,
-				handshake_timeout = time.Second,
-			},
-		) ==
-		.None,
-	)
-	defer surf.websocket_close(&connection)
-	assert(surf.websocket_upgrade(&connection).kind == .None)
+	assert(opened.kind == .None)
+	defer wa.message_connection_close(&connection)
+
 	client: wa.Client
 	fixture_client(&client, &connection)
 
 	if mode == "normal" {
 		client.config.handshake_timeout = time.Second
 	}
-
 	defer wa.client_close(&client)
+
 	payload := [?]u8{0x08, 0x01, 0x12, 0x03, 'b', 'o', 't'}
+
 	started := time.tick_now()
 	error := wa.client_handshake(&client, payload[:])
 
@@ -87,7 +88,7 @@ fixture_run :: proc(port: int, mode: string) {
 
 		if mode == "timeout" {
 			assert(elapsed >= 150 * time.Millisecond)
-			assert(error.transport.websocket.stream.transport == net.TCP_Recv_Error.Timeout)
+			assert(error.transport.websocket.kind == .Timeout)
 		}
 
 		assert(crypto.is_zero_constant_time(client.static_private[:]) == 1)
@@ -99,7 +100,7 @@ fixture_run :: proc(port: int, mode: string) {
 			"WA_LOOPBACK_OK mode=%s error=%v transport=%v\n",
 			mode,
 			error.kind,
-			error.transport.websocket.stream.transport,
+			error.transport.websocket.kind,
 		)
 		return
 	}
@@ -121,6 +122,7 @@ check_client_allocations :: proc(port: int, mode: string) {
 	tracker: mem.Tracking_Allocator
 	mem.tracking_allocator_init(&tracker, context.allocator)
 	defer mem.tracking_allocator_destroy(&tracker)
+
 	context.allocator = mem.tracking_allocator(&tracker)
 	context.temp_allocator = context.allocator
 	fixture_run(port, mode)
@@ -149,6 +151,7 @@ expect_client_frame :: proc(socket: net.Connection, opcode: u8, expected: string
 	body: [125]u8
 	peer.read_exact(socket, body[:len(expected)])
 	for &b, i in body[:len(expected)] {b ~= mask[i % 4]}
+
 	assert(string(body[:len(expected)]) == expected)
 }
 
@@ -164,10 +167,20 @@ serve_noise_transcript :: proc(server: ^Noise_Server) {
 	tcp: net.TCP_Connection
 	socket := peer.accept(server.listener, &tcp)
 	defer socket.close(socket.data)
+
 	buffer: [4096]u8
 	headers := peer.read_headers(socket, buffer[:])
 	key := peer.header_value(headers, "Sec-WebSocket-Key")
 	assert(key != "")
+	if server.mode == "upgrade-eof" {
+		return
+	}
+
+	if server.mode == "refused" {
+		peer.send_all(socket, transmute([]u8)string("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n"))
+		return
+	}
+
 	accept := ws.upgrade_accept_encoded(key)
 	response := fmt.tprintf(
 		"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n",
@@ -179,6 +192,7 @@ serve_noise_transcript :: proc(server: ^Noise_Server) {
 	if server.mode == "eof" {
 		data = data[:5]
 	}
+
 	frame: [130]u8
 	frame[0], frame[1] = 0x82, u8(len(data))
 	copy(frame[2:], transmute([]u8)data)
@@ -187,31 +201,42 @@ serve_noise_transcript :: proc(server: ^Noise_Server) {
 		time.sleep(500 * time.Millisecond)
 		return
 	}
+
 	for offset := 0; offset < len(data) + 2; offset += 5 {
 		peer.send_all(socket, frame[offset:min(offset + 5, len(data) + 2)])
 		time.sleep(time.Millisecond)
 	}
+
 	if server.mode == "eof" {
 		return
 	}
+
 	expect_client_frame(socket, 2, noise_envelope(FINISH))
 	data = noise_envelope(FROM_SERVER)
-	frame[1] = u8(len(data))
-	copy(frame[2:], transmute([]u8)data)
-	peer.send_all(socket, frame[:2 + len(data)])
+	// Pause the binary message at a partial WA header. A real RFC 6455
+	// Pong stays in Surf, and a server Ping still receives its required Pong.
+	peer.send_all(socket, []u8{0x02, 2, data[0], data[1], 0x8a, 0, 0x89, 1, 'q'})
+	expect_client_frame(socket, 10, "q")
+	frame[0], frame[1] = 0x80, u8(len(data) - 2)
+	copy(frame[2:], transmute([]u8)data[2:])
+	peer.send_all(socket, frame[:len(data)])
 	expect_client_frame(socket, 2, noise_envelope(FROM_CLIENT))
 	peer.send_all(socket, []u8{0x88, 2, 3, 0xe8})
+
 	expect_client_frame(socket, 8, "\x03\xe8")
 }
 
 @(test)
 noise_handshake_over_local_websocket :: proc(t: ^testing.T) {
-	for mode in ([]string{"normal", "eof", "timeout", "normal"}) {
+	for mode in ([]string{"refused", "upgrade-eof", "normal", "eof", "timeout", "normal"}) {
 		listener, port := peer.listen()
 		defer net.close(listener)
+
 		server := Noise_Server{listener, mode}
+
 		worker := thread.create_and_start_with_poly_data(&server, serve_noise_transcript)
 		defer thread.destroy(worker)
+
 		check_client_allocations(port, mode)
 		thread.join(worker)
 	}

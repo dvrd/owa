@@ -9,7 +9,6 @@ import "core:strconv"
 import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
-import "shared:async/http"
 import "shared:surf"
 
 // Registration, pairing and session establishment.
@@ -60,6 +59,7 @@ Protocol_Node_Info :: struct {
 	children:  []string,
 	ack_class: Protocol_Ack_Class,
 }
+
 Protocol_Node_Observer :: #type proc(data: rawptr, info: Protocol_Node_Info)
 
 // Application-level pairing progress. The library does not raise these events
@@ -148,6 +148,7 @@ Session :: struct {
 // DeviceProps.os to "Mac OS" and the platform to CHROME.
 // Applications may use official discovery or supply an explicit version.
 WA_WEB_VERSION_PINNED :: [3]u32{2, 3000, 1054981628}
+
 WA_WEB_BROWSER_OS :: "Mac OS"
 WA_WEB_BROWSER_NAME :: "Chrome"
 
@@ -262,8 +263,8 @@ session_read :: proc(
 	if allocation_err != nil {
 		return {}, session_fail(session, {kind = .Allocation_Failed, allocation = allocation_err})
 	}
-
 	defer delete(buffer)
+
 	size, read_err := client_read(session.client, buffer)
 
 	if read_err.kind != .None {
@@ -748,7 +749,9 @@ session_send_keepalive_ping :: proc(session: ^Session) -> Session_Error {
 		{"type", "get"},
 		{"xmlns", "w:p"},
 	}
+
 	children := [?]Binary_Node{{tag = "ping"}}
+
 	buffer: [256]u8
 	size, err := binary_node_encode(
 		buffer[:],
@@ -967,6 +970,7 @@ pairing_qr_encode :: proc(
 	if !pairing_qr_format_valid(format) {
 		return 0, {kind = .Invalid_QR_Format}
 	}
+
 	if !pairing_ref_valid(ref) {
 		return 0, {kind = .Invalid_Ref}
 	}
@@ -975,9 +979,11 @@ pairing_qr_encode :: proc(
 	if format == .Linked_Device {
 		required += len(PAIRING_LINKED_DEVICE_QR_PREFIX) + 2
 	}
+
 	if len(dst) < required {
 		return required, {kind = .Destination_Undersized}
 	}
+
 	// Profile strings may also borrow dst; read them before output writes.
 	companion_type := pairing_qr_companion_type(browser_os, browser_name)
 
@@ -991,8 +997,11 @@ pairing_qr_encode :: proc(
 	} else {
 		n = copy(dst, ref)
 	}
+
 	keys := [?][32]u8{noise_public, identity_public, adv_secret}
+
 	defer crypto.zero_explicit(&keys, size_of(keys))
+
 	for &key in keys {
 		dst[n] = ','
 		n += 1
@@ -1000,10 +1009,12 @@ pairing_qr_encode :: proc(
 		assert(encode_err == nil)
 		n += 44
 	}
+
 	if format == .Linked_Device {
 		dst[n], dst[n + 1] = ',', '0' + companion_type
 		n += 2
 	}
+
 	return n, {}
 }
 
@@ -1052,12 +1063,15 @@ pairing_device_handle :: proc(
 
 	next: Pairing_QR_State
 	defer crypto.zero_explicit(&next, size_of(next))
+
 	if ref_error := pairing_refs_decode(&next, children); ref_error.kind != .None {
 		return 0, ref_error
 	}
 
 	attrs := [?]Binary_Node_Attribute{{"to", PAIRING_SERVER}, {"type", "result"}, {"id", id}}
+
 	written, node_err := binary_node_encode(reply, {tag = "iq", attrs = attrs[:]})
+
 	if node_err.kind != .None {
 		return 0, {kind = .Binary_Node_Failed, binary = node_err}
 	}
@@ -1177,6 +1191,7 @@ pairing_success_handle :: proc(
 	if stanza_error.kind != .None {
 		return 0, stanza_error
 	}
+
 	identity_bytes, has_bytes := identity_node.content.([]u8)
 	if !has_bytes || len(identity_bytes) > MAX_PAIRING_IDENTITY_SIZE {
 		return 0, {kind = .Invalid_Identity}
@@ -1186,20 +1201,24 @@ pairing_success_handle :: proc(
 	if wrapper_error.kind != .None {
 		return 0, wrapper_error
 	}
+
 	identity, details, identity_error := pairing_success_signed_identity_decode(wrapper)
 	if identity_error.kind != .None {
 		return 0, identity_error
 	}
+
 	next := Paired_Account {
 		valid            = true,
 		hosted           = wrapper.account_type == 1,
 		key_index        = details.key_index,
 		signature_policy = .Current,
 	}
+
 	if metadata_error := pairing_success_metadata_decode(&next, pair, device_node);
 	   metadata_error.kind != .None {
 		return 0, metadata_error
 	}
+
 	if signature_error := pairing_success_signatures_prepare(
 		&next,
 		credentials,
@@ -1208,6 +1227,7 @@ pairing_success_handle :: proc(
 	); signature_error.kind != .None {
 		return 0, signature_error
 	}
+
 	written, reply_error := pairing_success_reply_encode(reply, &next, id)
 	if reply_error.kind != .None {
 		return 0, reply_error
@@ -1272,6 +1292,7 @@ pairing_success_hmac_decode :: proc(
 	mac: [32]u8
 	mac_context: hmac.Context
 	defer crypto.zero_explicit(&mac_context, size_of(mac_context))
+
 	hmac.init(&mac_context, .SHA256, credentials.adv_secret[:])
 	if wrapper.account_type == 1 {
 		hmac.update(&mac_context, []u8{6, 5})
@@ -1370,6 +1391,7 @@ pairing_success_signatures_prepare :: proc(
 	if domain_error.kind != .None {
 		return domain_error
 	}
+
 	signed[0], signed[1] = 6, account_domain
 	copy(signed[2:], identity.details)
 	copy(signed[2 + len(identity.details):], identity_public[:])
@@ -1426,6 +1448,7 @@ pairing_success_reply_encode :: proc(
 	key_index_buffer: [16]u8
 	key_index := fmt.bprintf(key_index_buffer[:], "%d", next.key_index)
 	identity_attrs := [?]Binary_Node_Attribute{{"key-index", key_index}}
+
 	identity_children := [?]Binary_Node {
 		{
 			tag = "device-identity",
@@ -1435,7 +1458,9 @@ pairing_success_reply_encode :: proc(
 	}
 
 	reply_children := [?]Binary_Node{{tag = "pair-device-sign", content = identity_children[:]}}
+
 	attrs := [?]Binary_Node_Attribute{{"to", PAIRING_SERVER}, {"type", "result"}, {"id", id}}
+
 	written, binary_err := binary_node_encode(
 		reply,
 		{tag = "iq", attrs = attrs[:], content = reply_children[:]},
@@ -1516,11 +1541,16 @@ paired_account_signature_domain :: proc(
 	switch policy {
 	case .Legacy:
 		return 0, {}
+
+
 	case .Current:
 		if details.device_type > 1 {
 			return 0, {kind = .Invalid_Account_Type}
 		}
+
 		return details.device_type == 1 ? 5 : 0, {}
+
+
 	case:
 		return 0, {kind = .Invalid_Account_Type}
 	}
@@ -1540,6 +1570,7 @@ paired_account_signatures_validate :: proc(
 	if domain_error.kind != .None {
 		return domain_error
 	}
+
 	message[0], message[1] = 6, account_domain
 	copy(message[2:], account.details[:account.details_size])
 	copy(message[2 + account.details_size:], identity_public[:])
@@ -1555,6 +1586,7 @@ paired_account_signatures_validate :: proc(
 	if account.signature_policy == .Legacy && account.hosted {
 		message[1] = 6
 	}
+
 	copy(message[2 + account.details_size + 32:], account.account_signature_key[:])
 	if err := signal_curve_verify(
 		identity_public,
@@ -1604,6 +1636,7 @@ QR_Error :: enum {
 	Invalid_Code,
 	Allocation_Failed,
 }
+
 // Owns all modules, stored at y*size+x. No backing allocation or borrowed text.
 QR_Code :: struct {
 	version, size, mask: int,
@@ -1653,6 +1686,7 @@ QR_ECC_PER_BLOCK := [41]int {
 	30,
 	30,
 }
+
 QR_BLOCKS := [41]int {
 	-1,
 	1,
@@ -1777,6 +1811,7 @@ qr_data_encode :: proc(data: []u8, text: string, version: int) {
 	for i in 0 ..< len(text) {
 		qr_bits_write(data, &bits, cast(u32)text[i], 8)
 	}
+
 	capacity := qr_data_codeword_count(version) * 8
 	qr_bits_write(data, &bits, 0, min(4, capacity - bits))
 	qr_bits_write(data, &bits, 0, (8 - bits % 8) % 8)
@@ -1862,6 +1897,7 @@ qr_terminal_render :: proc(code: ^QR_Code, allocator := context.allocator) -> (s
 
 	return cast(string)buffer, .None
 }
+
 qr_terminal_destroy :: proc(text: string, allocator := context.allocator) {
 	delete(text, allocator)
 }
@@ -1872,6 +1908,7 @@ qr_bits_write :: proc(data: []u8, at: ^int, value: u32, count: int) {
 		at^ += 1
 	}
 }
+
 qr_count_raw_data_modules :: proc(version: int) -> int {
 	result := (16 * version + 128) * version + 64
 
@@ -1885,9 +1922,11 @@ qr_count_raw_data_modules :: proc(version: int) -> int {
 
 	return result
 }
+
 qr_data_codeword_count :: proc(version: int) -> int {
 	return qr_count_raw_data_modules(version) / 8 - QR_ECC_PER_BLOCK[version] * QR_BLOCKS[version]
 }
+
 qr_gf256_multiply :: proc(x, y: u8) -> u8 {
 	z: u8
 
@@ -1898,6 +1937,7 @@ qr_gf256_multiply :: proc(x, y: u8) -> u8 {
 
 	return z
 }
+
 qr_interleave :: proc(data: []u8, version: int, result: []u8) {
 	blocks, ecc_size := QR_BLOCKS[version], QR_ECC_PER_BLOCK[version]
 	raw_words, data_size := qr_count_raw_data_modules(version) / 8, qr_data_codeword_count(version)
@@ -1930,6 +1970,7 @@ qr_interleave :: proc(data: []u8, version: int, result: []u8) {
 			for j in 0 ..< ecc_size - 1 {
 				ecc[j] = ecc[j + 1]
 			}
+
 			ecc[ecc_size - 1] = 0
 			for j in 0 ..< ecc_size {
 				ecc[j] ~= qr_gf256_multiply(divisor[j], factor)
@@ -1966,6 +2007,7 @@ qr_set_function :: proc(
 	index := y * code.size + x
 	code.modules[index], functions[index] = dark, true
 }
+
 qr_draw_function_patterns :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]bool) {
 	for i in 0 ..< code.size {
 		qr_set_function(code, functions, 6, i, i % 2 == 0)
@@ -2025,6 +2067,7 @@ qr_draw_function_patterns :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_
 		for _ in 0 ..< 12 {
 			remainder = (remainder << 1) ~ ((remainder >> 11) * 0x1f25)
 		}
+
 		bits := code.version << 12 | remainder
 
 		for i in 0 ..< 18 {
@@ -2035,6 +2078,7 @@ qr_draw_function_patterns :: proc(code: ^QR_Code, functions: ^[QR_MAX_SIZE * QR_
 		}
 	}
 }
+
 qr_write_format_bits :: proc(
 	code: ^QR_Code,
 	functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]bool,
@@ -2045,10 +2089,12 @@ qr_write_format_bits :: proc(
 	for _ in 0 ..< 10 {
 		remainder = (remainder << 1) ~ ((remainder >> 9) * 0x537)
 	}
+
 	bits := (data << 10 | remainder) ~ 0x5412
 	for i in 0 ..< 6 {
 		qr_set_function(code, functions, 8, i, (bits >> cast(uint)i) & 1 != 0)
 	}
+
 	qr_set_function(code, functions, 8, 7, (bits >> 6) & 1 != 0)
 	qr_set_function(code, functions, 8, 8, (bits >> 7) & 1 != 0)
 	qr_set_function(code, functions, 7, 8, (bits >> 8) & 1 != 0)
@@ -2066,6 +2112,7 @@ qr_write_format_bits :: proc(
 
 	qr_set_function(code, functions, 8, code.size - 8, true)
 }
+
 qr_apply_data_mask :: proc(
 	code: ^QR_Code,
 	functions: ^[QR_MAX_SIZE * QR_MAX_SIZE]bool,
@@ -2103,6 +2150,7 @@ qr_apply_data_mask :: proc(
 		}
 	}
 }
+
 qr_penalty :: proc(code: ^QR_Code) -> int {
 	score := 0
 
@@ -2173,6 +2221,7 @@ qr_penalty :: proc(code: ^QR_Code) -> int {
 
 	return score
 }
+
 qr_history_add :: proc(history: ^[7]int, run, size: int) {
 	value := run
 	if history[0] == 0 {
@@ -2182,8 +2231,10 @@ qr_history_add :: proc(history: ^[7]int, run, size: int) {
 	for i := 6; i > 0; i -= 1 {
 		history[i] = history[i - 1]
 	}
+
 	history[0] = value
 }
+
 qr_history_patterns :: proc(h: ^[7]int) -> int {
 	n := h[1]
 	core := n > 0 && h[2] == n && h[3] == n * 3 && h[4] == n && h[5] == n
@@ -2210,6 +2261,7 @@ Web_Version_Source :: enum {
 	Pinned, // the compiled WA_WEB_VERSION_PINNED
 	Configured, // the caller's fallback
 }
+
 Version_Error_Kind :: enum {
 	None,
 	HTTP_Failed,
@@ -2218,16 +2270,19 @@ Version_Error_Kind :: enum {
 	Missing_Version,
 	Invalid_Version,
 }
+
 Version_Error :: struct {
 	kind:   Version_Error_Kind,
 	http:   surf.HTTP_Error,
 	status: int,
 }
+
 Web_Version_Result :: struct {
 	version:     [3]u32,
 	source:      Web_Version_Source,
 	fetch_error: Version_Error,
 }
+
 // A callback transfers ownership of its Response to discovery, which always
 // destroys it. This seam permits deterministic/offline fixture tests.
 Version_Fetcher :: struct {
@@ -2248,6 +2303,7 @@ web_version_discover :: proc(
 	if settings.max_body_size <= 0 || settings.max_body_size > WA_WEB_VERSION_BODY_MAX {
 		settings.max_body_size = WA_WEB_VERSION_BODY_MAX
 	}
+
 	get := fetcher.get
 	if get == nil {
 		get = version_fetch_http
@@ -2263,6 +2319,7 @@ web_version_discover :: proc(
 
 	response, he := get(fetcher.data, WA_WEB_VERSION_URL, settings)
 	defer surf.response_destroy(&response)
+
 	if he.kind != .None {
 		result.fetch_error = {
 			kind = .HTTP_Failed,
@@ -2271,6 +2328,7 @@ web_version_discover :: proc(
 
 		return result
 	}
+
 	if response.status != 200 {
 		result.fetch_error = {
 			kind   = .HTTP_Status,
@@ -2279,6 +2337,7 @@ web_version_discover :: proc(
 
 		return result
 	}
+
 	if len(response.body) > settings.max_body_size {
 		result.fetch_error = {
 			kind = .Body_Oversized,
@@ -2286,12 +2345,15 @@ web_version_discover :: proc(
 
 		return result
 	}
+
 	revision, err := web_version_revision(response.body)
 	if err.kind != .None {
 		result.fetch_error = err
 		return result
 	}
+
 	result.version = {WA_WEB_VERSION_MAJOR, WA_WEB_VERSION_MINOR, revision}
+
 	result.source = .WhatsApp
 	return result
 }
@@ -2318,16 +2380,20 @@ web_version_revision :: proc(src: []u8) -> (revision: u32, err: Version_Error) {
 		if !matches {
 			continue
 		}
+
 		value, ok, invalid := parse_client_revision_digits(src, i + len(key), escaped)
 		if invalid {
 			return 0, {kind = .Invalid_Version}
 		}
+
 		if !ok {
 			continue
 		}
+
 		if found && revision != value {
 			return 0, {kind = .Invalid_Version}
 		}
+
 		revision = value
 		found = true
 	}
@@ -2344,14 +2410,17 @@ match_client_revision_key_at :: proc(src: []u8, i: int) -> (matches, escaped: bo
 	if i < 1 || i + len(key) > len(src) {
 		return false, false
 	}
+
 	if src[i - 1] != '"' {
 		return false, false
 	}
+
 	for c, n in key {
 		if src[i + n] != cast(u8)c {
 			return false, false
 		}
 	}
+
 	after := i + len(key)
 
 	if after < len(src) && src[after] != '"' && src[after] != '\\' {
@@ -2381,23 +2450,28 @@ parse_client_revision_digits :: proc(
 		if i >= len(src) || src[i] != '\\' {
 			return 0, false, true
 		}
+
 		i += 1
 	}
 
 	if i >= len(src) || src[i] != '"' {
 		return 0, false, true
 	}
+
 	i += 1
 	for i < len(src) && revision_space(src[i]) {
 		i += 1
 	}
+
 	if i >= len(src) || src[i] != ':' {
 		return 0, false, false
 	}
+
 	i += 1
 	for i < len(src) && revision_space(src[i]) {
 		i += 1
 	}
+
 	start := i
 
 	for i < len(src) && i - start < 10 && is_digit(src[i]) {
@@ -2407,9 +2481,11 @@ parse_client_revision_digits :: proc(
 	if i == start {
 		return 0, false, true
 	}
+
 	if i < len(src) && is_digit(src[i]) {
 		return 0, false, true
 	}
+
 	end := i
 	for i < len(src) && revision_space(src[i]) {
 		i += 1
@@ -2477,6 +2553,7 @@ web_version_parse :: proc(text: string) -> (version: [3]u32, err: Version_Error_
 
 	return version, .None
 }
+
 version_fetch_http :: proc(
 	data: rawptr,
 	url: string,
@@ -2485,9 +2562,10 @@ version_fetch_http :: proc(
 	surf.Response,
 	surf.HTTP_Error,
 ) {
-	headers := [2]http.Header {
+	headers := [2]surf.Header {
 		{name = "User-Agent", value = WA_WEB_USER_AGENT},
 		{name = "Sec-Fetch-Site", value = "none"},
 	}
+
 	return surf.execute({url = url, headers = headers[:]}, config)
 }
